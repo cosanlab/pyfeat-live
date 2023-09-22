@@ -121,3 +121,7 @@ while ctx.state.playing:
     out = dict(zip(FEAT_EMOTION_COLUMNS, emotions))
     text.write(out)
 
+# NEXT:
+# Use this demo to draw onto video-frames asynchronously
+# Will need to convert cv2 calls to plotly
+# https://github.com/whitphx/streamlit-webrtc-example/blob/main/app.py
