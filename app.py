@@ -11,7 +11,6 @@ import numpy as np
 lock = threading.Lock()
 detector = Detector(verbose=False)
 img_container = {"img": None}
-st.session_state['text'] = ''
 
 
 def video_frame_callback(frame):
