@@ -1,16 +1,27 @@
+import threading
+import streamlit as st
 from streamlit_webrtc import webrtc_streamer
 from feat import Detector
 from feat.utils.image_operations import convert_image_to_tensor
+from feat.utils import FEAT_EMOTION_COLUMNS
 from feat.data import _inverse_face_transform, _inverse_landmark_transform
 import torch
 import numpy as np
 
-detector = Detector(verbose=True)
+lock = threading.Lock()
+detector = Detector(verbose=False)
+img_container = {"img": None}
+st.session_state['text'] = ''
 
+
+def video_frame_callback(frame):
+    img = frame.to_image()
+    with lock:
+        img_container["img"] = img
+    return frame
 
 def run_pyfeat_detection(
     frame_img,
-    frame_counter=0,
     face_detection_threshold=0.5,
 ):
     """Function to run pyfeat detection on a single captured image frame
@@ -26,7 +37,7 @@ def run_pyfeat_detection(
     """
 
     batch_data = {
-        "Image": convert_image_to_tensor(frame_img.to_image()),
+        "Image": convert_image_to_tensor(frame_img),
         "Scale": torch.ones(1),
         "Padding": {
             "Left": torch.zeros(1),
@@ -87,9 +98,26 @@ def run_pyfeat_detection(
         faces, poses_dict["faces"], poses_dict["poses"]
     )   # print(frame_fex)
 
-    print(faces, poses, landmarks, aus, emotions)
+    print(emotions)
+    return faces, poses, landmarks, aus, emotions
 
-    return 
 
+# Create WebRTC cam
+ctx = webrtc_streamer(key="sample", video_frame_callback=video_frame_callback)
+# Text placeholder
+text = st.empty()
 
-webrtc_streamer(key="sample", video_frame_callback=run_pyfeat_detection)
+# Use threading to update streamlit display
+# https://github.com/whitphx/streamlit-webrtc
+while ctx.state.playing:
+    with lock:
+        img = img_container["img"]
+    if img is None:
+        continue
+    faces, poses, landmarks, aus, emotions = run_pyfeat_detection(img)
+    emotions = emotions[0][0,:].reshape(
+        1, len(FEAT_EMOTION_COLUMNS)
+    ).squeeze()
+    out = dict(zip(FEAT_EMOTION_COLUMNS, emotions))
+    text.write(out)
+
