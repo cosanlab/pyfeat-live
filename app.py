@@ -9,9 +9,11 @@ import torch
 import numpy as np
 
 lock = threading.Lock()
-detector = Detector(verbose=False)
 img_container = {"img": None}
 
+@st.cache_resource
+def load_detector():
+    return Detector(verbose=False)
 
 def video_frame_callback(frame):
     img = frame.to_image()
@@ -101,6 +103,8 @@ def run_pyfeat_detection(
     return faces, poses, landmarks, aus, emotions
 
 
+# Load detectors
+detector = load_detector()
 # Create WebRTC cam
 ctx = webrtc_streamer(key="sample", video_frame_callback=video_frame_callback)
 # Text placeholder
