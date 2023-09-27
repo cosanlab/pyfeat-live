@@ -6,3 +6,5 @@ This is a quick demo of using py-feat to analyze webcam frames in real time and 
 2. `pip install -r requirements.txt`
 3. `streamlit run app.py`
 4. Go to ` http://localhost:8501` in your browser
+
+If you run into installation issues with py-feat see [this issue](https://github.com/cosanlab/py-feat/issues/186)
