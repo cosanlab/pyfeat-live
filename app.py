@@ -7,6 +7,7 @@
 # https://discuss.streamlit.io/t/new-component-streamlit-webrtc-a-new-way-to-deal-with-real-time-media-streams/8669/73?u=whitphx
 
 import queue
+import threading
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
 from feat import Detector
@@ -21,6 +22,17 @@ import av
 
 st.set_page_config(layout='wide')
 emotion_queue = queue.Queue()
+lock = threading.Lock()
+
+# Shared variable between callback thread and streamlit thread
+button_container = {"rect": True, "emotions": True}
+
+# Initial button states are handled on the streamlit side
+# but are kept in sync with the button container using threads
+if 'rect' not in st.session_state:
+    st.session_state.rect = True
+if 'emotions' not in st.session_state:
+    st.session_state.emotions = True
 
 # %%
 
@@ -113,6 +125,13 @@ def run_pyfeat_detection(
 def video_frame_callback_with_drawing(frame):
     img = frame.to_image()
     image = Image.fromarray(frame.to_ndarray(format="bgr24"))
+
+    # Read from the shared variable in a thread-safe way
+    # Reading from queue doesn't seem to work as it blocks the video for some reason
+    with lock:
+        show_rect = button_container['rect']
+        show_emotions = button_container['emotions']
+
     faces, emotions = run_pyfeat_detection(img)
 
     if len(emotions[0]):
@@ -127,21 +146,27 @@ def video_frame_callback_with_drawing(frame):
         draw = ImageDraw.Draw(image)
         # draw.fontmode = "1"
         x1, y1, x2, y2 = faces[0][0][0], faces[0][0][1], faces[0][0][2], faces[0][0][3]
-        draw.rectangle([x1, y1, x2, y2], outline="green", width=5)
 
-        # font = ImageFont.load_default()
-        # font = ImageFont.load('arial.pil')
-        # font = ImageFont.truetype('./arial.ttf', 17)
-        # Above
-        # draw.text((np.mean([x1, x2]), y1), text, fill=(0, 255, 0), font=font)
-        # Side
-        draw.text((x1-150, y1), text, fill=(0, 255, 0), font=font)
+        # Toggle drawing face-rect
+        if show_rect:
+            draw.rectangle([x1, y1, x2, y2], outline="green", width=5)
+
+        # Toggle drawing face-rect
+        if show_emotions:
+            draw.text((x1-150, y1), text, fill=(0, 255, 0), font=font)
+
         emotion_queue.put(emotions)
         return av.VideoFrame.from_ndarray(np.array(image), format="bgr24")
     else:
         return av.VideoFrame.from_ndarray(np.array(image), format="bgr24")
 
+def toggle_rect():
+    """Toggle the streamlit session variable capturing button state"""
+    st.session_state.rect = not st.session_state.rect
 
+def toggle_emotions():
+    """Toggle the streamlit session variable capturing button state"""
+    st.session_state.emotions = not st.session_state.emotions
 # %%
 # Load detectors
 detector = load_detector()
@@ -161,6 +186,23 @@ ctx = webrtc_streamer(
 # If webstream is live then use a queue to retrieve the detected emotions and 
 # pass them to streamlit table/dataframe renderer
 if ctx.state.playing:
+
+    # Use thread-locks to control to toggle rendering faceboxes and emotions
+    with lock:
+        st.button('Toggle Rect', on_click=toggle_rect)
+        # We have to read the streamlit session state from within the lock
+        # Moving this into the callback doesn't seem to work
+        if st.session_state.rect:
+            button_container['rect'] = True
+        else:
+            button_container['rect'] = False
+
+        st.button('Toggle Emotions', on_click=toggle_emotions)
+        if st.session_state.emotions:
+            button_container['emotions'] = True
+        else:
+            button_container['emotions'] = False
+
     emotion_labels = st.empty()
     while True: # so it updates in place
         emotions = emotion_queue.get()
