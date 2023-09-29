@@ -189,19 +189,15 @@ if ctx.state.playing:
 
     # Use thread-locks to control to toggle rendering faceboxes and emotions
     with lock:
+        # Create buttons
         st.button('Toggle Rect', on_click=toggle_rect)
-        # We have to read the streamlit session state from within the lock
-        # Moving this into the callback doesn't seem to work
-        if st.session_state.rect:
-            button_container['rect'] = True
-        else:
-            button_container['rect'] = False
-
         st.button('Toggle Emotions', on_click=toggle_emotions)
-        if st.session_state.emotions:
-            button_container['emotions'] = True
-        else:
-            button_container['emotions'] = False
+
+        # We have to sync the streamlit session state and callback dict values
+        # from within the lock. Moving this into the callback function for each
+        # button doesn't seem to work
+        button_container['rect'] = st.session_state.rect
+        button_container['emotions'] = st.session_state.emotions
 
     emotion_labels = st.empty()
     while True: # so it updates in place
