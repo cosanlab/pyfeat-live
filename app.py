@@ -1394,8 +1394,6 @@ def update_figure_elements(
 ):
     """Update all figure elements depending on what is toggled"""
 
-    global image_visible, facebox_visible, landmark_visible, pose_visible, au_visible, emotion_visible
-
     new_detectors = []
     new_annotations = []
     new_images = []
@@ -1423,15 +1421,13 @@ def update_figure_elements(
         fig.layout.annotations = flatten_list(new_annotations)
         fig.layout.images = new_images
 
-    return fig
-
 
 def make_plotly_fig(figure, fex, img):
     image_frame = dict(
         x=0,
-        sizex=img.width,
         y=img.height,
-        sizey=img.width,
+        sizex=img.width,
+        sizey=img.height,
         xref="x",
         yref="y",
         opacity=0.9,  # TODO
@@ -1460,6 +1456,7 @@ def make_plotly_fig(figure, fex, img):
         xaxis=dict(visible=False, range=[0, img.width]),
         yaxis=dict(visible=False, range=[0, img.height], scaleanchor="x"),
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        showlegend=False
     )
 
     (
@@ -1487,7 +1484,7 @@ def make_plotly_fig(figure, fex, img):
         au_cmap="Blues",
     )
 
-    return update_figure_elements(
+    update_figure_elements(
         figure,
         image_frame,
         faceboxes_path,
@@ -1555,5 +1552,5 @@ if ctx.state.playing:
         fex = data_queue.get()
         img = img_queue.get()
         # data_table.table(fex)
-        fig = make_plotly_fig(figure, fex, img)
-        plot.plotly_chart(fig)
+        make_plotly_fig(figure, fex, img)
+        plot.plotly_chart(figure, use_container_width=True)
