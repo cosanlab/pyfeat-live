@@ -1522,7 +1522,7 @@ fps = st.empty()
 ctx = webrtc_streamer(
     key="sample",
     video_frame_callback=video_frame_callback_with_drawing,
-    mode=WebRtcMode.SENDRECV,
+    mode=WebRtcMode.SENDONLY,
     media_stream_constraints={"video": {"width": 640, "height": 480}, "audio": False},
     async_processing=True,
 )
