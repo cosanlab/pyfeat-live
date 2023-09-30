@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 import av
+import time
 
 st.set_page_config(layout='wide')
 emotion_queue = queue.Queue()
@@ -39,7 +40,7 @@ if 'emotions' not in st.session_state:
 
 @st.cache_resource
 def load_detector():
-    return Detector(verbose=False)
+    return Detector(verbose=False, backend='mps')
 
 
 
@@ -174,6 +175,9 @@ detector = load_detector()
 # Load font
 font = ImageFont.truetype('./arial.ttf', 17)
 
+# FPS counter
+fps = st.empty()
+
 # Create WebRTC cam
 ctx = webrtc_streamer(
     key="sample",
@@ -200,7 +204,11 @@ if ctx.state.playing:
         button_container['emotions'] = st.session_state.emotions
 
     emotion_labels = st.empty()
+    start = time.perf_counter()
     while True: # so it updates in place
+        now = time.perf_counter()
+        fps.text(f"FPS: {1 / (now-start):.3f}\nIFI: {(now-start):.3f}ms")
+        start = now
         emotions = emotion_queue.get()
         emotions = pd.DataFrame(dict(zip(FEAT_EMOTION_COLUMNS, np.round(emotions,2))), index=[0])
         emotion_labels.table(emotions.round(2))
