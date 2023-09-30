@@ -1426,7 +1426,7 @@ def update_figure_elements(
     return fig
 
 
-def make_plotly_fig(fex, img):
+def make_plotly_fig(figure, fex, img):
     image_frame = dict(
         x=0,
         sizex=img.width,
@@ -1439,8 +1439,6 @@ def make_plotly_fig(fex, img):
         sizing="stretch",
         source=img,
     )
-
-    figure = go.Figure()
 
     # Add invisible scatter trace to help the autoresize logic work.
     figure.add_trace(
@@ -1517,6 +1515,9 @@ detector = load_detector()
 # Load font
 font = ImageFont.truetype("./arial.ttf", 17)
 
+# Create initial plotly figure
+figure = go.Figure()
+
 # FPS counter
 fps = st.empty()
 
@@ -1554,5 +1555,5 @@ if ctx.state.playing:
         fex = data_queue.get()
         img = img_queue.get()
         # data_table.table(fex)
-        fig = make_plotly_fig(fex, img)
+        fig = make_plotly_fig(figure, fex, img)
         plot.plotly_chart(fig)
