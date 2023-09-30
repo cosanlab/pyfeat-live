@@ -10,7 +10,7 @@ import queue
 import threading
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
-from feat import Detector
+from feat import Detector, Fex
 from feat.utils.image_operations import convert_image_to_tensor
 from feat.utils import FEAT_EMOTION_COLUMNS
 from feat.data import _inverse_face_transform, _inverse_landmark_transform
@@ -21,8 +21,8 @@ from PIL import Image, ImageDraw, ImageFont
 import av
 import time
 
-st.set_page_config(layout='wide')
-emotion_queue = queue.Queue()
+st.set_page_config(layout="wide")
+data_queue = queue.Queue()
 lock = threading.Lock()
 
 # Shared variable between callback thread and streamlit thread
@@ -30,13 +30,13 @@ button_container = {"rect": True, "emotions": True, "aus": True, "poses": True}
 
 # Initial button states are handled on the streamlit side
 # but are kept in sync with the button container using threads
-if 'rect' not in st.session_state:
+if "rect" not in st.session_state:
     st.session_state.rect = True
-if 'emotions' not in st.session_state:
+if "emotions" not in st.session_state:
     st.session_state.emotions = True
-if 'aus' not in st.session_state:
+if "aus" not in st.session_state:
     st.session_state.aus = True
-if 'poses' not in st.session_state:
+if "poses" not in st.session_state:
     st.session_state.poses = True
 
 # NOTE: Disabled due to the error below
@@ -65,8 +65,7 @@ if 'poses' not in st.session_state:
 
 @st.cache_resource
 def load_detector():
-    return Detector(verbose=False, backend='mps')
-
+    return Detector(verbose=False, backend="mps")
 
 
 def run_pyfeat_detection(
@@ -98,7 +97,6 @@ def run_pyfeat_detection(
         "FileNames": str(np.nan),
     }
 
-
     faces = detector.detect_faces(
         batch_data["Image"],
         threshold=face_detection_threshold,
@@ -109,9 +107,9 @@ def run_pyfeat_detection(
         detected_faces=faces,
     )
 
-    # poses_dict = detector.detect_facepose(batch_data["Image"], landmarks)
+    poses_dict = detector.detect_facepose(batch_data["Image"], landmarks)
 
-    # aus = detector.detect_aus(batch_data["Image"], landmarks)
+    aus = detector.detect_aus(batch_data["Image"], landmarks)
 
     emotions = detector.detect_emotions(batch_data["Image"], faces, landmarks)
 
@@ -121,68 +119,130 @@ def run_pyfeat_detection(
     # )
 
     faces = _inverse_face_transform(faces, batch_data)
-    # landmarks = _inverse_landmark_transform(landmarks, batch_data)
+    landmarks = _inverse_landmark_transform(landmarks, batch_data)
 
     # match faces to poses - sometimes face detector finds different faces than pose detector.
-    # faces, poses = detector._match_faces_to_poses(
-    #     faces, poses_dict["faces"], poses_dict["poses"]
-    # )  
+    faces, poses = detector._match_faces_to_poses(
+        faces, poses_dict["faces"], poses_dict["poses"]
+    )
 
-    # return faces, poses, landmarks, aus, emotions
-    return faces, emotions
+    return faces, poses, landmarks, aus, emotions
 
 
 def video_frame_callback_with_drawing(frame):
     img = frame.to_image()
-    image = Image.fromarray(frame.to_ndarray(format="bgr24"))
 
     # Read from the shared variable in a thread-safe way
     # Reading from queue doesn't seem to work as it blocks the video for some reason
-    with lock:
-        show_rect = button_container['rect']
-        show_emotions = button_container['emotions']
+    # with lock:
+    #     show_rect = button_container["rect"]
+    #     show_emotions = button_container["emotions"]
 
-    faces, emotions = run_pyfeat_detection(img)
+    (
+        faces,
+        poses,
+        landmarks,
+        aus,
+        emotions,
+    ) = run_pyfeat_detection(img)
+    fex = create_fex(faces, poses, landmarks, aus, emotions)
 
-    if len(emotions[0]):
-        emotions = emotions[0][0, :].reshape(1, len(FEAT_EMOTION_COLUMNS)).squeeze()
+    data_queue.put(fex)
+    return 
 
-        # Emotions string
-        text = f""
-        for name, val in zip(FEAT_EMOTION_COLUMNS, emotions):
-            text += f"{name}: {val:.2f}\n"
 
-        # image = Image.fromarray(frame.to_ndarray(format="bgr24"))
-        draw = ImageDraw.Draw(image)
-        # draw.fontmode = "1"
-        x1, y1, x2, y2 = faces[0][0][0], faces[0][0][1], faces[0][0][2], faces[0][0][3]
+def create_fex(faces=None, poses=None, landmarks=None, aus=None, emotions=None):
+    """Like detector._create_fex() but handles different detector combos"""
 
-        # Toggle drawing face-rect
-        if show_rect:
-            draw.rectangle([x1, y1, x2, y2], outline="green", width=5)
+    out = []
+    for i, frame in enumerate(faces):
+        if frame:
+            for j, face_in_frame in enumerate(frame):
+                assemble = []
+                facebox_df = pd.DataFrame(
+                    [
+                        [
+                            face_in_frame[0],
+                            face_in_frame[1],
+                            face_in_frame[2] - face_in_frame[0],
+                            face_in_frame[3] - face_in_frame[1],
+                            face_in_frame[4],
+                        ]
+                    ],
+                    columns=detector.info["face_detection_columns"],
+                    index=[j],
+                )
+                assemble.append(facebox_df)
 
-        # Toggle drawing face-rect
-        if show_emotions:
-            draw.text((x1-150, y1), text, fill=(0, 255, 0), font=font)
+                if poses is not None:
+                    facepose_df = pd.DataFrame(
+                        [poses[i][j]],
+                        columns=detector.info["facepose_model_columns"],
+                        index=[j],
+                    )
+                    assemble.append(facepose_df)
 
-        emotion_queue.put(emotions)
-        return av.VideoFrame.from_ndarray(np.array(image), format="bgr24")
+                if landmarks is not None:
+                    landmarks_df = pd.DataFrame(
+                        [landmarks[i][j].flatten(order="F")],
+                        columns=detector.info["face_landmark_columns"],
+                        index=[j],
+                    )
+                    assemble.append(landmarks_df)
+
+                if aus is not None:
+                    aus_df = pd.DataFrame(
+                        aus[i][j, :].reshape(1, len(detector["au_presence_columns"])),
+                        columns=detector.info["au_presence_columns"],
+                        index=[j],
+                    )
+                    assemble.append(aus_df)
+
+                if emotions is not None:
+                    emotions_df = pd.DataFrame(
+                        emotions[i][j, :].reshape(
+                            1, len(detector.info["emotion_model_columns"])
+                        ),
+                        columns=detector.info["emotion_model_columns"],
+                        index=[j],
+                    )
+                    assemble.append(emotions_df)
+
+                tmp_df = pd.concat(assemble, axis=1)
+                out.append(tmp_df)
+
+    if out:
+        out = pd.concat(out, ignore_index=True)
     else:
-        return av.VideoFrame.from_ndarray(np.array(image), format="bgr24")
+        out = pd.DataFrame()
+
+    return Fex(
+        out,
+        au_columns=detector.info["au_presence_columns"],
+        emotion_columns=detector.info["emotion_model_columns"],
+        facebox_columns=detector.info["face_detection_columns"],
+        landmark_columns=detector.info["face_landmark_columns"],
+        facepose_columns=detector.info["facepose_model_columns"],
+        identity_columns=detector.info["identity_model_columns"],
+    )
+
 
 def toggle_rect():
     """Toggle the streamlit session variable capturing button state"""
     st.session_state.rect = not st.session_state.rect
 
+
 def toggle_emotions():
     """Toggle the streamlit session variable capturing button state"""
     st.session_state.emotions = not st.session_state.emotions
+
+
 # %%
 # Load detectors
 detector = load_detector()
 
 # Load font
-font = ImageFont.truetype('./arial.ttf', 17)
+font = ImageFont.truetype("./arial.ttf", 17)
 
 # FPS counter
 fps = st.empty()
@@ -196,28 +256,26 @@ ctx = webrtc_streamer(
     async_processing=True,
 )
 
-# If webstream is live then use a queue to retrieve the detected emotions and 
+# If webstream is live then use a queue to retrieve the detected emotions and
 # pass them to streamlit table/dataframe renderer
 if ctx.state.playing:
-
     # Use thread-locks to control to toggle rendering faceboxes and emotions
     with lock:
         # Create buttons
-        st.button('Toggle Rect', on_click=toggle_rect)
-        st.button('Toggle Emotions', on_click=toggle_emotions)
+        st.button("Toggle Rect", on_click=toggle_rect)
+        st.button("Toggle Emotions", on_click=toggle_emotions)
 
         # We have to sync the streamlit session state and callback dict values
         # from within the lock. Moving this into the callback function for each
         # button doesn't seem to work
-        button_container['rect'] = st.session_state.rect
-        button_container['emotions'] = st.session_state.emotions
+        button_container["rect"] = st.session_state.rect
+        button_container["emotions"] = st.session_state.emotions
 
-    emotion_labels = st.empty()
+    data_table = st.empty()
     start = time.perf_counter()
-    while True: # so it updates in place
+    while True:  # so it updates in place
         now = time.perf_counter()
         fps.text(f"FPS: {1 / (now-start):.3f}\nIFI: {(now-start):.3f}ms")
         start = now
-        emotions = emotion_queue.get()
-        emotions = pd.DataFrame(dict(zip(FEAT_EMOTION_COLUMNS, np.round(emotions,2))), index=[0])
-        emotion_labels.table(emotions.round(2))
+        fex = data_queue.get()
+        data_table.table(fex) 
