@@ -26,7 +26,7 @@ emotion_queue = queue.Queue()
 lock = threading.Lock()
 
 # Shared variable between callback thread and streamlit thread
-button_container = {"rect": True, "emotions": True}
+button_container = {"rect": True, "emotions": True, "aus": True, "poses": True}
 
 # Initial button states are handled on the streamlit side
 # but are kept in sync with the button container using threads
@@ -34,6 +34,31 @@ if 'rect' not in st.session_state:
     st.session_state.rect = True
 if 'emotions' not in st.session_state:
     st.session_state.emotions = True
+if 'aus' not in st.session_state:
+    st.session_state.aus = True
+if 'poses' not in st.session_state:
+    st.session_state.poses = True
+
+# NOTE: Disabled due to the error below
+# if 'identities' not in st.session_state:
+#     st.session_state.identities = True
+
+# ERROR:streamlit_webrtc.process:    return self._convert_detector_output(facebox, face_embeddings.numpy())
+# ERROR:streamlit_webrtc.process:                                                  ^^^^^^^^^^^^^^^^^^^^^^^
+# ERROR:streamlit_webrtc.process:RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.
+
+# faces, landmarks, poses, aus, emotions = detector._run_detection_waterfall(
+#     data, face_detection_threshold, {}, {}, {}, {}, {}, {}
+# )
+# frame_fex = detector._create_fex(
+#     faces,
+#     landmarks,
+#     poses,
+#     aus,
+#     emotions,
+#     data["FileNames"],
+#     frame_counter,
+# )
 
 # %%
 
@@ -73,22 +98,6 @@ def run_pyfeat_detection(
         "FileNames": str(np.nan),
     }
 
-    # ERROR:streamlit_webrtc.process:    return self._convert_detector_output(facebox, face_embeddings.numpy())
-    # ERROR:streamlit_webrtc.process:                                                  ^^^^^^^^^^^^^^^^^^^^^^^
-    # ERROR:streamlit_webrtc.process:RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.
-
-    # faces, landmarks, poses, aus, emotions = detector._run_detection_waterfall(
-    #     data, face_detection_threshold, {}, {}, {}, {}, {}, {}
-    # )
-    # frame_fex = detector._create_fex(
-    #     faces,
-    #     landmarks,
-    #     poses,
-    #     aus,
-    #     emotions,
-    #     data["FileNames"],
-    #     frame_counter,
-    # )
 
     faces = detector.detect_faces(
         batch_data["Image"],
