@@ -1,2 +1,4 @@
 env/
 *.DS*
+py-feat/
+__pycache__/

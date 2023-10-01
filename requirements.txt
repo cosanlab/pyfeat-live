@@ -4,3 +4,4 @@ watchdog
 streamlit-webrtc
 plotly
 seaborn
+snakeviz

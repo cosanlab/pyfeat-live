@@ -26,7 +26,7 @@ st.set_page_config(layout="wide")
 
 @st.cache_resource
 def load_detector():
-    return Detector(verbose=False, backend="mps")
+    return Detector(verbose=False, au_model='svm')
 
 
 def run_pyfeat_detection(
@@ -47,7 +47,7 @@ def run_pyfeat_detection(
     """
 
     batch_data = {
-        "Image": convert_image_to_tensor(frame_img),
+        "Image": convert_image_to_tensor(frame_img, img_type="float32"),
         "Scale": torch.ones(1),
         "Padding": {
             "Left": torch.zeros(1),
@@ -1470,7 +1470,6 @@ def make_plotly_fig(figure, fex, img):
     )
 
 
-
 # %%
 # Load detectors
 detector = load_detector()
@@ -1485,7 +1484,10 @@ fps = st.empty()
 ctx = webrtc_streamer(
     key="sample",
     mode=WebRtcMode.SENDONLY,
-    media_stream_constraints={"video": {"width": 640, "height": 480}, "audio": False},
+    media_stream_constraints={
+        "video": {"width": 640, "height": 480},
+        "audio": False,
+    },
 )
 
 plot = st.empty()
@@ -1493,23 +1495,22 @@ start = time.perf_counter()
 
 # If webcam is not is playing
 if ctx.video_receiver:
-
     # Create button row
     col1, col2, col3, col4, col5 = st.columns(5)
 
-    # Each button is has two-way binding it's key kwarg in st.session_state.key 
+    # Each button is has two-way binding it's key kwarg in st.session_state.key
     # st.session_state can then be used to read values within functions above to
     # do selecting processing/rendering without complicated threads and queues
     with col1:
-        st.checkbox('Facebox', key='rects', value=True)
+        st.checkbox("Facebox", key="rects", value=True)
     with col2:
-        st.checkbox('Landmarks', key='landmarks', value=True)
+        st.checkbox("Landmarks", key="landmarks", value=True)
     with col3:
-        st.checkbox('Emotions', key='emotions', value=False)
+        st.checkbox("Emotions", key="emotions", value=False)
     with col4:
-        st.checkbox('AUs', key='aus', value=False)
+        st.checkbox("AUs", key="aus", value=False)
     with col5:
-        st.checkbox('Poses', key='poses', value=False)
+        st.checkbox("Poses", key="poses", value=False)
 
     # Continually get a frame, process it, and draw a plotly figure
     while True:
@@ -1534,4 +1535,7 @@ if ctx.video_receiver:
 
 st.divider()
 
-st.info("Toggling checkboxes not only hides plotting, but *skips* running that detector to speed up processing. The only exceptions are the facebox and landmark detectors which are *always* run (only toggle plotting). You can check changes in the FPS counter to see how much faster/slower py-feat runs when toggling different detector combinations.", icon="💡")
+st.info(
+    "Toggling checkboxes not only hides plotting, but *skips* running that detector to speed up processing. The only exceptions are the facebox and landmark detectors which are *always* run (only toggle plotting). You can check changes in the FPS counter to see how much faster/slower py-feat runs when toggling different detector combinations.",
+    icon="💡",
+)
