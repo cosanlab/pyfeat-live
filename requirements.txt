@@ -2,3 +2,5 @@ git+https://github.com/cosanlab/py-feat.git
 streamlit
 watchdog
 streamlit-webrtc
+plotly
+seaborn
