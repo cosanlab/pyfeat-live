@@ -7,61 +7,19 @@
 # https://discuss.streamlit.io/t/new-component-streamlit-webrtc-a-new-way-to-deal-with-real-time-media-streams/8669/73?u=whitphx
 
 import queue
-import threading
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
 from feat import Detector, Fex
 from feat.utils.image_operations import convert_image_to_tensor
-from feat.utils import FEAT_EMOTION_COLUMNS
 from feat.data import _inverse_face_transform, _inverse_landmark_transform
 import torch
 import numpy as np
 import pandas as pd
-from PIL import Image, ImageDraw, ImageFont
-import av
 import time
 import plotly.graph_objects as go
 import seaborn as sns
 
 st.set_page_config(layout="wide")
-data_queue = queue.Queue()
-img_queue = queue.Queue()
-lock = threading.Lock()
-
-# Shared variable between callback thread and streamlit thread
-button_container = {"rect": True, "emotions": True, "aus": True, "poses": True}
-
-# Initial button states are handled on the streamlit side
-# but are kept in sync with the button container using threads
-if "rect" not in st.session_state:
-    st.session_state.rect = True
-if "emotions" not in st.session_state:
-    st.session_state.emotions = True
-if "aus" not in st.session_state:
-    st.session_state.aus = True
-if "poses" not in st.session_state:
-    st.session_state.poses = True
-
-# NOTE: Disabled due to the error below
-# if 'identities' not in st.session_state:
-#     st.session_state.identities = True
-
-# ERROR:streamlit_webrtc.process:    return self._convert_detector_output(facebox, face_embeddings.numpy())
-# ERROR:streamlit_webrtc.process:                                                  ^^^^^^^^^^^^^^^^^^^^^^^
-# ERROR:streamlit_webrtc.process:RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.
-
-# faces, landmarks, poses, aus, emotions = detector._run_detection_waterfall(
-#     data, face_detection_threshold, {}, {}, {}, {}, {}, {}
-# )
-# frame_fex = detector._create_fex(
-#     faces,
-#     landmarks,
-#     poses,
-#     aus,
-#     emotions,
-#     data["FileNames"],
-#     frame_counter,
-# )
 
 # %%
 
@@ -110,11 +68,21 @@ def run_pyfeat_detection(
         detected_faces=faces,
     )
 
-    poses_dict = detector.detect_facepose(batch_data["Image"], landmarks)
+    if st.session_state.poses:
+        poses_dict = detector.detect_facepose(batch_data["Image"], landmarks)
+    else:
+        poses_dict = None
+        poses = None
 
-    aus = detector.detect_aus(batch_data["Image"], landmarks)
+    if st.session_state.aus:
+        aus = detector.detect_aus(batch_data["Image"], landmarks)
+    else:
+        aus = None
 
-    emotions = detector.detect_emotions(batch_data["Image"], faces, landmarks)
+    if st.session_state.emotions:
+        emotions = detector.detect_emotions(batch_data["Image"], faces, landmarks)
+    else:
+        emotions = None
 
     # identities = detector.detect_identity(
     #     batch_data["Image"],
@@ -125,22 +93,16 @@ def run_pyfeat_detection(
     landmarks = _inverse_landmark_transform(landmarks, batch_data)
 
     # match faces to poses - sometimes face detector finds different faces than pose detector.
-    faces, poses = detector._match_faces_to_poses(
-        faces, poses_dict["faces"], poses_dict["poses"]
-    )
+    if st.session_state.poses:
+        faces, poses = detector._match_faces_to_poses(
+            faces, poses_dict["faces"], poses_dict["poses"]
+        )
 
     return faces, poses, landmarks, aus, emotions
 
 
-def video_frame_callback_with_drawing(frame):
+def process_frame(frame):
     img = frame.to_image()
-
-    # Read from the shared variable in a thread-safe way
-    # Reading from queue doesn't seem to work as it blocks the video for some reason
-    # with lock:
-    #     show_rect = button_container["rect"]
-    #     show_emotions = button_container["emotions"]
-
     (
         faces,
         poses,
@@ -150,9 +112,9 @@ def video_frame_callback_with_drawing(frame):
     ) = run_pyfeat_detection(img)
     fex = create_fex(faces, poses, landmarks, aus, emotions)
 
-    data_queue.put(fex)
-    img_queue.put(img)
-    return
+    # data_queue.put(fex)
+    # img_queue.put(img)
+    return fex, img
 
 
 def create_fex(faces=None, poses=None, landmarks=None, aus=None, emotions=None):
@@ -1289,97 +1251,108 @@ def _create_detector_elements(
         emotions_annotations: list of emotion annotation labels
     """
 
+    faceboxes_path, landmarks_path, poses_path, aus_path, emotions_annotations = (
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
     # Faceboxes path
-    faceboxes_path = [
-        dict(
-            type="rect",
-            x0=row["FaceRectX"],
-            y0=img_height - row["FaceRectY"],
-            x1=row["FaceRectX"] + row["FaceRectWidth"],
-            y1=img_height - row["FaceRectY"] - row["FaceRectHeight"],
-            line=dict(color=facebox_color, width=facebox_width),
-        )
-        for i, row in frame_fex.iterrows()
-    ]
-
-    # Landmarks path
-    landmarks_path = [
-        draw_plotly_landmark(
-            row,
-            img_height,
-            fig,
-            line_color=landmark_color,
-            line_width=landmark_width,
-        )
-        for i, row in frame_fex.iterrows()
-    ]
-
-    # Pose path
-    poses_path = flatten_list(
-        [
-            draw_plotly_pose(row, img_height, fig, line_width=pose_width)
+    if st.session_state.rects:
+        faceboxes_path = [
+            dict(
+                type="rect",
+                x0=row["FaceRectX"],
+                y0=img_height - row["FaceRectY"],
+                x1=row["FaceRectX"] + row["FaceRectWidth"],
+                y1=img_height - row["FaceRectY"] - row["FaceRectHeight"],
+                line=dict(color=facebox_color, width=facebox_width),
+            )
             for i, row in frame_fex.iterrows()
         ]
-    )
 
-    # AU Heatmaps
-    aus_path = flatten_list(
-        [
-            draw_plotly_au(
+    # Landmarks path
+    if st.session_state.landmarks:
+        landmarks_path = [
+            draw_plotly_landmark(
                 row,
                 img_height,
                 fig,
-                cmap=au_cmap,
-                au_opacity=au_opacity,
-                heatmap_resolution=au_heatmap_resolution,
+                line_color=landmark_color,
+                line_width=landmark_width,
             )
             for i, row in frame_fex.iterrows()
         ]
-    )
+
+    # Pose path
+    if st.session_state.poses:
+        poses_path = flatten_list(
+            [
+                draw_plotly_pose(row, img_height, fig, line_width=pose_width)
+                for i, row in frame_fex.iterrows()
+            ]
+        )
+
+    # AU Heatmaps
+    if st.session_state.aus:
+        aus_path = flatten_list(
+            [
+                draw_plotly_au(
+                    row,
+                    img_height,
+                    fig,
+                    cmap=au_cmap,
+                    au_opacity=au_opacity,
+                    heatmap_resolution=au_heatmap_resolution,
+                )
+                for i, row in frame_fex.iterrows()
+            ]
+        )
 
     # Emotions annotations
-    emotions_annotations = []
-    for i, row in frame_fex.iterrows():
-        emotion_dict = (
-            row[
-                [
-                    "anger",
-                    "disgust",
-                    "fear",
-                    "happiness",
-                    "sadness",
-                    "surprise",
-                    "neutral",
+    if st.session_state.emotions:
+        for i, row in frame_fex.iterrows():
+            emotion_dict = (
+                row[
+                    [
+                        "anger",
+                        "disgust",
+                        "fear",
+                        "happiness",
+                        "sadness",
+                        "surprise",
+                        "neutral",
+                    ]
                 ]
-            ]
-            .sort_values(ascending=False)
-            .to_dict()
-        )
-
-        x_position, y_position, align, valign = emotion_annotation_position(
-            row,
-            img_height,
-            img_width,
-            emotions_size=emotions_size,
-            emotions_position=emotions_position,
-        )
-
-        emotion_text = ""
-        for emotion in emotion_dict:
-            emotion_text += f"{emotion}: <i>{emotion_dict[emotion]:.2f}</i><br>"
-
-        emotions_annotations.append(
-            dict(
-                text=emotion_text,
-                x=x_position,
-                y=y_position,
-                opacity=emotions_opacity,
-                showarrow=False,
-                align=align,
-                valign=valign,
-                font=dict(color=emotions_color, size=emotions_size),
+                .sort_values(ascending=False)
+                .to_dict()
             )
-        )
+
+            x_position, y_position, align, valign = emotion_annotation_position(
+                row,
+                img_height,
+                img_width,
+                emotions_size=emotions_size,
+                emotions_position=emotions_position,
+            )
+
+            emotion_text = ""
+            for emotion in emotion_dict:
+                emotion_text += f"{emotion}: <i>{emotion_dict[emotion]:.2f}</i><br>"
+
+            emotions_annotations.append(
+                dict(
+                    text=emotion_text,
+                    x=x_position,
+                    y=y_position,
+                    opacity=emotions_opacity,
+                    showarrow=False,
+                    align=align,
+                    valign=valign,
+                    font=dict(color=emotions_color, size=emotions_size),
+                )
+            )
     return (faceboxes_path, landmarks_path, poses_path, aus_path, emotions_annotations)
 
 
@@ -1398,23 +1371,25 @@ def update_figure_elements(
     new_annotations = []
     new_images = []
 
-    # if image_visible:
     new_images.append(image_frame)
 
-    # if facebox_visible:
-    new_detectors.append(faceboxes_path)
+    if faceboxes_path:
+        new_detectors.append(faceboxes_path)
 
-    # if landmark_visible:
-    new_detectors.append(landmarks_path)
+    if landmarks_path:
+        new_detectors.append(landmarks_path)
 
     # if pose_visible:
-    new_detectors.append(poses_path)
+    if poses_path:
+        new_detectors.append(poses_path)
 
     # if au_visible:
-    new_detectors.append(aus_path)
+    if aus_path:
+        new_detectors.append(aus_path)
 
     # if emotion_visible:
-    new_annotations.append(emotions_annotations)
+    if emotions_annotations:
+        new_annotations.append(emotions_annotations)
 
     with fig.batch_update():
         fig.layout.shapes = flatten_list(new_detectors)
@@ -1456,7 +1431,7 @@ def make_plotly_fig(figure, fex, img):
         xaxis=dict(visible=False, range=[0, img.width]),
         yaxis=dict(visible=False, range=[0, img.height], scaleanchor="x"),
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
-        showlegend=False
+        showlegend=False,
     )
 
     (
@@ -1495,22 +1470,10 @@ def make_plotly_fig(figure, fex, img):
     )
 
 
-def toggle_rect():
-    """Toggle the streamlit session variable capturing button state"""
-    st.session_state.rect = not st.session_state.rect
-
-
-def toggle_emotions():
-    """Toggle the streamlit session variable capturing button state"""
-    st.session_state.emotions = not st.session_state.emotions
-
 
 # %%
 # Load detectors
 detector = load_detector()
-
-# Load font
-font = ImageFont.truetype("./arial.ttf", 17)
 
 # Create initial plotly figure
 figure = go.Figure()
@@ -1521,36 +1484,54 @@ fps = st.empty()
 # Create WebRTC cam
 ctx = webrtc_streamer(
     key="sample",
-    video_frame_callback=video_frame_callback_with_drawing,
     mode=WebRtcMode.SENDONLY,
     media_stream_constraints={"video": {"width": 640, "height": 480}, "audio": False},
-    async_processing=True,
 )
 
-# If webstream is live then use a queue to retrieve the detected emotions and
-# pass them to streamlit table/dataframe renderer
-if ctx.state.playing:
-    # Use thread-locks to control to toggle rendering faceboxes and emotions
-    with lock:
-        # Create buttons
-        st.button("Toggle Rect", on_click=toggle_rect)
-        st.button("Toggle Emotions", on_click=toggle_emotions)
+plot = st.empty()
+start = time.perf_counter()
 
-        # We have to sync the streamlit session state and callback dict values
-        # from within the lock. Moving this into the callback function for each
-        # button doesn't seem to work
-        button_container["rect"] = st.session_state.rect
-        button_container["emotions"] = st.session_state.emotions
+# If webcam is not is playing
+if ctx.video_receiver:
 
-    # data_table = st.empty()
-    start = time.perf_counter()
-    plot = st.empty()
-    while True:  # so it updates in place
-        now = time.perf_counter()
-        fps.text(f"FPS: {1 / (now-start):.3f}\nIFI: {(now-start):.3f}ms")
-        start = now
-        fex = data_queue.get()
-        img = img_queue.get()
-        # data_table.table(fex)
-        make_plotly_fig(figure, fex, img)
-        plot.plotly_chart(figure, use_container_width=True)
+    # Create button row
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    # Each button is has two-way binding it's key kwarg in st.session_state.key 
+    # st.session_state can then be used to read values within functions above to
+    # do selecting processing/rendering without complicated threads and queues
+    with col1:
+        st.checkbox('Facebox', key='rects', value=True)
+    with col2:
+        st.checkbox('Landmarks', key='landmarks', value=True)
+    with col3:
+        st.checkbox('Emotions', key='emotions', value=False)
+    with col4:
+        st.checkbox('AUs', key='aus', value=False)
+    with col5:
+        st.checkbox('Poses', key='poses', value=False)
+
+    # Continually get a frame, process it, and draw a plotly figure
+    while True:
+        try:
+            # Get video frame
+            frame = ctx.video_receiver.get_frame()
+
+            # Run detector
+            fex, img = process_frame(frame)
+
+            # Update FPS counter
+            now = time.perf_counter()
+            fps.text(f"FPS: {1 / (now-start):.3f}\nIFI: {(now-start):.3f}ms")
+            start = now
+
+            # Make figure
+            make_plotly_fig(figure, fex, img)
+            plot.plotly_chart(figure, use_container_width=True)
+
+        except queue.Empty:
+            break
+
+st.divider()
+
+st.info("Toggling checkboxes not only hides plotting, but *skips* running that detector to speed up processing. The only exceptions are the facebox and landmark detectors which are *always* run (only toggle plotting). You can check changes in the FPS counter to see how much faster/slower py-feat runs when toggling different detector combinations.", icon="💡")
