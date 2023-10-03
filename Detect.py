@@ -32,16 +32,17 @@ if not img_folder.exists():
 
 # Initialized detectors
 if "face_model" not in st.session_state:
-    st.session_state.face_model = "faceboxes"
+    st.session_state.face_model = "retinaface"
 if "landmark_model" not in st.session_state:
     st.session_state.landmark_model = "mobilefacenet"
 if "facepose_model" not in st.session_state:
     st.session_state.facepose_model = "img2pose"
 if "au_model" not in st.session_state:
-    st.session_state.au_model = "svm"
+    st.session_state.au_model = "xgb"
 if "emotion_model" not in st.session_state:
     st.session_state.emotion_model = "resmasknet"
-# st.set_page_config(layout="wide")
+
+st.set_page_config(layout="wide")
 
 # %%
 

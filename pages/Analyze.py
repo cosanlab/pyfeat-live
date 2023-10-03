@@ -50,7 +50,7 @@ else:
     st.write(
         "You can analyze a csv file or list of images by uploading a file or trying to load save detections from the live demo"
     )
-    st.file_uploader("Choose a file", key="upload_data")
+    st.file_uploader("Choose a csv file", key="upload_data")
     if fex_file.exists():
         st.button("Use live detections", key="live_data")
 
