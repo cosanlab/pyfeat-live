@@ -19,6 +19,9 @@ import time
 import plotly.graph_objects as go
 import seaborn as sns
 
+# Video and plotting dimensions
+WIDTH, HEIGHT = 640, 480
+
 st.set_page_config(layout="wide")
 
 # %%
@@ -1474,8 +1477,16 @@ def make_plotly_fig(figure, fex, img):
 # Load detectors
 detector = load_detector()
 
-# Create initial plotly figure
+# Create initial plotly figure of correct dimensions
 figure = go.Figure()
+figure.update_layout(
+    width=WIDTH,
+    height=HEIGHT,
+    xaxis=dict(visible=False, range=[0, WIDTH]),
+    yaxis=dict(visible=False, range=[0, HEIGHT], scaleanchor="x"),
+    margin={"l": 0, "r": 0, "t": 0, "b": 0},
+    showlegend=False,
+)
 
 # FPS counter
 fps = st.empty()
@@ -1485,16 +1496,28 @@ ctx = webrtc_streamer(
     key="sample",
     mode=WebRtcMode.SENDONLY,
     media_stream_constraints={
-        "video": {"width": 640, "height": 480},
+        "video": {"width": WIDTH, "height": HEIGHT},
         "audio": False,
     },
 )
 
+# Create plot
 plot = st.empty()
-start = time.perf_counter()
 
-# If webcam is not is playing
+st.divider()
+
+st.info(
+    "Toggling checkboxes not only hides plotting, but *skips* running that detector to speed up processing. The only exceptions are the facebox and landmark detectors which are *always* run (only toggle plotting). You can check changes in the FPS counter to see how much faster/slower py-feat runs when toggling different detector combinations.",
+    icon="💡",
+)
+
+# If webcam is playing
 if ctx.video_receiver:
+
+    # Initialize empty text and image area
+    fps.text(f"FPS: \nIFI:")
+    plot.plotly_chart(figure)
+
     # Create button row
     col1, col2, col3, col4, col5 = st.columns(5)
 
@@ -1513,6 +1536,7 @@ if ctx.video_receiver:
         st.checkbox("Poses", key="poses", value=False)
 
     # Continually get a frame, process it, and draw a plotly figure
+    start = time.perf_counter()
     while True:
         try:
             # Get video frame
@@ -1533,9 +1557,3 @@ if ctx.video_receiver:
         except queue.Empty:
             break
 
-st.divider()
-
-st.info(
-    "Toggling checkboxes not only hides plotting, but *skips* running that detector to speed up processing. The only exceptions are the facebox and landmark detectors which are *always* run (only toggle plotting). You can check changes in the FPS counter to see how much faster/slower py-feat runs when toggling different detector combinations.",
-    icon="💡",
-)
