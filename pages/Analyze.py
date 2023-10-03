@@ -36,7 +36,7 @@ def show_data():
         )
 
 
-# @st.cache_data
+@st.cache_data
 def convert_live_data(df):
     return df.to_csv().encode("utf-8")
 

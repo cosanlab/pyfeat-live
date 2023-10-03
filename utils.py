@@ -49,18 +49,18 @@ def run_pyfeat_detection(
         detected_faces=faces,
     )
 
-    if st.session_state.poses:
+    if st.session_state.get("poses"):
         poses_dict = detector.detect_facepose(batch_data["Image"], landmarks)
     else:
         poses_dict = None
         poses = None
 
-    if st.session_state.aus:
+    if st.session_state.get("aus"):
         aus = detector.detect_aus(batch_data["Image"], landmarks)
     else:
         aus = None
 
-    if st.session_state.emotions:
+    if st.session_state.get("emotions"):
         emotions = detector.detect_emotions(batch_data["Image"], faces, landmarks)
     else:
         emotions = None
@@ -74,7 +74,7 @@ def run_pyfeat_detection(
     landmarks = _inverse_landmark_transform(landmarks, batch_data)
 
     # match faces to poses - sometimes face detector finds different faces than pose detector.
-    if st.session_state.poses:
+    if st.session_state.get("poses"):
         faces, poses = detector._match_faces_to_poses(
             faces, poses_dict["faces"], poses_dict["poses"]
         )
@@ -1268,7 +1268,7 @@ def _create_detector_elements(
         [],
     )
     # Faceboxes path
-    if st.session_state.rects:
+    if st.session_state.get("rects"):
         faceboxes_path = [
             dict(
                 type="rect",
@@ -1282,7 +1282,7 @@ def _create_detector_elements(
         ]
 
     # Landmarks path
-    if st.session_state.landmarks:
+    if st.session_state.get("landmarks"):
         landmarks_path = [
             draw_plotly_landmark(
                 row,
@@ -1295,7 +1295,7 @@ def _create_detector_elements(
         ]
 
     # Pose path
-    if st.session_state.poses:
+    if st.session_state.get("poses"):
         poses_path = flatten_list(
             [
                 draw_plotly_pose(row, img_height, fig, line_width=pose_width)
@@ -1304,7 +1304,7 @@ def _create_detector_elements(
         )
 
     # AU Heatmaps
-    if st.session_state.aus:
+    if st.session_state.get("aus"):
         aus_path = flatten_list(
             [
                 draw_plotly_au(
@@ -1320,7 +1320,7 @@ def _create_detector_elements(
         )
 
     # Emotions annotations
-    if st.session_state.emotions:
+    if st.session_state.get("emotions"):
         for i, row in frame_fex.iterrows():
             emotion_dict = (
                 row[
