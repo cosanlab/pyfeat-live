@@ -32,13 +32,13 @@ if not img_folder.exists():
 
 # Initialized detectors
 if "face_model" not in st.session_state:
-    st.session_state.face_model = "faceboxes"
+    st.session_state.face_model = "retinaface"
 if "landmark_model" not in st.session_state:
     st.session_state.landmark_model = "mobilefacenet"
 if "facepose_model" not in st.session_state:
     st.session_state.facepose_model = "img2pose"
 if "au_model" not in st.session_state:
-    st.session_state.au_model = "svm"
+    st.session_state.au_model = "xgb"
 if "emotion_model" not in st.session_state:
     st.session_state.emotion_model = "resmasknet"
 # st.set_page_config(layout="wide")
@@ -95,7 +95,6 @@ figure.update_layout(
 
 # Sidebar Detector and saving controls
 with st.sidebar:
-
     st.write("### Saving detections")
     st.checkbox("Save detections", key="save_fex", value=False)
     st.checkbox("Save images", key="save_img", value=False)
@@ -109,31 +108,28 @@ with st.sidebar:
         "Face detector",
         key="face_model",
         options=["retinaface", "mtcnn", "faceboxes", "img2pose", "img2pose-c"],
-        on_change=reload_detector
+        on_change=reload_detector,
     )
     st.radio(
         "Landmark detector",
         key="landmark_model",
         options=["mobilefacenet", "mobilenet", "pfld"],
-        on_change=reload_detector
+        on_change=reload_detector,
     )
     st.radio(
         "Pose detector",
         key="facepose_model",
         options=["img2pose", "img2pose-c"],
-        on_change=reload_detector
+        on_change=reload_detector,
     )
     st.radio(
-        "AU detector",
-        key="au_model",
-        options=["svm", "xgb"],
-        on_change=reload_detector
+        "AU detector", key="au_model", options=["svm", "xgb"], on_change=reload_detector
     )
     st.radio(
         "Emotion detector",
         key="emotion_model",
         options=["resmasknet", "svm"],
-        on_change=reload_detector
+        on_change=reload_detector,
     )
 
 # Header text and saving controls
