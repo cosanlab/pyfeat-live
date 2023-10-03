@@ -5,3 +5,4 @@ streamlit-webrtc
 plotly
 seaborn
 snakeviz
+kaleido

@@ -2,3 +2,5 @@ env/
 *.DS*
 py-feat/
 __pycache__/
+detections/
+*.csv
