@@ -99,8 +99,10 @@ with st.sidebar:
     st.write("### Saving detections")
     st.checkbox("Save detections", key="save_fex", value=False)
     st.checkbox("Save images", key="save_img", value=False)
-    st.button("Clear detections", key="delete_fex", on_click=clear_fex_file)
-    st.button("Clear images", key="delete_img", on_click=clear_imgs)
+    if fex_file.exists():
+        st.button("Clear detections", key="delete_fex", on_click=clear_fex_file)
+    if any(img_folder.iterdir()):
+        st.button("Clear images", key="delete_img", on_click=clear_imgs)
 
     st.divider()
 
@@ -209,7 +211,7 @@ if ctx.video_receiver:
             plot.plotly_chart(figure, use_container_width=True)
             current_time = time.strftime("%Y%m%d-%H%M%S")
 
-            if st.session_state.save_fex:
+            if st.session_state.save_fex and not fex.empty:
                 fex["frame"] = current_time
                 if fex_file.exists():
                     fex.to_csv(fex_file, mode="a", header=False, index=False)
