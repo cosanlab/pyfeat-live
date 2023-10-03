@@ -16,15 +16,31 @@ from utils import process_frame, make_plotly_fig
 from pathlib import Path
 import shutil
 import time
+import logging
+
+webrtc_logger = logging.getLogger("streamlit_webrtc")
+webrtc_logger.setLevel(logging.ERROR)
 
 # Video and plotting dimensions
 WIDTH, HEIGHT = 640, 480
 
+# File saving
 fex_file = Path("./detections.csv")
 img_folder = Path("./detections")
 if not img_folder.exists():
     img_folder.mkdir()
 
+# Initialized detectors
+if "face_model" not in st.session_state:
+    st.session_state.face_model = "faceboxes"
+if "landmark_model" not in st.session_state:
+    st.session_state.landmark_model = "mobilefacenet"
+if "facepose_model" not in st.session_state:
+    st.session_state.facepose_model = "img2pose"
+if "au_model" not in st.session_state:
+    st.session_state.au_model = "svm"
+if "emotion_model" not in st.session_state:
+    st.session_state.emotion_model = "resmasknet"
 # st.set_page_config(layout="wide")
 
 # %%
@@ -33,14 +49,32 @@ if not img_folder.exists():
 @st.cache_resource
 def load_detector():
     """Load detector once on app boot"""
-    return Detector(verbose=False, au_model="svm")
+    return Detector(
+        face_model=st.session_state.face_model,
+        landmark_model=st.session_state.landmark_model,
+        facepose_model=st.session_state.facepose_model,
+        au_model=st.session_state.au_model,
+        emotion_model=st.session_state.emotion_model,
+    )
+
 
 def clear_fex_file():
     if fex_file.exists():
         fex_file.unlink()
 
+
 def clear_imgs():
     shutil.rmtree(img_folder)
+
+
+def reload_detector():
+    detector.change_model(
+        face_model=st.session_state.face_model,
+        landmark_model=st.session_state.landmark_model,
+        facepose_model=st.session_state.facepose_model,
+        au_model=st.session_state.au_model,
+        emotion_model=st.session_state.emotion_model,
+    )
 
 
 # %% MAIN UI CODE
@@ -59,21 +93,64 @@ figure.update_layout(
     showlegend=False,
 )
 
+# Sidebar Detector and saving controls
+with st.sidebar:
+
+    st.write("### Saving detections")
+    st.checkbox("Save detections", key="save_fex", value=False)
+    st.checkbox("Save images", key="save_img", value=False)
+    st.button("Clear detections", key="delete_fex", on_click=clear_fex_file)
+    st.button("Clear images", key="delete_img", on_click=clear_imgs)
+
+    st.divider()
+
+    st.write("### Swap detectors")
+    st.radio(
+        "Face detector",
+        key="face_model",
+        options=["retinaface", "mtcnn", "faceboxes", "img2pose", "img2pose-c"],
+        on_change=reload_detector
+    )
+    st.radio(
+        "Landmark detector",
+        key="landmark_model",
+        options=["mobilefacenet", "mobilenet", "pfld"],
+        on_change=reload_detector
+    )
+    st.radio(
+        "Pose detector",
+        key="facepose_model",
+        options=["img2pose", "img2pose-c"],
+        on_change=reload_detector
+    )
+    st.radio(
+        "AU detector",
+        key="au_model",
+        options=["svm", "xgb"],
+        on_change=reload_detector
+    )
+    st.radio(
+        "Emotion detector",
+        key="emotion_model",
+        options=["resmasknet", "svm"],
+        on_change=reload_detector
+    )
+
 # Header text and saving controls
 st.write("# Py-feat Live Demo")
 st.write(
     "This is a demo app that uses py-feat to process your webcam frames in real-time!\nYou can optionally save detections and image frames to disk"
 )
 
-save_fex_col, save_img_col, clear_fex_col, clear_img_col = st.columns(4)
-with save_fex_col:
-    st.checkbox("Save detections", key="save_fex", value=False)
-with save_img_col:
-    st.checkbox("Save images", key="save_img", value=False)
-with clear_fex_col:
-    st.button("Clear detections", key="delete_fex", on_click=clear_fex_file)
-with clear_img_col:
-    st.button("Clear images", key="delete_img", on_click=clear_imgs)
+# save_fex_col, save_img_col, clear_fex_col, clear_img_col = st.columns(4)
+# with save_fex_col:
+#     st.checkbox("Save detections", key="save_fex", value=False)
+# with save_img_col:
+#     st.checkbox("Save images", key="save_img", value=False)
+# with clear_fex_col:
+#     st.button("Clear detections", key="delete_fex", on_click=clear_fex_file)
+# with clear_img_col:
+#     st.button("Clear images", key="delete_img", on_click=clear_imgs)
 
 # FPS counter
 fps = st.empty()
@@ -142,7 +219,7 @@ if ctx.video_receiver:
             current_time = time.strftime("%Y%m%d-%H%M%S")
 
             if st.session_state.save_fex:
-                fex['frame'] = current_time
+                fex["frame"] = current_time
                 if fex_file.exists():
                     fex.to_csv(fex_file, mode="a", header=False, index=False)
                 else:
