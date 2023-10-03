@@ -10,6 +10,7 @@ import queue
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
 from feat import Detector
+from feat.utils.io import read_feat
 import time
 import plotly.graph_objects as go
 from utils import process_frame, make_plotly_fig
@@ -17,6 +18,8 @@ from pathlib import Path
 import shutil
 import time
 import logging
+import pandas as pd
+import os
 
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
@@ -95,7 +98,19 @@ figure.update_layout(
 
 # Sidebar Detector and saving controls
 with st.sidebar:
+    # saving controls
     st.write("### Saving detections")
+    # # folder_path = st.text_input("Enter the folder path to save data:")
+    # if folder_path is not None:
+    #     img_folder = Path(os.path.basename(folder_path))
+    #     fex_file = Path(os.path.join(img_folder, "detections.csv"))
+    # else:
+    #     # File saving
+    #     fex_file = Path("./detections.csv")
+    #     img_folder = Path("./detections")
+    # if not img_folder.exists():
+    #     img_folder.mkdir()
+
     st.checkbox("Save detections", key="save_fex", value=False)
     st.checkbox("Save images", key="save_img", value=False)
     st.button("Clear detections", key="delete_fex", on_click=clear_fex_file)
@@ -137,6 +152,16 @@ st.write("# Py-feat Live Demo")
 st.write(
     "This is a demo app that uses py-feat to process your webcam frames in real-time!\nYou can optionally save detections and image frames to disk"
 )
+
+# Upload a Fex file
+fex = None
+uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+if uploaded_file is not None:
+    fex = read_feat(uploaded_file)
+
+if fex is not None:
+    make_plotly_fig(figure, fex, img)
+    plot.plotly_chart(figure, use_container_width=True)
 
 # save_fex_col, save_img_col, clear_fex_col, clear_img_col = st.columns(4)
 # with save_fex_col:
@@ -214,6 +239,10 @@ if ctx.video_receiver:
             plot.plotly_chart(figure, use_container_width=True)
             current_time = time.strftime("%Y%m%d-%H%M%S")
 
+            if st.session_state.save_img:
+                figure.write_image(img_folder / f"{current_time}.png")
+                fex["input"] = img_folder / f"{current_time}.png"
+
             if st.session_state.save_fex:
                 fex["frame"] = current_time
                 if fex_file.exists():
@@ -221,8 +250,7 @@ if ctx.video_receiver:
                 else:
                     fex.to_csv(fex_file, index=False)
 
-            if st.session_state.save_img:
-                figure.write_image(img_folder / f"{current_time}.png")
-
         except queue.Empty:
             break
+
+# %%
