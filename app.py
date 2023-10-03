@@ -142,16 +142,6 @@ st.write(
     "This is a demo app that uses py-feat to process your webcam frames in real-time!\nYou can optionally save detections and image frames to disk"
 )
 
-# save_fex_col, save_img_col, clear_fex_col, clear_img_col = st.columns(4)
-# with save_fex_col:
-#     st.checkbox("Save detections", key="save_fex", value=False)
-# with save_img_col:
-#     st.checkbox("Save images", key="save_img", value=False)
-# with clear_fex_col:
-#     st.button("Clear detections", key="delete_fex", on_click=clear_fex_file)
-# with clear_img_col:
-#     st.button("Clear images", key="delete_img", on_click=clear_imgs)
-
 # FPS counter
 fps = st.empty()
 
@@ -163,6 +153,7 @@ ctx = webrtc_streamer(
         "video": {"width": WIDTH, "height": HEIGHT},
         "audio": False,
     },
+    async_processing=True
 )
 
 # Create button row
