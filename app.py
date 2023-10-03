@@ -165,6 +165,9 @@ ctx = webrtc_streamer(
     },
 )
 
+# Create button row
+col1, col2, col3, col4, col5 = st.columns(5)
+
 # Create plot
 plot = st.empty()
 
@@ -179,10 +182,6 @@ st.info(
 if ctx.video_receiver:
     # Initialize empty text and image area
     fps.text(f"FPS: \nIFI:")
-    plot.plotly_chart(figure)
-
-    # Create button row
-    col1, col2, col3, col4, col5 = st.columns(5)
 
     # Each button is has two-way binding it's key kwarg in st.session_state.key
     # st.session_state can then be used to read values within functions above to
@@ -198,6 +197,7 @@ if ctx.video_receiver:
     with col5:
         st.checkbox("Poses", key="poses", value=False)
 
+    plot.plotly_chart(figure)
     # Continually get a frame, process it, and draw a plotly figure
     start = time.perf_counter()
     while True:
