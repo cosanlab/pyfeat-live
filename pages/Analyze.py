@@ -8,12 +8,10 @@ st.set_page_config(layout="wide")
 
 img_folder = Path("./static/detections")
 fex_file = Path("./static/detections.csv")
-uploaded_file = None
 
 
 def show_data():
     if st.session_state.upload_data:
-        # data = st.session_state.upload_data.getvalue()
         fex = read_feat(st.session_state.upload_data)
         return st.dataframe(fex)
 
