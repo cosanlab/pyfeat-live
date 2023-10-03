@@ -20,6 +20,7 @@ import time
 import logging
 import pandas as pd
 import os
+from PIL import Image
 
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
@@ -150,7 +151,7 @@ with st.sidebar:
 # Header text and saving controls
 st.write("# Py-feat Live Demo")
 st.write(
-    "This is a demo app that uses py-feat to process your webcam frames in real-time!\nYou can optionally save detections and image frames to disk"
+    "This is a demo app that uses py-feat to process your webcam frames in real-time!\nYou can optionally save detections and image frames to disk\nSelect camera by pressing 'Select Device'. Press start to begin live video streaming.\n\nYou can also view previously collected data by dragging in a fex .csv file."
 )
 
 # Upload a Fex file
@@ -159,7 +160,30 @@ uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
 if uploaded_file is not None:
     fex = read_feat(uploaded_file)
 
+    # select first frame for now
+    frame = fex["frame"].unique()[0]
+    fex = fex.query("frame==@frame")
+    img = Image.open(fex["input"].iloc[0])
+
 if fex is not None:
+    # Create button row
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    # Each button is has two-way binding it's key kwarg in st.session_state.key
+    # st.session_state can then be used to read values within functions above to
+    # do selecting processing/rendering without complicated threads and queues
+    with col1:
+        st.checkbox("Facebox", key="rects", value=True)
+    with col2:
+        st.checkbox("Landmarks", key="landmarks", value=True)
+    with col3:
+        st.checkbox("Emotions", key="emotions", value=False)
+    with col4:
+        st.checkbox("AUs", key="aus", value=False)
+    with col5:
+        st.checkbox("Poses", key="poses", value=False)
+    plot = st.empty()
+
     make_plotly_fig(figure, fex, img)
     plot.plotly_chart(figure, use_container_width=True)
 

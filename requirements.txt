@@ -6,3 +6,4 @@ plotly
 seaborn
 snakeviz
 kaleido
+pillow
