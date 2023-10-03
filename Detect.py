@@ -25,8 +25,8 @@ webrtc_logger.setLevel(logging.ERROR)
 WIDTH, HEIGHT = 640, 480
 
 # File saving
-fex_file = Path("./detections.csv")
-img_folder = Path("./detections")
+fex_file = Path("./static/detections.csv")
+img_folder = Path("./static/detections")
 if not img_folder.exists():
     img_folder.mkdir()
 
