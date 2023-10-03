@@ -101,6 +101,9 @@ figure.update_layout(
 with st.sidebar:
     # saving controls
     st.write("### Saving detections")
+    st.write(
+        "You can save the py-feat detections to a csv file and also each image frame with the overlaid detections as a png. The data are saved to the folder you started the streamlit app. Press the buttons to clear previously collected detections. "
+    )
     # # folder_path = st.text_input("Enter the folder path to save data:")
     # if folder_path is not None:
     #     img_folder = Path(os.path.basename(folder_path))
@@ -119,7 +122,7 @@ with st.sidebar:
 
     st.divider()
 
-    st.write("### Swap detectors")
+    st.write("### Swap Detector Model")
     st.radio(
         "Face detector",
         key="face_model",
@@ -139,7 +142,7 @@ with st.sidebar:
         on_change=reload_detector,
     )
     st.radio(
-        "AU detector", key="au_model", options=["svm", "xgb"], on_change=reload_detector
+        "AU detector", key="au_model", options=["xgb", "svm"], on_change=reload_detector
     )
     st.radio(
         "Emotion detector",
