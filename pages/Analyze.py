@@ -20,11 +20,24 @@ if "upload_data" not in st.session_state:
     st.session_state.upload_data = None
 if "show_select_container" not in st.session_state:
     st.session_state.show_select_container = True
+if "show_save_button" not in st.session_state:
+    st.session_state.show_save_button = False
+
+def show_save():
+    st.session_state.show_save_button = True
 
 def show_uploaded_data():
     """Render uploaded data or live detection data"""
     if st.session_state.upload_data is not None:
-        return st.dataframe(st.session_state.upload_data)
+        button_placeholder = st.empty()
+        new_fex = st.data_editor(st.session_state.upload_data, on_change=show_save)
+        if st.session_state.show_save_button:
+            button_placeholder.button("Save", on_click=save_fex, args=[new_fex])
+
+
+def save_fex(new_fex):
+    new_fex.to_csv(fex_file, index=False)
+
 
 def show_live_data():
     if st.session_state.live_data:
@@ -42,11 +55,15 @@ def show_live_data():
 
         show_images()
         if st.toggle("Display csv"):
-            st.data_editor(
+            button_placeholder = st.empty()
+            new_fex = st.data_editor(
                 fex,
                 column_config={"img_paths": st.column_config.ImageColumn("image")},
                 hide_index=True,
+                on_change=show_save
             )
+            if st.session_state.show_save_button:
+                button_placeholder.button("Save", on_click=save_fex, args=[new_fex])
 
 
 def increment_idx():
@@ -81,18 +98,23 @@ def show_images():
 def convert_live_data(df):
     return df.to_csv().encode("utf-8")
 
+
 def handle_file_upload(upload_data):
     st.session_state.upload_data = read_feat(upload_data)
     st.session_state.show_select_container = False
+
 
 def handle_use_live():
     st.session_state.live_data = True
     st.session_state.show_select_container = False
 
+
 def handle_reset():
     st.session_state.show_select_container = True
-    st.session_state.live_data=None
-    st.session_state.upload_data=None
+    st.session_state.live_data = None
+    st.session_state.upload_data = None
+
+
 # %%
 
 st.write("# Analyze")
