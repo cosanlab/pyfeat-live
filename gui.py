@@ -35,7 +35,7 @@ def main():
     # Force the opening (does not open automatically) of the browser tab after a brief delay to let
     # the streamlit server start.
     time.sleep(3)
-    window = webview.create_window("Py-Feat Live", 'tp://localhost:8501')
+    window = webview.create_window("Py-Feat Live", 'https://localhost:8501')
     webview.start()
 
     while True:
