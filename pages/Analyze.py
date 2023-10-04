@@ -15,18 +15,18 @@ if "num_images" not in st.session_state:
 if "img_idx" not in st.session_state:
     st.session_state.img_idx = 0
 if "live_data" not in st.session_state:
-    st.session_state.live_data = False
+    st.session_state.live_data = None
 if "upload_data" not in st.session_state:
-    st.session_state.upload_data = False
+    st.session_state.upload_data = None
 if "show_select_container" not in st.session_state:
     st.session_state.show_select_container = True
 
-def show_data():
+def show_uploaded_data():
     """Render uploaded data or live detection data"""
-    if st.session_state.upload_data:
-        fex = read_feat(st.session_state.upload_data)
-        return st.dataframe(fex)
+    if st.session_state.upload_data is not None:
+        return st.dataframe(st.session_state.upload_data)
 
+def show_live_data():
     if st.session_state.live_data:
         if not fex_file.exists():
             return st.error(
@@ -39,11 +39,14 @@ def show_data():
             "img_paths",
             fex["frame"].apply(lambda x: f"app/static/detections/{x}.png"),
         )
-        return st.data_editor(
-            fex,
-            column_config={"img_paths": st.column_config.ImageColumn("image")},
-            hide_index=True,
-        )
+
+        show_images()
+        if st.toggle("Display csv"):
+            st.data_editor(
+                fex,
+                column_config={"img_paths": st.column_config.ImageColumn("image")},
+                hide_index=True,
+            )
 
 
 def increment_idx():
@@ -78,29 +81,38 @@ def show_images():
 def convert_live_data(df):
     return df.to_csv().encode("utf-8")
 
+def handle_file_upload(upload_data):
+    st.session_state.upload_data = read_feat(upload_data)
+    st.session_state.show_select_container = False
 
+def handle_use_live():
+    st.session_state.live_data = True
+    st.session_state.show_select_container = False
+
+def handle_reset():
+    st.session_state.show_select_container = True
+    st.session_state.live_data=None
+    st.session_state.upload_data=None
 # %%
 
 st.write("# Analyze")
+# File select container
 if st.session_state.show_select_container:
     st.write(
         "You can analyze a csv file or list of images by uploading a file or trying to load save detections from the live demo"
     )
     upload_data = st.file_uploader("Choose a csv file")
     if upload_data is not None:
-        st.session_state.upload_data = upload_data
-        st.session_state.show_select_container = False
-        st.rerun()
-    if fex_file.exists():
-        if st.button("Use live detections"):
-            st.session_state.live_data = True
-            st.session_state.show_select_container = False
-elif st.session_state.get("live_data"):
-    show_images()
-    if st.toggle("Display csv"):
-        show_data()
-elif st.session_state.get("upload_data"):
-    show_data()
+        st.button("Upload", on_click=handle_file_upload, args=[upload_data])
+    else:
+        if fex_file.exists():
+            st.button("Use live detections", on_click=handle_use_live)
+else:
+    st.button("Upload New File", on_click=handle_reset)
+
+# Render data
+show_live_data()
+show_uploaded_data()
 
 with st.sidebar:
     if fex_file.exists():
