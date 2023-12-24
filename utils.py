@@ -119,7 +119,7 @@ def create_fex(
                     facepose_df = pd.DataFrame(
                         {x: np.nan for x in detector.info["facepose_model_columns"]},
                         columns=detector.info["facepose_model_columns"],
-                        index=[i],
+                        index=[j],
                     )
                 assemble.append(facepose_df)
 
@@ -133,7 +133,7 @@ def create_fex(
                     landmarks_df = pd.DataFrame(
                         {x: np.nan for x in detector.info["face_landmark_columns"]},
                         columns=detector.info["face_landmark_columns"],
-                        index=[i],
+                        index=[j],
                     )
                 assemble.append(landmarks_df)
 
@@ -147,7 +147,7 @@ def create_fex(
                     aus_df = pd.DataFrame(
                         {x: np.nan for x in detector.info["au_presence_columns"]},
                         columns=detector.info["au_presence_columns"],
-                        index=[i],
+                        index=[j],
                     )
                 assemble.append(aus_df)
 
@@ -163,7 +163,7 @@ def create_fex(
                     emotions_df = pd.DataFrame(
                         {x: np.nan for x in detector.info["emotion_model_columns"]},
                         columns=detector.info["emotion_model_columns"],
-                        index=[i],
+                        index=[j],
                     )
                 assemble.append(emotions_df)
 

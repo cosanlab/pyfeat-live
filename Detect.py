@@ -96,7 +96,6 @@ figure.update_layout(
 
 # Sidebar Detector and saving controls
 with st.sidebar:
-
     st.write("### Saving detections")
     st.checkbox("Save detections", key="save_fex", value=False)
     st.checkbox("Save images", key="save_img", value=False)
@@ -112,31 +111,28 @@ with st.sidebar:
         "Face detector",
         key="face_model",
         options=["retinaface", "mtcnn", "faceboxes", "img2pose", "img2pose-c"],
-        on_change=reload_detector
+        on_change=reload_detector,
     )
     st.radio(
         "Landmark detector",
         key="landmark_model",
         options=["mobilefacenet", "mobilenet", "pfld"],
-        on_change=reload_detector
+        on_change=reload_detector,
     )
     st.radio(
         "Pose detector",
         key="facepose_model",
         options=["img2pose", "img2pose-c"],
-        on_change=reload_detector
+        on_change=reload_detector,
     )
     st.radio(
-        "AU detector",
-        key="au_model",
-        options=["svm", "xgb"],
-        on_change=reload_detector
+        "AU detector", key="au_model", options=["svm", "xgb"], on_change=reload_detector
     )
     st.radio(
         "Emotion detector",
         key="emotion_model",
         options=["resmasknet", "svm"],
-        on_change=reload_detector
+        on_change=reload_detector,
     )
 
 # Header text and saving controls
@@ -156,7 +152,7 @@ ctx = webrtc_streamer(
         "video": {"width": WIDTH, "height": HEIGHT},
         "audio": False,
     },
-    async_processing=True
+    async_processing=True,
 )
 
 # Create button row
