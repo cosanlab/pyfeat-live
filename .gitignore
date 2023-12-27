@@ -4,4 +4,5 @@ build/
 py-feat/
 __pycache__/
 detections/
+recordings/
 *.csv
