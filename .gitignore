@@ -1,4 +1,5 @@
 env/
+build/
 *.DS*
 py-feat/
 __pycache__/
