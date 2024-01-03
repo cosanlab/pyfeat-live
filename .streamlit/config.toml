@@ -1,2 +1,8 @@
 [server]
 enableStaticServing = true
+
+[global]
+developmentMode = false
+
+[server]
+port = 8501

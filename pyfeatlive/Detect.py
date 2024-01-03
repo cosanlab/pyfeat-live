@@ -9,8 +9,6 @@
 import queue
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
-
-# from aiortc.contrib.media import MediaRecorder
 from feat import Detector
 import time
 import plotly.graph_objects as go
@@ -98,11 +96,10 @@ def app():
         video_stream.pix_fmt = frames[0].format.name
 
         pts = frames[0].time_base.denominator
-        time_base = 1.0 / fps
         for frame in frames:
             frame.pts = pts
-            # pts += int(time_base * fps)
             pts += int((1 / fps) * frame.time_base.denominator)
+
             # Convert PyAV frame to a packet and write to the container
             for packet in video_stream.encode(frame):
                 output.mux(packet)

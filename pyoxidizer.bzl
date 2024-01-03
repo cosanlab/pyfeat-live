@@ -1,20 +1,24 @@
 # This file defines how PyOxidizer application building and packaging is
 # performed. See PyOxidizer's documentation at
-# https://pyoxidizer.readthedocs.io/en/stable/ for details of this
-# configuration file format.
+# https://gregoryszorc.com/docs/pyoxidizer/stable/pyoxidizer.html for details
+# of this configuration file format.
+
+PYFEATLIVE_VERSION = "0.0.1"
+AUTHOR = "Eshin Jolly & Luke Chang"
+ICNS_PATH = "/Users/lukechang/Github/pyfeat-live/logos/pyfeat_logo_green.icns"
+MAC_BUILD_PATH = "/Users/lukechang/Github/pyfeat-live/build/"
+APP_NAME = "pyfeatlive"
+DISPLAY_NAME = "PyFeatLive"
+
 
 # Configuration files consist of functions which define build "targets."
 # This function creates a Python executable and installs it in a destination
 # directory.
-
-# Based on https://github.com/takov751/Pyoxidizer_example/blob/main/app/pyoxidizer.bzl
-
-
 def make_exe():
     # Obtain the default PythonDistribution for our build target. We link
     # this distribution into our produced executable and extract the Python
     # standard library from it.
-    dist = default_python_distribution(python_version="3.10")
+    dist = default_python_distribution()
 
     # This function creates a `PythonPackagingPolicy` instance, which
     # influences how executables are built and how resources are added to
@@ -22,18 +26,14 @@ def make_exe():
     # to attributes and calling functions.
     policy = dist.make_python_packaging_policy()
 
-    # Configure policy values to classify files as typed resources.
-    # (This is the default.)
-    # policy.set_resource_handling_mode("classify")
+    # Enable support for non-classified "file" resources to be added to
+    # resource collections.
+    policy.allow_files = True
 
-    # Configure policy values to handle files as files and not attempt
-    # to classify files as specific types.
-    policy.set_resource_handling_mode("files")
-
-    # site-packages is required here so that streamlit doesn't boot in
-    # development mode:
-    # https://github.com/streamlit/streamlit/blob/953dfdbe/lib/streamlit/config.py#L255-L267
-    policy.resources_location = "filesystem-relative:site-packages"
+    # Control support for loading Python extensions and other shared libraries
+    # from memory. This is only supported on Windows and is ignored on other
+    # platforms.
+    # policy.allow_in_memory_shared_library_loading = True
 
     # Control whether to generate Python bytecode at various optimization
     # levels. The default optimization level used by Python is 0.
@@ -72,7 +72,7 @@ def make_exe():
 
     # Toggle whether Python module source code for modules in the Python
     # distribution's standard library are included.
-    # policy.include_distribution_sources = False
+    policy.include_distribution_sources = True
 
     # Toggle whether Python package resource files for the Python standard
     # library are included.
@@ -99,6 +99,10 @@ def make_exe():
 
     # Use filesystem-relative location for adding resources by default.
     # policy.resources_location = "filesystem-relative:prefix"
+    # site-packages is required here so that streamlit doesn't boot in
+    # development mode:
+    # https://github.com/streamlit/streamlit/blob/953dfdbe/lib/streamlit/config.py#L255-L267
+    policy.resources_location = "filesystem-relative:site-packages"
 
     # Attempt to add resources relative to the built binary when
     # `resources_location` fails.
@@ -110,6 +114,14 @@ def make_exe():
     # Define a preferred Python extension module variant in the Python distribution
     # to use.
     # policy.set_preferred_extension_module_variant("foo", "bar")
+
+    # Configure policy values to classify files as typed resources.
+    # (This is the default.)
+    # policy.set_resource_handling_mode("classify")
+
+    # Configure policy values to handle files as files and not attempt
+    # to classify files as specific types.
+    policy.set_resource_handling_mode("files")
 
     # This variable defines the configuration of the embedded Python
     # interpreter. By default, the interpreter will run a Python REPL
@@ -126,6 +138,7 @@ def make_exe():
 
     # Set initial value for `sys.path`. If the string `$ORIGIN` exists in
     # a value, it will be expanded to the directory of the built executable.
+    # python_config.module_search_paths = ["$ORIGIN/lib"]
     python_config.module_search_paths = ["$ORIGIN/site-packages"]
 
     # Use jemalloc as Python's memory allocator.
@@ -173,14 +186,13 @@ def make_exe():
 
     # Control whether `oxidized_importer` is the first importer on
     # `sys.meta_path`.
-    python_config.oxidized_importer = False
+    # python_config.oxidized_importer = False
 
     # Enable the standard path-based importer which attempts to load
     # modules from the filesystem.
-    python_config.filesystem_importer = True
+    # python_config.filesystem_importer = True
 
     # Set `sys.frozen = False`
-    # python_config.sys_frozen = False
     python_config.sys_frozen = True
 
     # Set `sys.meipass`
@@ -191,20 +203,24 @@ def make_exe():
     # python_config.write_modules_directory_env = "/tmp/oxidized/loaded_modules"
 
     # Evaluate a string as Python code when the interpreter starts.
-    # python_config.run_command = "quickemu_watcher.__main__"
+    # python_config.run_command = "<code>"
 
     # Run a Python module as __main__ when the interpreter starts.
+    # python_config.run_module = "<module>"
     python_config.run_module = "pyfeatlive"
 
     # Run a Python file when the interpreter starts.
-    # python_config.run_filename = "test"
+    # python_config.run_filename = "/path/to/file"
 
     # Produce a PythonExecutable from a Python distribution, embedded
     # resources, and other options. The returned object represents the
     # standalone executable that will be built.
     exe = dist.to_python_executable(
-        name="pyfeatlive",
+        name=APP_NAME,
+        # If no argument passed, the default `PythonPackagingPolicy` for the
+        # distribution is used.
         packaging_policy=policy,
+        # If no argument passed, the default `PythonInterpreterConfig` is used.
         config=python_config,
     )
 
@@ -221,10 +237,10 @@ def make_exe():
 
     # Copy Windows runtime DLLs next to the build executable and error if this
     # cannot be done.
-    exe.windows_runtime_dlls_mode = "always"
+    # exe.windows_runtime_dlls_mode = "always"
 
     # Make the executable a console application on Windows.
-    exe.windows_subsystem = "console"
+    # exe.windows_subsystem = "console"
 
     # Make the executable a non-console application on Windows.
     # exe.windows_subsystem = "windows"
@@ -236,14 +252,24 @@ def make_exe():
     # policy's resource location attributes.
     # exe.add_python_resources(exe.pip_download(["pyflakes==2.2.0"]))
 
+    # Invoke `pip install` with our Python distribution to install a single package.
+    # `pip_install()` returns objects representing installed files.
+    # `add_python_resources()` adds these objects to the binary, with a load
+    # location as defined by the packaging policy's resource location
+    # attributes.
     # exe.add_python_resources(exe.pip_install(["appdirs"]))
+
+    # Invoke `pip install` using a requirements file and add the collected resources
+    # to our binary.
+    exe.add_python_resources(exe.pip_install(["-r", "requirements.txt"]))
+    exe.add_python_resources(exe.pip_install(["."]))
 
     # Read Python files from a local directory and add them to our embedded
     # context, taking just the resources belonging to the `foo` and `bar`
     # Python packages.
     # exe.add_python_resources(exe.read_package_root(
-    #     path=".",
-    #     packages=["quickemu_watcher"],
+    #    path="/src/mypackage",
+    #    packages=["foo", "bar"],
     # ))
 
     # Discover Python files from a virtualenv and add them to our embedded
@@ -252,32 +278,117 @@ def make_exe():
 
     # Filter all resources collected so far through a filter of names
     # in a file.
-    # exe.filter_from_files(files=["/path/to/filter-file"]))
-
-    # Invoke `pip install` with our Python distribution to install a single package.
-    # `pip_install()` returns objects representing installed files.
-    # `add_python_resources()` adds these objects to the binary, with a load
-    # location as defined by the packaging policy's resource location
-    # attributes.
-    exe.add_python_resources(exe.pip_install(["-r", "requirements.txt"]))
-    exe.add_python_resources(exe.pip_install(["."]))
+    # exe.filter_resources_from_files(files=["/path/to/filter-file"])
 
     # Return our `PythonExecutable` instance so it can be built and
     # referenced by other consumers of this target.
     return exe
 
 
+def make_embedded_resources(exe):
+    return exe.to_embedded_resources()
+
+
 def make_install(exe):
+    # Create an object that represents our installed application file layout.
     files = FileManifest()
+
+    # Add the generated executable to our install layout in the root directory.
     files.add_python_resource(".", exe)
-    files.install("dist", replace=True)
 
     return files
 
 
+def make_macos_app_bundle():
+    # exe = make_exe()
+
+    ARCHES = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+
+    bundle = MacOsApplicationBundleBuilder(DISPLAY_NAME)
+    bundle.add_icon(ICNS_PATH)
+    # bundle.add_macos_file()
+    bundle.set_info_plist_required_keys(
+        display_name=DISPLAY_NAME,
+        identifier="com.cosanlab." + APP_NAME,
+        version=PYFEATLIVE_VERSION,
+        signature="pyfl",
+        executable=APP_NAME,
+    )
+    bundle.identifier = "com.cosanlab." + APP_NAME
+    # https://gregoryszorc.com/docs/pyoxidizer/main/tugger_starlark_type_apple_universal_binary.html
+    # universal = AppleUniversalBinary(DISPLAY_NAME)
+    # for target in ["aarch64-apple-darwin", "x86_64-apple-darwin"]:
+    #     universal.add_path("targets/" + target + "/" + APP_NAME)
+    # universal.add_path(MAC_BUILD_PATH + "targets/" + target + "/" + APP_NAME)
+
+    # m = FileManifest()
+    # m.add_file(universal.to_file_content())
+    # bundle.add_macos_manifest(m)
+
+    return bundle
+
+
+def make_msi(exe):
+    # See the full docs for more. But this will convert your Python executable
+    # into a `WiXMSIBuilder` Starlark type, which will be converted to a Windows
+    # .msi installer when it is built.
+    return exe.to_wix_msi_builder(
+        # Simple identifier of your app.
+        "myapp",
+        # The name of your application.
+        "My Application",
+        # The version of your application.
+        "1.0",
+        # The author/manufacturer of your application.
+        "Alice Jones",
+    )
+
+
+# Dynamically enable automatic code signing.
+def register_code_signers():
+    # You will need to run with `pyoxidizer build --var ENABLE_CODE_SIGNING 1` for
+    # this if block to be evaluated.
+    # if not VARS.get("ENABLE_CODE_SIGNING"):
+    #     return
+
+    # Use a code signing certificate in a .pfx/.p12 file, prompting the
+    # user for its path and password to open.
+    pfx_path = prompt_input(
+        "/Users/lukechang/Documents/DeveloperCertificates/Cosanlab_Apple_Developer_Certificate.p12"
+    )
+    pfx_password = prompt_password(
+        "password for code signing certificate file", confirm=True
+    )
+    signer = code_signer_from_pfx_file(pfx_path, pfx_password)
+
+    # Use a code signing certificate in the Windows certificate store, specified
+    # by its SHA-1 thumbprint. (This allows you to use YubiKeys and other
+    # hardware tokens if they speak to the Windows certificate APIs.)
+    # sha1_thumbprint = prompt_input(
+    #     "SHA-1 thumbprint of code signing certificate in Windows store"
+    # )
+    # signer = code_signer_from_windows_store_sha1_thumbprint(sha1_thumbprint)
+
+    # Choose a code signing certificate automatically from the Windows
+    # certificate store.
+    # signer = code_signer_from_windows_store_auto()
+
+    # Activate your signer so it gets called automatically.
+    signer.activate()
+
+
+# Call our function to set up automatic code signers.
+# register_code_signers()
+
+# Tell PyOxidizer about the build targets defined above.
 register_target("exe", make_exe)
 register_target(
-    "install", make_install, depends=["exe"], default=True, default_build_script=True
+    "resources", make_embedded_resources, depends=["exe"], default_build_script=True
 )
+register_target("install", make_install, depends=["exe"], default=True)
+# register_target("msi_installer", make_msi, depends=["exe"])
+register_target("macos_app_bundle", make_macos_app_bundle)
 
+# Resolve whatever targets the invoker of this configuration file is requesting
+# be resolved.
 resolve_targets()
