@@ -5,7 +5,7 @@
 
 PYFEATLIVE_VERSION = "0.0.1"
 AUTHOR = "Eshin Jolly & Luke Chang"
-ICNS_PATH = "/Users/lukechang/Github/pyfeat-live/logos/pyfeat_logo_green.icns"
+ICNS_PATH = "/Users/lukechang/Github/pyfeat-live/logos/pyfeat_logo_green_shadow.icns"
 MAC_BUILD_PATH = "/Users/lukechang/Github/pyfeat-live/build/"
 APP_NAME = "pyfeatlive"
 DISPLAY_NAME = "PyFeatLive"
@@ -387,7 +387,7 @@ register_target(
 )
 register_target("install", make_install, depends=["exe"], default=True)
 # register_target("msi_installer", make_msi, depends=["exe"])
-register_target("macos_app_bundle", make_macos_app_bundle)
+# register_target("macos_app_bundle", make_macos_app_bundle)
 
 # Resolve whatever targets the invoker of this configuration file is requesting
 # be resolved.
