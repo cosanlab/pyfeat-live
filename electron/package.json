@@ -23,7 +23,7 @@
     "productName": "PyFeatLive",
     "appId": "com.cosanlab.pyfeatlive",
     "mac": {
-      "icon": "/Users/lukechang/Github/pyfeat-live/logos/pyfeat_logo_green_shadow.icns",
+      "icon": "logos/pyfeat_logo_green_shadow.icns",
       "category": "public.app-category.education",
       "target": {
         "target": "default",
@@ -32,6 +32,7 @@
           "x64"
         ]
       },
+      "darkModeSupport": true,
       "hardenedRuntime": true,
       "entitlements": "resources/entitlements.mac.plist",
       "entitlementsInherit": "resources/entitlements.mac.plist",
@@ -44,7 +45,7 @@
         "nsis",
         "portable"
       ],
-      "icon": "/Users/lukechang/Github/pyfeat-live/logos/pyfeat_logo_green_shadow.ico"
+      "icon": "logos/pyfeat_logo_green_shadow.ico"
     },
     "files": [
       "app/**/*",
@@ -64,6 +65,7 @@
         ]
       }
     ],
+    "afterSign": "scripts/notarize.js",
     "publish": null
   },
   "scripts": {
@@ -73,6 +75,7 @@
   },
   "dependencies": {
     "@electron/osx-sign": "^1.0.5",
+    "dotenv": "^16.3.1",
     "electron-squirrel-startup": "^1.0.0",
     "env": "^0.0.2",
     "fs-jetpack": "^5.1.0",
@@ -81,6 +84,7 @@
   "devDependencies": {
     "electron": "^28.1.0",
     "electron-builder": "^24.9.1",
+    "electron-notarize": "^1.2.2",
     "webpack": "^5.89.0",
     "webpack-cli": "^5.1.4",
     "webpack-merge": "^5.10.0",

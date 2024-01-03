@@ -6,3 +6,4 @@ __pycache__/
 detections/
 recordings/
 *.csv
+.env
