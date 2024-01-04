@@ -19,7 +19,6 @@ import pandas as pd
 import av
 from io import BytesIO
 from PIL import Image
-import os
 
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
@@ -112,7 +111,6 @@ def app():
         pts = frames[0].time_base.denominator
         for frame in frames:
             frame.pts = pts
-            print(f"pts - {pts}")
             pts += int(safe_divide_fps(1, fps) * frame.time_base.denominator)
 
             # Convert PyAV frame to a packet and write to the container
@@ -229,6 +227,7 @@ def app():
     # If webcam is playing process and render frames
     if ctx.video_receiver:
         st.session_state.video_state = True
+
         # Initialize empty text and image area
         fps.text(f"FPS: ")
 
@@ -264,6 +263,7 @@ def app():
                     st.session_state.combined_frames.append(frame)
                     print(st.session_state.combined_frames[-1])
                     st.session_state.combined_fex.append(fex)
+
             except queue.Empty:
                 break
     else:
@@ -281,7 +281,6 @@ def app():
                 st.session_state.combined_fex = []
                 st.session_state.combined_frames = []
                 st.write("")
-
             else:
                 # Check if there is fex data to download
                 with save_col2:
@@ -318,10 +317,10 @@ def app():
                         )
                     else:
                         st.write("Video unavailable")
-        # Footer
-        st.write(
-            "Copyright © 2024 | [Eshin Jolly](https://eshinjolly.com/)  &  [Luke Chang](https://cosanlab.com/) | [Dartmouth College](https://pbs.dartmouth.edu/) | Hanover, NH"
-        )
+    # Footer
+    st.write(
+        "Copyright © 2024 | [Eshin Jolly](https://eshinjolly.com/)  &  [Luke Chang](https://cosanlab.com/) | [Dartmouth College](https://pbs.dartmouth.edu/) | Hanover, NH"
+    )
 
 
 if __name__ == "__main__":

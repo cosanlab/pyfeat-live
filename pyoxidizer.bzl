@@ -296,6 +296,8 @@ def make_install(exe):
     # Add the generated executable to our install layout in the root directory.
     files.add_python_resource(".", exe)
 
+    files.add_path("pyfeat_logo_green_shadow.png", strip_prefix="")
+
     return files
 
 
