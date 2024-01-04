@@ -2,7 +2,7 @@
 
 This is a standalone demo of using [py-feat](https://py-feat.org/) to analyze webcam frames in real time and display the results.
 
-![](./static/demo.gif)
+![](./demo.gif)
 
 ## Useage
 1. Choose your camera by clicking on `SELECT DEVICE`.

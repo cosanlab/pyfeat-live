@@ -25,7 +25,8 @@ webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
 
 # Video and plotting dimensions
-WIDTH, HEIGHT = 640, 480
+WIDTH, HEIGHT = 960, 540
+# WIDTH, HEIGHT = 640, 480
 
 # Initialized detectors
 if "face_model" not in st.session_state:
@@ -38,6 +39,10 @@ if "au_model" not in st.session_state:
     st.session_state.au_model = "xgb"
 if "emotion_model" not in st.session_state:
     st.session_state.emotion_model = "resmasknet"
+if "frame_counter" not in st.session_state:
+    st.session_state.frame_counter = 0
+if "video_state" not in st.session_state:
+    st.session_state.video_state = False
 if "combined_fex" not in st.session_state:
     st.session_state.combined_fex = []
 if "combined_frames" not in st.session_state:
@@ -69,6 +74,7 @@ def app():
     # Load detectors
     detector = load_detector()
 
+    # Helper Function
     def reload_detector():
         detector.change_model(
             face_model=st.session_state.face_model,
@@ -83,6 +89,12 @@ def app():
         fex_df["input"] = file_name
         csv_string = fex_df.to_csv(index=False)
         return csv_string.encode("utf-8")
+
+    def safe_divide_fps(numerator, denominator, default_value=1):
+        try:
+            return numerator / denominator
+        except ZeroDivisionError:
+            return default_value
 
     def frames_to_video_in_memory(frames, fps=20, format="mp4"):
         # Create an in-memory bytes buffer
@@ -100,7 +112,8 @@ def app():
         pts = frames[0].time_base.denominator
         for frame in frames:
             frame.pts = pts
-            pts += int((1 / fps) * frame.time_base.denominator)
+            print(f"pts - {pts}")
+            pts += int(safe_divide_fps(1, fps) * frame.time_base.denominator)
 
             # Convert PyAV frame to a packet and write to the container
             for packet in video_stream.encode(frame):
@@ -115,9 +128,6 @@ def app():
         buffer.seek(0)
         return buffer
 
-    # Initialize
-    frame_counter = 0
-
     # Create initial plotly figure of correct dimensions
     figure = go.Figure()
     figure.update_layout(
@@ -129,135 +139,98 @@ def app():
         showlegend=False,
     )
 
-    # Sidebar Detector and saving controls
+    # Sidebar Detector Models
     with st.sidebar:
-        img = Image.open(
-            os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "..",
-                "static",
-                "pyfeat_logo_green_shadow.png",
-            )
-        )
+        img = Image.open("pyfeat_logo_green_shadow.png")
         st.image(
             img,
             channels="RGB",
             use_column_width=True,
         )
-        st.write("### Saving detections")
-        st.checkbox("Record Session", key="save_session", value=True)
 
-        # Check if there is fex data to download
-        if st.session_state.save_session and st.session_state.combined_fex:
-            # Only create the download button if there is data
-            st.download_button(
-                label="Download Fex",
-                data=fex_to_csv(
-                    st.session_state.combined_fex,
-                    file_name=f"pyfeatlive_video_{st.session_state.start_time}.csv",
-                ),
-                file_name=f"pyfeatlive_fex_{st.session_state.start_time}.csv",
-                mime="text/csv",
-            )
-        else:
-            st.write("Fex unavailable to download.")
-
-        # Check if there is video data to download
-        if st.session_state.save_session and st.session_state.combined_frames:
-            st.download_button(
-                label="Download Video",
-                data=frames_to_video_in_memory(
-                    st.session_state.combined_frames,
-                    fps=int(1 / st.session_state.avg_fps),
-                ),
-                file_name=f"pyfeatlive_video_{st.session_state.start_time}.mp4",
-                mime="video/mp4",
-            )
-        else:
-            st.write("Video unavailable to download.")
         st.divider()
 
-        st.write("### Swap detectors")
+        st.write("### SWAP MODELS")
         st.radio(
-            "Face detector",
+            "Face Detector",
             key="face_model",
             options=["retinaface", "mtcnn", "faceboxes", "img2pose", "img2pose-c"],
             on_change=reload_detector,
         )
         st.radio(
-            "Landmark detector",
+            "Landmark Detector",
             key="landmark_model",
             options=["mobilefacenet", "mobilenet", "pfld"],
             on_change=reload_detector,
         )
         st.radio(
-            "Pose detector",
+            "Pose Detector",
             key="facepose_model",
             options=["img2pose", "img2pose-c"],
             on_change=reload_detector,
         )
         st.radio(
-            "AU detector",
+            "AU Detector",
             key="au_model",
             options=["svm", "xgb"],
             on_change=reload_detector,
         )
         st.radio(
-            "Emotion detector",
+            "Emotion Detector",
             key="emotion_model",
             options=["resmasknet", "svm"],
             on_change=reload_detector,
         )
 
-    # Header text and saving controls
+    # Main Window
     st.write("# Py-Feat Live")
-    st.write(
-        "This app uses py-feat to process your webcam frames in real-time. \n1. Choose your camera by clicking on `SELECT DEVICE`.\n2. Sessions can be recorded and downladed after the session is ended by toggling `Record Session`. \n3. Switch models with `Swap detectors` buttons.\n4. Toggle which detectors you would like to show. \n5. Start the session by clicking the red `START` button."
-    )
 
-    # FPS counter
-    fps = st.empty()
+    # Instructions
+    with st.expander(label="OVERVIEW", expanded=False):
+        st.write(
+            "This app uses [py-feat](https://py-feat.org/) to automatically detect facial expression features in real-time from a webcam. \n1. Choose your camera by clicking on `SELECT DEVICE`.\n2. Sessions can be recorded and downloaded after the session is ended by toggling `Record Session`. \n3. Switch models with `SWAP MODELS` buttons.\n4. Toggle which detectors you would like to display. Toggling checkboxes not only hides plotting, but *skips* running that detector to speed up processing. The only exceptions are the facebox and landmark detectors which are *always* run (only toggle plotting). \n5. Start the session by clicking the red `START` button.",
+        )
 
-    # Create WebRTC cam
-    ctx = webrtc_streamer(
-        key="sample",
-        mode=WebRtcMode.SENDONLY,
-        media_stream_constraints={
-            "video": {"width": WIDTH, "height": HEIGHT},
-            "audio": False,
-        },
-        async_processing=True,
-    )
-    # Each button is has two-way binding it's key kwarg in st.session_state.key
-    # st.session_state can then be used to read values within functions above to
-    # do selecting processing/rendering without complicated threads and queues
-    # Create button row
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.checkbox("Facebox", key="rects", value=True)
-    with col2:
-        st.checkbox("Landmarks", key="landmarks", value=True)
-    with col3:
-        st.checkbox("Emotions", key="emotions", value=False)
-    with col4:
-        st.checkbox("AUs", key="aus", value=False)
-    with col5:
-        st.checkbox("Poses", key="poses", value=False)
+    # Webcam container
+    with st.container(border=True):
+        # FPS counter
+        fps = st.empty()
 
-    # Create plot
-    plot = st.empty()
+        # Create WebRTC cam
+        ctx = webrtc_streamer(
+            key="sample",
+            mode=WebRtcMode.SENDONLY,
+            media_stream_constraints={
+                "video": {"width": WIDTH, "height": HEIGHT},
+                "audio": False,
+            },
+            async_processing=True,
+        )
+        # Each button is has two-way binding it's key kwarg in st.session_state.key
+        # st.session_state can then be used to read values within functions above to
+        # do selecting processing/rendering without complicated threads and queues
+        # Create button row
+        st.write("### SELECT DETECTORS")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.checkbox("Faceboxes", key="rects", value=True)
+        with col2:
+            st.checkbox("Landmarks", key="landmarks", value=True)
+        with col3:
+            st.checkbox("Emotions", key="emotions", value=False)
+        with col4:
+            st.checkbox("AUs", key="aus", value=False)
+        with col5:
+            st.checkbox("Poses", key="poses", value=False)
 
-    st.divider()
-
-    st.info(
-        "Toggling checkboxes not only hides plotting, but *skips* running that detector to speed up processing. The only exceptions are the facebox and landmark detectors which are *always* run (only toggle plotting). You can check changes in the FPS counter to see how much faster/slower py-feat runs when toggling different detector combinations.",
-        icon="💡",
-    )
+        # Create plot
+        plot = st.empty()
 
     # If webcam is playing process and render frames
     if ctx.video_receiver:
+        st.session_state.video_state = True
         # Initialize empty text and image area
-        fps.text(f"FPS: \nIFI:")
+        fps.text(f"FPS: ")
 
         # Continually get a frame, process it, and draw a plotly figure
         start = time.perf_counter()
@@ -270,8 +243,8 @@ def app():
 
                 # Run detector
                 fex, img = process_frame(detector, frame)
-                fex["frame"] = frame_counter
-                frame_counter += 1
+                fex["frame"] = st.session_state.frame_counter
+                st.session_state.frame_counter += 1
 
                 # Update FPS counter
                 now = time.perf_counter()
@@ -279,7 +252,7 @@ def app():
                 st.session_state.avg_fps += current_fps
                 st.session_state.avg_fps /= 2
 
-                fps.text(f"FPS: {1 / current_fps:.3f}\nIFI: {current_fps:.3f}ms")
+                fps.text(f"FPS: {1 / current_fps:.3f}")
                 start = now
 
                 # Make figure
@@ -289,10 +262,66 @@ def app():
                 # Update Save Frames
                 if st.session_state.save_session:
                     st.session_state.combined_frames.append(frame)
+                    print(st.session_state.combined_frames[-1])
                     st.session_state.combined_fex.append(fex)
-
             except queue.Empty:
                 break
+    else:
+        st.session_state.video_state = False
+
+        # Save Detections
+        with st.container(border=True):
+            st.write("### SAVE DETECTIONS")
+
+            save_col1, save_col2, save_col3 = st.columns(3)
+            with save_col1:
+                st.checkbox("Record Session", key="save_session", value=True)
+
+            if not st.session_state.save_session:
+                st.session_state.combined_fex = []
+                st.session_state.combined_frames = []
+                st.write("")
+
+            else:
+                # Check if there is fex data to download
+                with save_col2:
+                    if (
+                        st.session_state.combined_fex
+                        and not st.session_state.video_state
+                    ):
+                        # Only create the download button if there is data
+                        st.download_button(
+                            label="Download Fex",
+                            data=fex_to_csv(
+                                st.session_state.combined_fex,
+                                file_name=f"pyfeatlive_video_{st.session_state.start_time}.csv",
+                            ),
+                            file_name=f"pyfeatlive_fex_{st.session_state.start_time}.csv",
+                            mime="text/csv",
+                        )
+                    else:
+                        st.write("Fex unavailable")
+
+                with save_col3:
+                    if (
+                        st.session_state.combined_frames
+                        and not st.session_state.video_state
+                    ):
+                        st.download_button(
+                            label="Download Video",
+                            data=frames_to_video_in_memory(
+                                st.session_state.combined_frames,
+                                fps=int(safe_divide_fps(1, st.session_state.avg_fps)),
+                            ),
+                            file_name=f"pyfeatlive_video_{st.session_state.start_time}.mp4",
+                            mime="video/mp4",
+                        )
+                    else:
+                        st.write("Video unavailable")
+        # Footer
+        st.write(
+            "Copyright © 2024 | [Eshin Jolly](https://eshinjolly.com/)  &  [Luke Chang](https://cosanlab.com/) | [Dartmouth College](https://pbs.dartmouth.edu/) | Hanover, NH"
+        )
 
 
 if __name__ == "__main__":
