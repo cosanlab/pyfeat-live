@@ -3,18 +3,22 @@
 
 const path = require("path");
 const nodeExternals = require("webpack-node-externals");
+require('dotenv').config();
 
-const determineEnvironment = (env) => {
-    return env.production ? "production" : env.test ? "test" : "development";
+const determineEnvironment = () => {
+    // Use the environment variable
+    const env = process.env.nodeEnvironment;
+    return env === 'production' ? 'production' : env === 'test' ? 'test' : 'development';
 };
 
-const determineMode = (env) => {
-    return env.production ? "production" : "development";
+const determineMode = () => {
+    const env = process.env.nodeEnvironment;
+    return env === 'production' ? 'production' : 'development';
 };
 
-module.exports = (env) => ({
+module.exports = () => ({
     target: "electron-renderer",
-    mode: determineMode(env),
+    mode: determineMode(),
     node: {
         __dirname: false,
         __filename: false
@@ -22,7 +26,7 @@ module.exports = (env) => ({
     externals: [nodeExternals()],
     resolve: {
         alias: {
-            env: path.resolve(__dirname, `../config/env_${determineEnvironment(env)}.json`)
+            env: path.resolve(__dirname, `../config/env_${determineEnvironment()}.json`)
         },
         extensions: ['.js'],
     },
@@ -32,6 +36,5 @@ module.exports = (env) => ({
     devtool: "source-map",
     module: {
         rules: []
-        // Removed TypeScript loader
     },
 });

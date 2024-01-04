@@ -4,10 +4,15 @@
 
 const childProcess = require("child_process");
 const electron = require("electron");
+require('dotenv').config();
 const webpack = require("webpack");
 const config = require("./webpack.app.config");
 
-const compiler = webpack(config({ development: true }));
+// Check the value of the environment variable
+const isDevelopment = process.env.nodeEnvironment !== 'production';
+
+const compiler = webpack(config({ development: isDevelopment }));
+
 let electronStarted = false;
 
 compiler.watch({}, (err, stats) => {
