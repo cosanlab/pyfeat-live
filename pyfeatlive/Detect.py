@@ -18,6 +18,8 @@ import logging
 import pandas as pd
 import av
 from io import BytesIO
+from PIL import Image
+import os
 
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
@@ -129,6 +131,19 @@ def app():
 
     # Sidebar Detector and saving controls
     with st.sidebar:
+        img = Image.open(
+            os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..",
+                "static",
+                "pyfeat_logo_green_shadow.png",
+            )
+        )
+        st.image(
+            img,
+            channels="RGB",
+            use_column_width=True,
+        )
         st.write("### Saving detections")
         st.checkbox("Record Session", key="save_session", value=True)
 
@@ -195,9 +210,9 @@ def app():
         )
 
     # Header text and saving controls
-    st.write("# Py-feat Live Demo")
+    st.write("# Py-Feat Live")
     st.write(
-        "This is a demo app that uses py-feat to process your webcam frames in real-time!\nYou can optionally save detections and image frames to disk"
+        "This app uses py-feat to process your webcam frames in real-time. \n1. Choose your camera by clicking on `SELECT DEVICE`.\n2. Sessions can be recorded and downladed after the session is ended by toggling `Record Session`. \n3. Switch models with `Swap detectors` buttons.\n4. Toggle which detectors you would like to show. \n5. Start the session by clicking the red `START` button."
     )
 
     # FPS counter
