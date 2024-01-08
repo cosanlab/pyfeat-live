@@ -13,7 +13,6 @@ from feat import Detector
 import time
 import plotly.graph_objects as go
 from utils import process_frame, make_plotly_fig
-from pathlib import Path
 import logging
 import pandas as pd
 import av
@@ -24,8 +23,8 @@ webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
 
 # Video and plotting dimensions
-WIDTH, HEIGHT = 960, 540
-# WIDTH, HEIGHT = 640, 480
+# NOTE: doesn't seem to work reliably for some reason let's keep it small for now, when bigger width jumps around and causes a segmentation fault when downloading to video
+WIDTH, HEIGHT = 640, 360
 
 # Initialized detectors
 if "face_model" not in st.session_state:
@@ -46,6 +45,10 @@ if "combined_fex" not in st.session_state:
     st.session_state.combined_fex = []
 if "combined_frames" not in st.session_state:
     st.session_state.combined_frames = []
+if "frame_width" not in st.session_state:
+    st.session_state.frame_width = WIDTH
+if "frame_height" not in st.session_state:
+    st.session_state.frame_height = HEIGHT
 if "avg_fps" not in st.session_state:
     st.session_state.avg_fps = 0
 if "start_time" not in st.session_state:
@@ -89,13 +92,16 @@ def app():
         csv_string = fex_df.to_csv(index=False)
         return csv_string.encode("utf-8")
 
-    def safe_divide_fps(numerator, denominator, default_value=1):
-        try:
-            return numerator / denominator
-        except ZeroDivisionError:
-            return default_value
+    def safe_divide_fps(numerator, denominator, default_value=0.1):
+        return numerator / max([denominator, default_value])
 
-    def frames_to_video_in_memory(frames, fps=20, format="mp4"):
+    def frames_to_video_in_memory(
+        frames,
+        fps=20,
+        format="mp4",
+        bit_rate=1024000,
+        bit_rate_tolerance=4000000,
+    ):
         # Create an in-memory bytes buffer
         buffer = BytesIO()
 
@@ -107,6 +113,8 @@ def app():
         video_stream.width = frames[0].width
         video_stream.height = frames[0].height
         video_stream.pix_fmt = frames[0].format.name
+        video_stream.bit_rate = bit_rate
+        video_stream.bit_rate_tolerance = bit_rate_tolerance
 
         pts = frames[0].time_base.denominator
         for frame in frames:
@@ -129,10 +137,12 @@ def app():
     # Create initial plotly figure of correct dimensions
     figure = go.Figure()
     figure.update_layout(
-        width=WIDTH,
-        height=HEIGHT,
-        xaxis=dict(visible=False, range=[0, WIDTH]),
-        yaxis=dict(visible=False, range=[0, HEIGHT], scaleanchor="x"),
+        width=st.session_state.frame_width,
+        height=st.session_state.frame_height,
+        xaxis=dict(visible=False, range=[0, st.session_state.frame_width]),
+        yaxis=dict(
+            visible=False, range=[0, st.session_state.frame_height], scaleanchor="x"
+        ),
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
         showlegend=False,
     )
@@ -199,7 +209,10 @@ def app():
             key="sample",
             mode=WebRtcMode.SENDONLY,
             media_stream_constraints={
-                "video": {"width": WIDTH, "height": HEIGHT},
+                "video": {
+                    "width": st.session_state.frame_width,
+                    "height": st.session_state.frame_height,
+                },
                 "audio": False,
             },
             async_processing=True,
@@ -261,7 +274,6 @@ def app():
                 # Update Save Frames
                 if st.session_state.save_session:
                     st.session_state.combined_frames.append(frame)
-                    print(st.session_state.combined_frames[-1])
                     st.session_state.combined_fex.append(fex)
 
             except queue.Empty:
