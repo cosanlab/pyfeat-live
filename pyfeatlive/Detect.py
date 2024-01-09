@@ -18,6 +18,8 @@ import pandas as pd
 import av
 from io import BytesIO
 from PIL import Image
+import sys
+import os
 
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
@@ -149,7 +151,16 @@ def app():
 
     # Sidebar Detector Models
     with st.sidebar:
-        img = Image.open("pyfeat_logo_green_shadow.png")
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            # Running in a bundled state
+            base_path = sys._MEIPASS
+        else:
+            # Running in a normal development environment
+            base_path = os.path.dirname(__file__)
+
+        img_path = os.path.join(base_path, "pyfeat_logo_green_shadow.png")
+
+        img = Image.open(img_path)
         st.image(
             img,
             channels="RGB",
