@@ -1,6 +1,9 @@
 env/
+build/
 *.DS*
 py-feat/
 __pycache__/
 detections/
+recordings/
 *.csv
+.env
