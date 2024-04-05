@@ -20,6 +20,7 @@ from io import BytesIO
 from PIL import Image
 import sys
 import os
+import numpy as np
 
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
@@ -47,6 +48,8 @@ if "combined_fex" not in st.session_state:
     st.session_state.combined_fex = []
 if "combined_frames" not in st.session_state:
     st.session_state.combined_frames = []
+if "combined_figs" not in st.session_state:
+    st.session_state.combined_figs = []
 if "frame_width" not in st.session_state:
     st.session_state.frame_width = WIDTH
 if "frame_height" not in st.session_state:
@@ -102,12 +105,20 @@ def app():
         st.session_state.combined_frames = []
 
     def frames_to_video_in_memory(
-        frames,
         fps=20,
         format="mp4",
         bit_rate=1024000,
         bit_rate_tolerance=4000000,
     ):
+        # Get frame meta-data before converting to PIL images
+        frames = st.session_state.combined_frames
+
+        # Convert plotly Fig objects to PIL image frames
+        figs = [
+            Image.open(BytesIO(f.to_image(format="jpg")))
+            for f in st.session_state.combined_figs
+        ]
+
         # Create an in-memory bytes buffer
         buffer = BytesIO()
 
@@ -123,12 +134,15 @@ def app():
         video_stream.bit_rate_tolerance = bit_rate_tolerance
 
         pts = frames[0].time_base.denominator
-        for frame in frames:
+        for frame, fig in zip(frames, figs):
             frame.pts = pts
+            to_encode = av.VideoFrame.from_ndarray(np.array(fig), format='rgb24')
+            to_encode.pts = frame.pts
+            to_encode.time_base = frame.time_base
             pts += int(safe_divide_fps(1, fps) * frame.time_base.denominator)
 
             # Convert PyAV frame to a packet and write to the container
-            for packet in video_stream.encode(frame):
+            for packet in video_stream.encode(to_encode):
                 output.mux(packet)
 
         # Finalize and close the container
@@ -289,6 +303,7 @@ def app():
                 # Update Save Frames
                 if st.session_state.save_session:
                     st.session_state.combined_frames.append(frame)
+                    st.session_state.combined_figs.append(figure)
                     st.session_state.combined_fex.append(fex)
 
             except queue.Empty:
@@ -311,6 +326,7 @@ def app():
             if not st.session_state.save_session:
                 st.session_state.combined_fex = []
                 st.session_state.combined_frames = []
+                st.session_state.combined_figs = []
                 st.write("")
             else:
                 # Check if there is fex data to download
@@ -340,7 +356,6 @@ def app():
                         st.download_button(
                             label="Download Video",
                             data=frames_to_video_in_memory(
-                                st.session_state.combined_frames,
                                 fps=int(safe_divide_fps(1, st.session_state.avg_fps)),
                             ),
                             file_name=f"pyfeatlive_video_{st.session_state.start_time}.mp4",
@@ -348,9 +363,12 @@ def app():
                         )
                     else:
                         st.write("No video recorded")
-                
+
                 with save_col4:
-                    if st.session_state.combined_frames and not st.session_state.video_state:
+                    if (
+                        st.session_state.combined_frames
+                        and not st.session_state.video_state
+                    ):
                         st.button("Clear Recorded Data", on_click=clear_recorded_data)
     # Footer
     st.write(
