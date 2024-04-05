@@ -97,6 +97,10 @@ def app():
     def safe_divide_fps(numerator, denominator, default_value=0.1):
         return numerator / max([denominator, default_value])
 
+    def clear_recorded_data():
+        st.session_state.combined_fex = []
+        st.session_state.combined_frames = []
+
     def frames_to_video_in_memory(
         frames,
         fps=20,
@@ -289,6 +293,10 @@ def app():
 
             except queue.Empty:
                 break
+            except Exception as e:
+                st.session_state.video_state = False
+                print(e)
+                break
     else:
         st.session_state.video_state = False
 
@@ -296,7 +304,7 @@ def app():
         with st.container(border=True):
             st.write("### SAVE DETECTIONS")
 
-            save_col1, save_col2, save_col3 = st.columns(3)
+            save_col1, save_col2, save_col3, save_col4 = st.columns(4)
             with save_col1:
                 st.checkbox("Record Session", key="save_session", value=True)
 
@@ -322,7 +330,7 @@ def app():
                             mime="text/csv",
                         )
                     else:
-                        st.write("Fex unavailable")
+                        st.write("No detections recorded")
 
                 with save_col3:
                     if (
@@ -339,7 +347,11 @@ def app():
                             mime="video/mp4",
                         )
                     else:
-                        st.write("Video unavailable")
+                        st.write("No video recorded")
+                
+                with save_col4:
+                    if st.session_state.combined_frames and not st.session_state.video_state:
+                        st.button("Clear Recorded Data", on_click=clear_recorded_data)
     # Footer
     st.write(
         "Copyright © 2024 | [Eshin Jolly](https://eshinjolly.com/)  &  [Luke Chang](https://cosanlab.com/) | [Dartmouth College](https://pbs.dartmouth.edu/) | Hanover, NH"
