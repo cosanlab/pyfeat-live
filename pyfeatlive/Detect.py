@@ -56,7 +56,21 @@ if "avg_fps" not in st.session_state:
 if "start_time" not in st.session_state:
     st.session_state.start_time = time.strftime("%Y%m%d-%H%M%S")
 
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="Py-feat Live", layout="wide")
+st.markdown(
+    """
+    <style>
+        .reportview-container {
+            margin-top: -2em;
+        }
+        #MainMenu {visibility: hidden;}
+        .stDeployButton {display:none;}
+        footer {visibility: hidden;}
+        #stDecoration {display:none;}
+    </style>
+""",
+    unsafe_allow_html=True,
+)
 
 # %%
 
@@ -348,9 +362,12 @@ def app():
                         )
                     else:
                         st.write("No video recorded")
-                
+
                 with save_col4:
-                    if st.session_state.combined_frames and not st.session_state.video_state:
+                    if (
+                        st.session_state.combined_frames
+                        and not st.session_state.video_state
+                    ):
                         st.button("Clear Recorded Data", on_click=clear_recorded_data)
     # Footer
     st.write(

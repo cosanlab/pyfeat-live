@@ -1,4 +1,4 @@
-git+https://github.com/cosanlab/py-feat.git
+py-feat @ git+https://github.com/cosanlab/py-feat@main
 streamlit
 watchdog
 streamlit-webrtc

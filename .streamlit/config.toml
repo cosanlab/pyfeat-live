@@ -1,6 +1,15 @@
 [server]
-enableStaticServing = true
+enableStaticServing = false
 port = 8501
+fileWatcherType = "none"
+maxUploadSize = 1000
 
 [global]
+showWarningOnDirectExecution = false
 developmentMode = false
+
+[client]
+toolbarMode = "viewer"
+
+[theme]
+base = "light"

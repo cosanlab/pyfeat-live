@@ -8,3 +8,4 @@ recordings/
 *.csv
 .env
 environment.yml
+**.egg-info/
