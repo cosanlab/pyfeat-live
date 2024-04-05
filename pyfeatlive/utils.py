@@ -1460,11 +1460,11 @@ def make_plotly_fig(figure, fex, img):
         landmark_color="white",
         landmark_width=2,
         emotions_position="left",
-        emotions_opacity=0.9,
-        emotions_color="pink",
-        emotions_size=16,
-        au_heatmap_resolution=1000,
-        au_opacity=0.9,
+        emotions_opacity=1.0,
+        emotions_color="white",
+        emotions_size=22,
+        au_heatmap_resolution=150,
+        au_opacity=0.75,
         au_cmap="Blues",
     )
 
