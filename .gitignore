@@ -7,3 +7,4 @@ detections/
 recordings/
 *.csv
 .env
+environment.yml
