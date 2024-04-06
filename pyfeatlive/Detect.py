@@ -20,6 +20,7 @@ from io import BytesIO
 from PIL import Image
 import sys
 import os
+from zipfile import ZipFile
 
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
@@ -101,6 +102,25 @@ def app():
             au_model=st.session_state.au_model,
             emotion_model=st.session_state.emotion_model,
         )
+
+    def make_zip_file():
+
+        video_buffer = frames_to_video_in_memory(
+            st.session_state.combined_frames,
+            fps=int(safe_divide_fps(1, st.session_state.avg_fps)),
+        )
+
+        fex_data = fex_to_csv(
+            st.session_state.combined_fex,
+            file_name=f"pyfeatlive_video_{st.session_state.start_time}.csv",
+        )
+
+        buf = BytesIO()
+        with ZipFile(buf, "x") as z:
+            z.writestr("fex_data.csv", fex_data)
+            z.writestr("video.mp4", video_buffer.read())
+
+        return buf.getvalue()
 
     def fex_to_csv(fex_data, file_name=None):
         fex_df = pd.concat(fex_data, axis=0)
@@ -318,7 +338,7 @@ def app():
         with st.container(border=True):
             st.write("### SAVE DETECTIONS")
 
-            save_col1, save_col2, save_col3, save_col4 = st.columns(4)
+            save_col1, save_col2, save_col3 = st.columns(3)
             with save_col1:
                 st.checkbox("Record Session", key="save_session", value=True)
 
@@ -331,39 +351,20 @@ def app():
                 with save_col2:
                     if (
                         st.session_state.combined_fex
+                        and st.session_state.combined_frames
                         and not st.session_state.video_state
                     ):
                         # Only create the download button if there is data
                         st.download_button(
-                            label="Download Fex",
-                            data=fex_to_csv(
-                                st.session_state.combined_fex,
-                                file_name=f"pyfeatlive_video_{st.session_state.start_time}.csv",
-                            ),
-                            file_name=f"pyfeatlive_fex_{st.session_state.start_time}.csv",
-                            mime="text/csv",
+                            label="Download Detections",
+                            data=make_zip_file(),
+                            file_name=f"pyfeatlive_{st.session_state.start_time}.zip",
+                            mime="application/zip",
                         )
                     else:
                         st.write("No detections recorded")
 
                 with save_col3:
-                    if (
-                        st.session_state.combined_frames
-                        and not st.session_state.video_state
-                    ):
-                        st.download_button(
-                            label="Download Video",
-                            data=frames_to_video_in_memory(
-                                st.session_state.combined_frames,
-                                fps=int(safe_divide_fps(1, st.session_state.avg_fps)),
-                            ),
-                            file_name=f"pyfeatlive_video_{st.session_state.start_time}.mp4",
-                            mime="video/mp4",
-                        )
-                    else:
-                        st.write("No video recorded")
-
-                with save_col4:
                     if (
                         st.session_state.combined_frames
                         and not st.session_state.video_state
