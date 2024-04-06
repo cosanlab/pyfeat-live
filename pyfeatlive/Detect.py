@@ -105,26 +105,33 @@ def app():
 
     def make_zip_file():
 
+        video_filename = f"pyfeatlive_video_{st.session_state.start_time}.mp4"
+        csv_filename = f"pyfeatlive_fex_{st.session_state.start_time}.csv"
+
+        # Compile in-memory frames to video
         video_buffer = frames_to_video_in_memory(
             st.session_state.combined_frames,
             fps=int(safe_divide_fps(1, st.session_state.avg_fps)),
         )
 
+        # Create in-memory CSV file
         fex_data = fex_to_csv(
             st.session_state.combined_fex,
-            file_name=f"pyfeatlive_video_{st.session_state.start_time}.csv",
+            video_file_name=video_filename,
         )
 
+        # Create in-memory zip file buffer
         buf = BytesIO()
         with ZipFile(buf, "x") as z:
-            z.writestr("fex_data.csv", fex_data)
-            z.writestr("video.mp4", video_buffer.read())
+            z.writestr(csv_filename, fex_data)
+            z.writestr(video_filename, video_buffer.read())
 
+        # Return contents of buffer for download
         return buf.getvalue()
 
-    def fex_to_csv(fex_data, file_name=None):
+    def fex_to_csv(fex_data, video_file_name=None):
         fex_df = pd.concat(fex_data, axis=0)
-        fex_df["input"] = file_name
+        fex_df["input"] = video_file_name
         csv_string = fex_df.to_csv(index=False)
         return csv_string.encode("utf-8")
 
@@ -148,8 +155,8 @@ def app():
         # Open an output container in memory, specifying the format (e.g., 'mp4')
         output = av.open(buffer, "w", format=format)
 
-        # Add a video stream to the container
-        video_stream = output.add_stream("mpeg4", rate=fps)
+        # Add a video stream to the container using avg fps of capture
+        video_stream = output.add_stream("mpeg4", rate=int(st.session_state.avg_fps))
         video_stream.width = frames[0].width
         video_stream.height = frames[0].height
         video_stream.pix_fmt = frames[0].format.name
@@ -162,8 +169,13 @@ def app():
             pts += int(safe_divide_fps(1, fps) * frame.time_base.denominator)
 
             # Convert PyAV frame to a packet and write to the container
-            for packet in video_stream.encode(frame):
-                output.mux(packet)
+            # Sometimes this throws a PermissionError, but that doesn't seem to affect the final video, so we just continue
+            try:
+                packets = video_stream.encode(frame)
+                for packet in packets:
+                    output.mux(packet)
+            except PermissionError:
+                continue
 
         # Finalize and close the container
         for packet in video_stream.encode():
@@ -189,13 +201,8 @@ def app():
 
     # Sidebar Detector Models
     with st.sidebar:
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            # Running in a bundled state
-            base_path = sys._MEIPASS
-        else:
-            # Running in a normal development environment
-            base_path = os.path.dirname(__file__)
-
+        # Running in a normal development environment
+        base_path = os.path.dirname(__file__)
         img_path = os.path.join(base_path, "pyfeat_logo_green_shadow.png")
 
         img = Image.open(img_path)
@@ -277,11 +284,11 @@ def app():
         with col2:
             st.checkbox("Landmarks", key="landmarks", value=True)
         with col3:
-            st.checkbox("Emotions", key="emotions", value=False)
+            st.checkbox("Poses", key="poses", value=False)
         with col4:
             st.checkbox("AUs", key="aus", value=False)
         with col5:
-            st.checkbox("Poses", key="poses", value=False)
+            st.checkbox("Emotions", key="emotions", value=False)
 
         # Create plot
         plot = st.empty()
