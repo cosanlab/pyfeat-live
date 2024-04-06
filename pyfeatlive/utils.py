@@ -1348,7 +1348,9 @@ def _create_detector_elements(
 
             emotion_text = ""
             for emotion in emotion_dict:
-                emotion_text += f"{emotion}: <i>{emotion_dict[emotion]:.2f}</i><br>"
+                emotion_text += (
+                    f"{emotion.capitalize()}: <i>{emotion_dict[emotion]:.2f}</i><br>"
+                )
 
             emotions_annotations.append(
                 dict(
@@ -1359,6 +1361,7 @@ def _create_detector_elements(
                     showarrow=False,
                     align=align,
                     valign=valign,
+                    bgcolor="black",
                     font=dict(color=emotions_color, size=emotions_size),
                 )
             )
@@ -1462,7 +1465,7 @@ def make_plotly_fig(figure, fex, img):
         emotions_position="left",
         emotions_opacity=1.0,
         emotions_color="white",
-        emotions_size=22,
+        emotions_size=20,
         au_heatmap_resolution=150,
         au_opacity=0.75,
         au_cmap="Blues",
