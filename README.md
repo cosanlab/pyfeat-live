@@ -18,6 +18,8 @@ This is a standalone demo of using [py-feat](https://py-feat.org/) to analyze we
 
 ## Development Details
 
+Rather than use a more complicated installation process (see [the packaging branch](https://github.com/cosanlab/pyfeat-live/tree/packaging-backup)) to build platform independent executables, this is a simple CLI wrapper to launch a streamlit GUI using the `pyfeat-live` terminal command, similar to how `fsleyes` launches a GUI for `fsl`.
+
 One thing to note is that if you only use a barebones py-feat install, the app will need to download all of the py-feat models. So the first time the app boots up it will take a minute or two to load. If you want to speed things up you can install `pyfeat-live` into the same environment as `py-feat` and the models will be preloaded.
 
 ## Setup
