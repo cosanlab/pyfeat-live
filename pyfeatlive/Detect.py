@@ -57,21 +57,6 @@ if "avg_fps" not in st.session_state:
 if "start_time" not in st.session_state:
     st.session_state.start_time = time.strftime("%Y%m%d-%H%M%S")
 
-st.set_page_config(page_title="Py-feat Live", layout="wide")
-st.markdown(
-    """
-    <style>
-        .reportview-container {
-            margin-top: -2em;
-        }
-        #MainMenu {visibility: hidden;}
-        .stDeployButton {display:none;}
-        footer {visibility: hidden;}
-        #stDecoration {display:none;}
-    </style>
-""",
-    unsafe_allow_html=True,
-)
 
 # %%
 
@@ -206,19 +191,6 @@ def app():
 
     # Sidebar Detector Models
     with st.sidebar:
-        # Running in a normal development environment
-        base_path = os.path.dirname(__file__)
-        img_path = os.path.join(base_path, "pyfeat_logo_green_shadow.png")
-
-        img = Image.open(img_path)
-        st.image(
-            img,
-            channels="RGB",
-            use_column_width=True,
-        )
-
-        st.divider()
-
         st.write("### SWAP MODELS")
         st.radio(
             "Face Detector",
@@ -251,13 +223,10 @@ def app():
             on_change=reload_detector,
         )
 
-    # Main Window
-    st.write("# Py-Feat Live")
-
     # Instructions
-    with st.expander(label="OVERVIEW", expanded=False):
+    with st.expander(label="Usage Guide", expanded=False):
         st.write(
-            "This app uses [py-feat](https://py-feat.org/) to automatically detect facial expression features in real-time from a webcam. \n1. Choose your camera by clicking on `SELECT DEVICE`.\n2. Sessions can be recorded and downloaded after the session is ended by toggling `Record Session`. \n3. Switch models with `SWAP MODELS` buttons.\n4. Toggle which detectors you would like to display. Toggling checkboxes not only hides plotting, but *skips* running that detector to speed up processing. The only exceptions are the facebox and landmark detectors which are *always* run (only toggle plotting). \n5. Start the session by clicking the red `START` button.",
+            "Automatically detect facial expression from your live camera feed. \n1. Choose your device by clicking on `SELECT DEVICE`\n2. Toggle checkboxes to enable or disable specific detectors (speeds up processing)\n3. Video recording and detections are saved by default and can be downloaded or cleared using the buttons below",
         )
 
     # Webcam container
@@ -383,10 +352,11 @@ def app():
                     ):
                         st.button("Clear Recorded Data", on_click=clear_recorded_data)
     # Footer
-    st.write(
-        "Copyright © 2024 | [Eshin Jolly](https://eshinjolly.com/)  &  [Luke Chang](https://cosanlab.com/) | [Dartmouth College](https://pbs.dartmouth.edu/) | Hanover, NH"
-    )
+    # st.write(
+    #     "Copyright © 2024 | [Eshin Jolly](https://eshinjolly.com/)  &  [Luke Chang](https://cosanlab.com/) | [Dartmouth College](https://pbs.dartmouth.edu/) | Hanover, NH"
+    # )
 
 
-if __name__ == "__main__":
-    app()
+app()
+# if __name__ == "__main__":
+#     app()

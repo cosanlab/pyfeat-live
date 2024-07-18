@@ -11,7 +11,7 @@ setup(
     package_data={"pyfeatlive": ["*.png"]},
     entry_points={
         "console_scripts": [
-            "pyfeat-live=pyfeatlive.Detect_entry_point:main",
+            "pyfeat-live=pyfeatlive.entry_point:main",
         ],
     },
 )

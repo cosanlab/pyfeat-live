@@ -3,6 +3,8 @@ from feat.utils.io import read_feat
 from pathlib import Path
 import pandas as pd
 
+# st.set_page_config()
+
 img_folder = Path("./static/detections")
 fex_file = Path("./static/detections.csv")
 
@@ -102,6 +104,13 @@ def handle_file_upload(upload_data):
     st.session_state.show_select_container = False
 
 
+# TODO:
+def handle_video_upload(upload_data):
+    # st.session_state.upload_data = read_feat(upload_data)
+    st.session_state.show_select_container = False
+    pass
+
+
 def handle_use_live():
     st.session_state.live_data = True
     st.session_state.show_select_container = False
@@ -118,11 +127,14 @@ def handle_reset():
 # File select container
 if st.session_state.show_select_container:
     st.write(
-        "Drag and drop an existing image or video file to run analysis with Py-Feat. Adjust the options below to change how detections are performed"
+        "Drag and drop an existing CSV file of detections and optionally the original video they came from, to interactively explore."
     )
-    upload_data = st.file_uploader("Choose an image or video file")
-    if upload_data is not None:
-        st.button("Upload", on_click=handle_file_upload, args=[upload_data])
+    upload_fex = st.file_uploader("Choose a csv file")
+    upload_vid = st.file_uploader("(Optional) Choose video file")
+    if upload_fex is not None:
+        st.button("Upload", on_click=handle_file_upload, args=[upload_fex])
+    if upload_vid is not None:
+        st.button("Upload", on_click=handle_video_upload, args=[upload_vid])
     else:
         if fex_file.exists():
             st.button("Use live detections", on_click=handle_use_live)
