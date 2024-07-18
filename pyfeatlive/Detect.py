@@ -76,9 +76,12 @@ st.markdown(
 # %%
 
 
-@st.cache_resource
+@st.cache_resource(
+    show_spinner="Loading models...these may take a few minutes to download in the background if it's your first time launching pyfeat-live"
+)
 def load_detector():
     """Load detector once on app boot"""
+
     return Detector(
         face_model=st.session_state.face_model,
         landmark_model=st.session_state.landmark_model,
@@ -90,6 +93,7 @@ def load_detector():
 
 # %% MAIN UI CODE
 def app():
+
     # Load detectors
     detector = load_detector()
 
