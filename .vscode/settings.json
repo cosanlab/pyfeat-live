@@ -1,7 +1,8 @@
 {
-"[python]": {
-  "editor.defaultFormatter": "ms-python.black-formatter",
-  "editor.formatOnSave": true
-},
-"python.defaultInterpreterPath": "${workspaceFolder}/env/bin/python"
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "editor.formatOnSave": true
+  },
+  "python.defaultInterpreterPath": "${workspaceFolder}/env/bin/python",
+  "black-formatter.path": ["${workspaceFolder}/env/bin/black"],
 }

@@ -1,0 +1,5 @@
+-r requirements.txt
+watchdog
+seaborn
+snakeviz
+black==24.4.2
