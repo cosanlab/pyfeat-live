@@ -107,6 +107,7 @@ def app():
             emotion_model=st.session_state.emotion_model,
         )
 
+    # TODO: this should be a background job that intermittently saves and then RAM so we don't run out of memory
     def make_zip_file():
 
         video_filename = f"pyfeatlive_video_{st.session_state.start_time}.mp4"
