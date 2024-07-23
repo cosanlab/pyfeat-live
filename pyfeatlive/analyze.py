@@ -3,6 +3,7 @@ from feat.utils.io import read_feat
 from pathlib import Path
 import pandas as pd
 from utils import process_video
+from tempfile import NamedTemporaryFile
 
 ACCEPTED_VIDEOS = [".mp4", ".mov"]
 ACCEPTED_IMAGES = [".jpg", ".jpeg", ".png"]
@@ -15,6 +16,10 @@ if "show_select_container" not in st.session_state:
     st.session_state.show_select_container = True
 if "show_analyze_ui" not in st.session_state:
     st.session_state.show_analyze_ui = False
+# File for input widget
+if "upload_file" not in st.session_state:
+    st.session_state.upload_file = None
+# After calling .read() on file
 if "upload_data" not in st.session_state:
     st.session_state.upload_data = None
 if "upload_filetype" not in st.session_state:
@@ -29,6 +34,7 @@ def handle_file_upload(upload_data):
         st.session_state.upload_filetype = "image"
 
     # Read in data
+    st.session_state.upload_file = upload_data
     st.session_state.upload_data = upload_data.read()
 
     # Set UI
@@ -142,12 +148,17 @@ if st.session_state.show_analyze_ui:
                 value=False,
                 help="If True, the data loader will copy Tensors into CUDA pinned memory before returning them. If your data elements are a custom type, or your collate_fn returns a batch that is a custom type",
             )
-        if run_detection:
 
-            # Get shared detector
-            detector = None
-            kwargs = dict()
-            output = process_video(detector, st.session_state.upload_data, **kwargs)
+        if run_detection:
+            output = None
+            while output is None:
+                # Create a temporary filepath to pass to py-feat
+                with NamedTemporaryFile(suffix=".mp4") as temp:
+                    temp.write(st.session_state.upload_file.getvalue())
+                    temp.seek(0)
+                    output = st.session_state.detector.detect_video(temp.name)
+                # fex -> pandas
+            st.dataframe(output)
 
     # Video
 

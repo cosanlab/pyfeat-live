@@ -7,6 +7,34 @@ from feat.data import _inverse_face_transform, _inverse_landmark_transform
 import torch
 import plotly.graph_objects as go
 import seaborn as sns
+from feat import Detector
+
+
+# Helper function
+@st.cache_resource(
+    show_spinner="Loading models...these may take a few minutes to download in the background if it's your first time launching pyfeat-live"
+)
+def load_detector():
+    """Load detector once on app boot"""
+
+    return Detector(
+        face_model=st.session_state.face_model,
+        landmark_model=st.session_state.landmark_model,
+        facepose_model=st.session_state.facepose_model,
+        au_model=st.session_state.au_model,
+        emotion_model=st.session_state.emotion_model,
+    )
+
+
+def reload_detector():
+    st.session_state.detector.change_model(
+        face_model=st.session_state.face_model,
+        landmark_model=st.session_state.landmark_model,
+        facepose_model=st.session_state.facepose_model,
+        au_model=st.session_state.au_model,
+        emotion_model=st.session_state.emotion_model,
+    )
+    st.toast("**Detector swap complete!**", icon="✅")
 
 
 def run_pyfeat_detection(
@@ -200,6 +228,10 @@ def process_frame(detector, frame):
     # data_queue.put(fex)
     # img_queue.put(img)
     return fex, img
+
+
+def process_video(detector, video, **kwargs):
+    return detector.detect_video(video, **kwargs)
 
 
 def flatten_list(data):
