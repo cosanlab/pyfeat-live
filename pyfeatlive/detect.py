@@ -146,7 +146,8 @@ def app():
         output = av.open(buffer, "w", format=format)
 
         # Add a video stream to the container using avg fps of capture
-        video_stream = output.add_stream("mpeg4", rate=int(st.session_state.avg_fps))
+        # video_stream = output.add_stream("mpeg4", rate=int(st.session_state.avg_fps))
+        video_stream = output.add_stream("h264", rate=int(st.session_state.avg_fps))
         video_stream.width = frames[0].width
         video_stream.height = frames[0].height
         video_stream.pix_fmt = frames[0].format.name
