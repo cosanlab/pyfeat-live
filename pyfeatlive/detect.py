@@ -255,15 +255,15 @@ def app():
         st.write("### SELECT DETECTORS")
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
-            st.checkbox("Faceboxes", key="rects", value=True)
+            st.toggle("Faceboxes", key="rects", value=True)
         with col2:
-            st.checkbox("Landmarks", key="landmarks", value=True)
+            st.toggle("Landmarks", key="landmarks", value=True)
         with col3:
-            st.checkbox("Poses", key="poses", value=False)
+            st.toggle("Poses", key="poses", value=False)
         with col4:
-            st.checkbox("AUs", key="aus", value=False)
+            st.toggle("AUs", key="aus", value=False)
         with col5:
-            st.checkbox("Emotions", key="emotions", value=False)
+            st.toggle("Emotions", key="emotions", value=False)
 
         # Create plot
         plot = st.empty()
