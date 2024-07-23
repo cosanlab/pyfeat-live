@@ -1,4 +1,6 @@
 py-feat @ git+https://github.com/cosanlab/py-feat@main
 streamlit
+watchdog
+# pytables
 streamlit-webrtc
 plotly
