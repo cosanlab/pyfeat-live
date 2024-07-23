@@ -16,19 +16,34 @@ This is a standalone demo of using [py-feat](https://py-feat.org/) to analyze we
 4. Select which detectors you would like to run with the checkboxes. More detectors adds processing time and will slow the framerate. This can be changed on the fly.
 5. Start the session by clicking the red `START` button.
 
-## Development Details
+## App Structure
 
-Rather than use a more complicated installation process (see [the packaging branch](https://github.com/cosanlab/pyfeat-live/tree/packaging-backup)) to build platform independent executables, this is a simple CLI wrapper to launch a streamlit GUI using the `pyfeat-live` terminal command, similar to how `fsleyes` launches a GUI for `fsl`.
+In `setup.py` we define an `entry_point` that allows us to a define a console command "`pyfeat-live`" that the user can run in their terminal after they pip install the package. This mechanism gives us functionality similar to other CLI programs e.g. `fsleyes`. In other words, there is no need for the user to open a python interpreter or jupyter notebook and import anything. Once installed, the package is effectively a CLI app. 
 
-One thing to note is that if you only use a barebones py-feat install, the app will need to download all of the py-feat models. So the first time the app boots up it will take a minute or two to load. If you want to speed things up you can install `pyfeat-live` into the same environment as `py-feat` and the models will be preloaded.
+The `pyfeat-live` command essentially runs `python entry_point.py` which executes the `main()` function within `entry_point.py`. This function wraps `streamlit run app.py` and allows us to immediately open a browser tab and start the streamlit app when the user types `pyfeat-live` at their terminal. 
 
-## Setup
+## Pages and routing
+
+`app.py` is setup as a [multi-page streamlit app](https://docs.streamlit.io/develop/concepts/multipage-apps). This allows us some "templating" like functionality, whereby we can share UI across pages by putting it within this file (e.g. footer). We also define a page-router within this file that streamlit will setup for us, providing a more consistent user-experience. 
+
+Currently we have the following routes/pages:
+- "live page" -> `detect.py` that also currently acts as the homepage
+- "analyze page" -> `analyze.py` for a user to upload files to analyze and work with `py-feat` interactively
+- "view page" -> `view.py` for the user to interactively explore detections a la `fslview`/`fsleyes`
+
+## Data download
+
+Until upstream `py-feat` <-> `huggingface` data storage and download integration is complete, each fresh environment install of `pyfeat-live` requires a fresh install of model weights. This will take a few minutes on first launch depending on internet speed.
+You can avoid this by install `pyfeat-live` into an existing python environment that has a working install of `py-feat`. 
+
+### Development Setup
 
 To run the barebones streamlit app for development, clone this repository then:
 
 1. Create a new `conda` or `venv`
 2. `pip install -r requirements.txt`
-3. `streamlit run pyfeatlive/Detect.py`
+3. `pip install -e .`
+3. `pyfeat-live`
 4. Go to ` http://localhost:8501` in your browser
 
 If you run into installation issues with py-feat see [this issue](https://github.com/cosanlab/py-feat/issues/186)
