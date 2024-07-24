@@ -11,9 +11,8 @@ import streamlit as st
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
 import time
 import plotly.graph_objects as go
-from utils import process_frame, make_plotly_fig
+from utils import process_frame, make_plotly_fig, fex_to_csv, safe_divide_fps
 import logging
-import pandas as pd
 import av
 from io import BytesIO
 from zipfile import ZipFile
@@ -47,10 +46,6 @@ if "start_time" not in st.session_state:
 def clear_recorded_data():
     st.session_state.combined_fex = []
     st.session_state.combined_frames = []
-
-
-def safe_divide_fps(numerator, denominator, default_value=0.1):
-    return numerator / max([denominator, default_value])
 
 
 def frames_to_video_in_memory(
@@ -124,13 +119,6 @@ def make_zip_file():
 
     # Return contents of buffer for download
     return buf.getvalue()
-
-
-def fex_to_csv(fex_data, video_file_name=None):
-    fex_df = pd.concat(fex_data, axis=0)
-    fex_df["input"] = video_file_name
-    csv_string = fex_df.to_csv(index=False)
-    return csv_string.encode("utf-8")
 
 
 # Create initial plotly figure of correct dimensions

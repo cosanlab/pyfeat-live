@@ -10,6 +10,17 @@ import seaborn as sns
 from feat import Detector
 
 
+def safe_divide_fps(numerator, denominator, default_value=0.1):
+    return numerator / max([denominator, default_value])
+
+
+def fex_to_csv(fex_data, video_file_name=None, concat=True):
+    if concat:
+        fex_data = pd.concat(fex_data, axis=0)
+    fex_data["input"] = video_file_name
+    return fex_data.to_csv(index=False).encode("utf-8")
+
+
 # Helper function
 @st.cache_resource(
     show_spinner="Loading models...these may take a few minutes to download in the background if it's your first time launching pyfeat-live"
