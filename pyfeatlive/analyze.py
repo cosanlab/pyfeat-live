@@ -89,23 +89,10 @@ if st.session_state.analyze__upload_file_type == "video":
 
 # TODO: image gallery or single image viewer
 elif st.session_state.analyze__upload_file_type == "image":
-    st.image(st.session_state.upload_data)
+    st.image(st.session_state.analyze__upload_data)
 
 # OPTIONS UI
 if st.session_state.analyze__ui_state == "options":
-
-    # Image
-
-    ## Main options
-    # face_detection_threshold = 0.5
-    # face_identity_threshold = 0.8
-    # batch_size = 1
-
-    # TODO: share across video/image by creating st.tab ahead of time?
-    ## Advanced options
-    # output_size = 700
-    # num_workers = 0
-    # pin_memory = False
 
     # OPTIONS UI
     st.write("## Detector Options")
@@ -187,27 +174,52 @@ if st.session_state.analyze__ui_state == "options":
 # PROCESSING UI
 if st.session_state.analyze__ui_state == "processing":
     with st.spinner("**Processing**"):
-        # Create a temporary filepath to pass to py-feat
-        with NamedTemporaryFile(suffix=".mp4") as temp:
-            temp.write(st.session_state.analyze__upload_file.getvalue())
-            temp.seek(0)
-            output = st.session_state.detector.detect_video(
-                temp.name,
-                face_detection_threshold=st.session_state.analyze__face_detection_threshold,
-                face_identity_threshold=st.session_state.analyze__face_identity_threshold,
-                batch_size=st.session_state.analyze__batch_size,
-                skip_frames=st.session_state.analyze__skip_frames,
-                output_size=st.session_state.analyze__output_size,
-                num_workers=st.session_state.analyze__num_workers,
-                pin_memory=st.session_state.analyze__pin_memory,
-            )
 
-        # Prepare file
-        fname = st.session_state.analyze__upload_file.name.split(".")[0]
-        st.session_state.analyze__output = fex_to_csv(
-            output, video_file_name=fname, concat=False
-        )
-        st.session_state.analyze__output_file_name = f"pyfeatlive_fex_{fname}_.csv"
+        if st.session_state.analyze__upload_file_type == "video":
+            # Create a temporary filepath to pass to py-feat
+            with NamedTemporaryFile(suffix=".mp4") as temp:
+                temp.write(st.session_state.analyze__upload_file.getvalue())
+                temp.seek(0)
+                output = st.session_state.detector.detect_video(
+                    temp.name,
+                    face_detection_threshold=st.session_state.analyze__face_detection_threshold,
+                    face_identity_threshold=st.session_state.analyze__face_identity_threshold,
+                    batch_size=st.session_state.analyze__batch_size,
+                    skip_frames=st.session_state.analyze__skip_frames,
+                    output_size=st.session_state.analyze__output_size,
+                    num_workers=st.session_state.analyze__num_workers,
+                    pin_memory=st.session_state.analyze__pin_memory,
+                )
+
+            # Prepare file
+            fname = st.session_state.analyze__upload_file.name.split(".")[0]
+            st.session_state.analyze__output = fex_to_csv(
+                output, video_file_name=fname, concat=False
+            )
+            st.session_state.analyze__output_file_name = f"pyfeatlive_fex_{fname}_.csv"
+
+        elif st.session_state.analyze__upload_file_type == "image":
+
+            # Create a temporary filepath to pass to py-feat
+            with NamedTemporaryFile(suffix=".jpg") as temp:
+                temp.write(st.session_state.analyze__upload_file.getvalue())
+                temp.seek(0)
+                output = st.session_state.detector.detect_image(
+                    temp.name,
+                    face_detection_threshold=st.session_state.analyze__face_detection_threshold,
+                    face_identity_threshold=st.session_state.analyze__face_identity_threshold,
+                    batch_size=st.session_state.analyze__batch_size,
+                    output_size=st.session_state.analyze__output_size,
+                    num_workers=st.session_state.analyze__num_workers,
+                    pin_memory=st.session_state.analyze__pin_memory,
+                )
+
+            # Prepare file
+            fname = st.session_state.analyze__upload_file.name.split(".")[0]
+            st.session_state.analyze__output = fex_to_csv(
+                output, video_file_name=fname, concat=False
+            )
+            st.session_state.analyze__output_file_name = f"pyfeatlive_fex_{fname}_.csv"
 
         # Update state
         update_state("analyze", "ui_state", "results")
