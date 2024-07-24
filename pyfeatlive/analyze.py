@@ -50,6 +50,7 @@ def handle_file_upload(upload_data):
         st.session_state.analyze__upload_data = upload_data.read()
     else:
         st.session_state.analyze__upload_file_type = "imagelist"
+        st.session_state.analyze__upload_file = upload_data
         st.session_state.analyze__upload_data_file_name = [e.name for e in upload_data]
         st.session_state.analyze__upload_data = [e.read() for e in upload_data]
 
@@ -122,8 +123,8 @@ elif st.session_state.analyze__upload_file_type == "image":
     st.image(st.session_state.analyze__upload_data)
 
 elif st.session_state.analyze__upload_file_type == "imagelist":
-
     with st.container(border=True):
+        # Center image in container
         l, c, r = st.columns(3)
         with c:
             st.image(
@@ -131,6 +132,8 @@ elif st.session_state.analyze__upload_file_type == "imagelist":
                     st.session_state.analyze__upload_imagelist_idx
                 ],
             )
+
+        # Gallery controls
         left, center, right = st.columns(3)
         with left:
             st.button(
@@ -274,6 +277,35 @@ if st.session_state.analyze__ui_state == "processing":
                 output, video_file_name=fname, concat=False
             )
             st.session_state.analyze__output_file_name = f"pyfeatlive_fex_{fname}_.csv"
+
+        elif st.session_state.analyze__upload_file_type == "imagelist":
+
+            # Create a temporary filepath to pass to py-feat
+            temp_list = []
+            temp_name_list = []
+            for f in st.session_state.analyze__upload_file:
+                temp = NamedTemporaryFile(suffix=".jpg")
+                temp.write(f.getvalue())
+                temp.seek(0)
+                temp_list.append(temp)
+                temp_name_list.append(temp.name)
+
+            output = st.session_state.detector.detect_image(
+                temp_name_list,
+                face_detection_threshold=st.session_state.analyze__face_detection_threshold,
+                face_identity_threshold=st.session_state.analyze__face_identity_threshold,
+                batch_size=st.session_state.analyze__batch_size,
+                output_size=st.session_state.analyze__output_size,
+                num_workers=st.session_state.analyze__num_workers,
+                pin_memory=st.session_state.analyze__pin_memory,
+            )
+
+            # Prepare file
+            st.session_state.analyze__output = output.to_csv(index=False).encode(
+                "utf-8"
+            )
+            # TODO: how to handle file name with image list?
+            st.session_state.analyze__output_file_name = f"pyfeatlive_fex.csv"
 
         # Update state
         update_state("analyze", "ui_state", "results")
