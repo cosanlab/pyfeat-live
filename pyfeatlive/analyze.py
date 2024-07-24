@@ -21,6 +21,10 @@ if "analyze__upload_file_name" not in st.session_state:
     st.session_state.analyze__upload_file_name = None
 if "analyze__upload_file_type" not in st.session_state:
     st.session_state.analyze__upload_file_type = None
+
+# For image gallery
+if "analyze__upload_imagelist_idx" not in st.session_state:
+    st.session_state.analyze__upload_imagelist_idx = 0
 # After calling .read() on file
 if "analyze__upload_data" not in st.session_state:
     st.session_state.analyze__upload_data = None
@@ -32,16 +36,22 @@ if "analyze_output_file_name" not in st.session_state:
 
 
 def handle_file_upload(upload_data):
-    if any(upload_data.name.endswith(suffix) for suffix in ACCEPTED_VIDEOS):
-        st.session_state.analyze__upload_file_type = "video"
+    if len(upload_data) == 1:
+        upload_data = upload_data[0]
+        if any(upload_data.name.endswith(suffix) for suffix in ACCEPTED_VIDEOS):
+            st.session_state.analyze__upload_file_type = "video"
 
-    if any(upload_data.name.endswith(suffix) for suffix in ACCEPTED_IMAGES):
-        st.session_state.analyze__upload_file_type = "image"
+        if any(upload_data.name.endswith(suffix) for suffix in ACCEPTED_IMAGES):
+            st.session_state.analyze__upload_file_type = "image"
 
-    # Read in data
-    st.session_state.analyze__upload_file = upload_data
-    st.session_state.analyze__upload_file_Name = upload_data.name
-    st.session_state.analyze__upload_data = upload_data.read()
+        # Read in data
+        st.session_state.analyze__upload_file = upload_data
+        st.session_state.analyze__upload_file_name = upload_data.name
+        st.session_state.analyze__upload_data = upload_data.read()
+    else:
+        st.session_state.analyze__upload_file_type = "imagelist"
+        st.session_state.analyze__upload_data_file_name = [e.name for e in upload_data]
+        st.session_state.analyze__upload_data = [e.read() for e in upload_data]
 
     # Set UI
     update_state("analyze", "ui_state", "options")
@@ -69,6 +79,22 @@ def reset():
         update_state("analyze", k, v)
 
 
+def update_idx(how):
+    if how == "increment":
+        new_idx = st.session_state.analyze__upload_imagelist_idx + 1
+        # Wrap-around
+        if new_idx == len(st.session_state.analyze__upload_data):
+            new_idx = 0
+        # new_idx = min(new_idx, len(st.session_state.analyze__upload_data) - 1)
+    if how == "decrement":
+        new_idx = st.session_state.analyze__upload_imagelist_idx - 1
+        # Wrap around
+        if new_idx == -1:
+            new_idx = len(st.session_state.analyze__upload_data) - 1
+        # new_idx = max(new_idx, 0)
+    st.session_state.analyze__upload_imagelist_idx = new_idx
+
+
 # %%
 
 # FILE SELECT UI
@@ -76,20 +102,48 @@ if st.session_state.analyze__ui_state == "select":
     st.write(
         "Drag and drop an existing image or video file to run analysis with Py-Feat. Adjust the options below to change how detections are performed"
     )
-    upload_data = st.file_uploader("Choose an image or video file", type=ACCEPTED_FILES)
-    if upload_data is not None:
+    upload_data = st.file_uploader(
+        "Choose an image or video file", type=ACCEPTED_FILES, accept_multiple_files=True
+    )
+    if upload_data is not None and len(upload_data) > 0:
         # Load file and change UI state
         st.button(
-            "Load file", on_click=handle_file_upload, args=[upload_data], type="primary"
+            "Load file(s)",
+            on_click=handle_file_upload,
+            args=[upload_data],
+            type="primary",
         )
 
 # UPLOADED FILE VIEWER - UI state independent as long as we have upload_data
 if st.session_state.analyze__upload_file_type == "video":
     st.video(st.session_state.analyze__upload_data)
 
-# TODO: image gallery or single image viewer
 elif st.session_state.analyze__upload_file_type == "image":
     st.image(st.session_state.analyze__upload_data)
+
+elif st.session_state.analyze__upload_file_type == "imagelist":
+
+    with st.container(border=True):
+        l, c, r = st.columns(3)
+        with c:
+            st.image(
+                st.session_state.analyze__upload_data[
+                    st.session_state.analyze__upload_imagelist_idx
+                ],
+            )
+        left, center, right = st.columns(3)
+        with left:
+            st.button(
+                "⏪", on_click=update_idx, args=["decrement"], use_container_width=True
+            )
+        with center:
+            st.write(
+                f"**File:** {st.session_state.analyze__upload_data_file_name[st.session_state.analyze__upload_imagelist_idx]}",
+            )
+        with right:
+            st.button(
+                "⏩", on_click=update_idx, args=["increment"], use_container_width=True
+            )
 
 # OPTIONS UI
 if st.session_state.analyze__ui_state == "options":
@@ -101,13 +155,13 @@ if st.session_state.analyze__ui_state == "options":
     b1, b2 = st.columns(2)
     with b1:
         st.button(
-            "Process File",
+            "Process File(s)",
             type="primary",
             on_click=update_state,
             args=["analyze", "ui_state", "processing"],
         )
     with b2:
-        st.button("Load New File", on_click=reset)
+        st.button("Load New File(s)", on_click=reset)
 
     st.info("*Optional: Adjust detection settings below*")
     st.info(
