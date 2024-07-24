@@ -10,6 +10,10 @@ import seaborn as sns
 from feat import Detector
 
 
+def update_state(page, field, value):
+    st.session_state[f"{page}__{field}"] = value
+
+
 def safe_divide_fps(numerator, denominator, default_value=0.1):
     return numerator / max([denominator, default_value])
 

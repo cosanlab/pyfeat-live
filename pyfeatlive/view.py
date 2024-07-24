@@ -3,8 +3,6 @@ from feat.utils.io import read_feat
 from pathlib import Path
 import pandas as pd
 
-# st.set_page_config()
-
 img_folder = Path("./static/detections")
 fex_file = Path("./static/detections.csv")
 
@@ -126,6 +124,8 @@ def handle_reset():
 
 # File select container
 if st.session_state.show_select_container:
+    if st.session_state.analyze__output is not None:
+        st.button("Use recent analysis", type="primary")
     st.write(
         "Drag and drop an existing CSV file of detections and optionally the original video they came from, to interactively explore."
     )
@@ -145,9 +145,9 @@ else:
 show_live_data()
 show_uploaded_data()
 
-with st.sidebar:
-    if fex_file.exists():
-        df = convert_live_data(pd.read_csv(fex_file))
-        st.download_button(
-            "Download live data", data=df, file_name="detections.csv", mime="text/csv"
-        )
+# with st.sidebar:
+#     if fex_file.exists():
+#         df = convert_live_data(pd.read_csv(fex_file))
+#         st.download_button(
+#             "Download live data", data=df, file_name="detections.csv", mime="text/csv"
+#         )
