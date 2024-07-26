@@ -1,6 +1,7 @@
 import streamlit as st
 from feat.utils.io import read_feat
 from pathlib import Path
+import pandas as pd
 
 img_folder = Path("./static/detections")
 fex_file = Path("./static/detections.csv")
@@ -121,12 +122,23 @@ def handle_reset():
     st.session_state.view__upload_data = None
 
 
+def render_plotly():
+    return st.session_state.analyze__output.iplot_detections()
+
+
 # %%
 
 # File select container
 if st.session_state.view__show_select_container:
+    # We have Fex data in-memory from Analysis tab
+    # TODO: add support for using in-memory Detect tab
     if st.session_state.analyze__output is not None:
-        st.button("Use recent analysis", type="primary")
+        if st.button("Use recent analysis", type="primary"):
+            st.dataframe(pd.DataFrame(st.session_state.analyze__output_fex))
+            # TODO: Fixme - not currently working because torch tries to reach a video file it doesn't have on disk within the load_pil_img helper function. We'll need to adjust this function to take a path or write a custom image loader and pass it into .iplot_detections
+            # plotly_fig = st.session_state.analyze__output_fex.iplot_detections()
+            # st.plotly_chart(plotly_fig)
+
     st.write(
         "Drag and drop an existing CSV file of detections and optionally the original video they came from, to interactively explore."
     )

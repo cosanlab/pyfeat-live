@@ -31,6 +31,8 @@ if "analyze__upload_data" not in st.session_state:
 # File returned to user
 if "analyze__output" not in st.session_state:
     st.session_state.analyze__output = None
+if "analyze__output_fex" not in st.session_state:
+    st.session_state.analyze__output_fex = None
 if "analyze_output_file_name" not in st.session_state:
     st.session_state.analyze__output_file_name = None
 
@@ -256,6 +258,7 @@ if st.session_state.analyze__ui_state == "processing":
 
             # Prepare file
             fname = st.session_state.analyze__upload_file.name.split(".")[0]
+            st.session_state.analyze__output_fex = output
             st.session_state.analyze__output = fex_to_csv(
                 output, video_file_name=fname, concat=False
             )
@@ -279,6 +282,7 @@ if st.session_state.analyze__ui_state == "processing":
 
             # Prepare file
             fname = st.session_state.analyze__upload_file.name.split(".")[0]
+            st.session_state.analyze__output_fex = output
             st.session_state.analyze__output = fex_to_csv(
                 output, video_file_name=fname, concat=False
             )
@@ -307,6 +311,7 @@ if st.session_state.analyze__ui_state == "processing":
             )
 
             # Prepare file
+            st.session_state.analyze__output_fex = output
             st.session_state.analyze__output = output.to_csv(index=False).encode(
                 "utf-8"
             )
