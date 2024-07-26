@@ -31,6 +31,10 @@ Currently we have the following routes/pages:
 - "analyze page" -> `analyze.py` for a user to upload files to analyze and work with `py-feat` interactively
 - "view page" -> `view.py` for the user to interactively explore detections a la `fslview`/`fsleyes`
 
+## Client-side "state"
+
+Python variables and values can be shared across pages and used to reactively update the UI. To do so we create custom keys in Streamlit's Session State dictionary in the following naming convention: `st.session_state.PAGE__KEY`. These can be as specific or general as needed, e.g. `st.session_state.analyze__ui_state` or `st.session_state.view__show_save_button`. These values can be used to keep data or objects in memory and are only wiped on page refreshes or `pyfeat-live` restarts.
+
 ## Data download
 
 Until upstream `py-feat` <-> `huggingface` data storage and download integration is complete, each fresh environment install of `pyfeat-live` requires a fresh install of model weights. This will take a few minutes on first launch depending on internet speed.

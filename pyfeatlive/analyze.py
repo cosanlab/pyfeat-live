@@ -137,7 +137,10 @@ elif st.session_state.analyze__upload_file_type == "imagelist":
         left, center, right = st.columns(3)
         with left:
             st.button(
-                "⏪", on_click=update_idx, args=["decrement"], use_container_width=True
+                "⏪ Previous",
+                on_click=update_idx,
+                args=["decrement"],
+                use_container_width=True,
             )
         with center:
             st.write(
@@ -145,7 +148,10 @@ elif st.session_state.analyze__upload_file_type == "imagelist":
             )
         with right:
             st.button(
-                "⏩", on_click=update_idx, args=["increment"], use_container_width=True
+                "Next ⏩",
+                on_click=update_idx,
+                args=["increment"],
+                use_container_width=True,
             )
 
 # OPTIONS UI

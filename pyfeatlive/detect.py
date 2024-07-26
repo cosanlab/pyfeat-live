@@ -24,28 +24,35 @@ webrtc_logger.setLevel(logging.ERROR)
 # NOTE: doesn't seem to work reliably for some reason let's keep it small for now, when bigger width jumps around and causes a segmentation fault when downloading to video
 WIDTH, HEIGHT = 640, 360
 
-# Initialized detectors
-if "frame_counter" not in st.session_state:
-    st.session_state.frame_counter = 0
-if "video_state" not in st.session_state:
-    st.session_state.video_state = False
-if "combined_fex" not in st.session_state:
-    st.session_state.combined_fex = []
-if "combined_frames" not in st.session_state:
-    st.session_state.combined_frames = []
-if "frame_width" not in st.session_state:
-    st.session_state.frame_width = WIDTH
-if "frame_height" not in st.session_state:
-    st.session_state.frame_height = HEIGHT
-if "avg_fps" not in st.session_state:
-    st.session_state.avg_fps = 0
-if "start_time" not in st.session_state:
-    st.session_state.start_time = time.strftime("%Y%m%d-%H%M%S")
+# Counter to keep tracker of processed frames
+if "detect__frame_counter" not in st.session_state:
+    st.session_state.detect__frame_counter = 0
+# If wwebcam is playing and rendering frames
+if "detect__video_state" not in st.session_state:
+    st.session_state.detect__video_state = False
+# List of Fex dfs for each processed frame stored in RAM
+if "detect__combined_fex" not in st.session_state:
+    st.session_state.detect__combined_fex = []
+# List of each input-video frame stored in RAM
+if "detect__combined_frames" not in st.session_state:
+    st.session_state.detect__combined_frames = []
+# Plotly figure width
+if "detect__frame_width" not in st.session_state:
+    st.session_state.detect__frame_width = WIDTH
+# Plotly figure height
+if "detect__frame_height" not in st.session_state:
+    st.session_state.detect__frame_height = HEIGHT
+# Average live FPS used when rendering out video to file
+if "detect__avg_fps" not in st.session_state:
+    st.session_state.detect__avg_fps = 0
+# Date and time of created download file
+if "detect__start_time" not in st.session_state:
+    st.session_state.detect__start_time = time.strftime("%Y%m%d-%H%M%S")
 
 
 def clear_recorded_data():
-    st.session_state.combined_fex = []
-    st.session_state.combined_frames = []
+    st.session_state.detect__combined_fex = []
+    st.session_state.detect__combined_frames = []
 
 
 def frames_to_video_in_memory(
@@ -62,8 +69,7 @@ def frames_to_video_in_memory(
     output = av.open(buffer, "w", format=format)
 
     # Add a video stream to the container using avg fps of capture
-    # video_stream = output.add_stream("mpeg4", rate=int(st.session_state.avg_fps))
-    video_stream = output.add_stream("h264", rate=int(st.session_state.avg_fps))
+    video_stream = output.add_stream("h264", rate=int(st.session_state.detect__avg_fps))
     video_stream.width = frames[0].width
     video_stream.height = frames[0].height
     video_stream.pix_fmt = frames[0].format.name
@@ -96,18 +102,18 @@ def frames_to_video_in_memory(
 
 def make_zip_file():
 
-    video_filename = f"pyfeatlive_video_{st.session_state.start_time}.mp4"
-    csv_filename = f"pyfeatlive_fex_{st.session_state.start_time}.csv"
+    video_filename = f"pyfeatlive_video_{st.session_state.detect__start_time}.mp4"
+    csv_filename = f"pyfeatlive_fex_{st.session_state.detect__start_time}.csv"
 
     # Compile in-memory frames to video
     video_buffer = frames_to_video_in_memory(
-        st.session_state.combined_frames,
-        fps=int(safe_divide_fps(1, st.session_state.avg_fps)),
+        st.session_state.detect__combined_frames,
+        fps=int(safe_divide_fps(1, st.session_state.detect__avg_fps)),
     )
 
     # Create in-memory CSV file
     fex_data = fex_to_csv(
-        st.session_state.combined_fex,
+        st.session_state.detect__combined_fex,
         video_file_name=video_filename,
     )
 
@@ -124,11 +130,11 @@ def make_zip_file():
 # Create initial plotly figure of correct dimensions
 figure = go.Figure()
 figure.update_layout(
-    width=st.session_state.frame_width,
-    height=st.session_state.frame_height,
-    xaxis=dict(visible=False, range=[0, st.session_state.frame_width]),
+    width=st.session_state.detect__frame_width,
+    height=st.session_state.detect__frame_height,
+    xaxis=dict(visible=False, range=[0, st.session_state.detect__frame_width]),
     yaxis=dict(
-        visible=False, range=[0, st.session_state.frame_height], scaleanchor="x"
+        visible=False, range=[0, st.session_state.detect__frame_height], scaleanchor="x"
     ),
     margin={"l": 0, "r": 0, "t": 0, "b": 0},
     showlegend=False,
@@ -151,8 +157,8 @@ with st.container(border=True):
         mode=WebRtcMode.SENDONLY,
         media_stream_constraints={
             "video": {
-                "width": st.session_state.frame_width,
-                "height": st.session_state.frame_height,
+                "width": st.session_state.detect__frame_width,
+                "height": st.session_state.detect__frame_height,
             },
             "audio": False,
         },
@@ -180,7 +186,7 @@ with st.container(border=True):
 
 # If webcam is playing process and render frames
 if ctx.video_receiver:
-    st.session_state.video_state = True
+    st.session_state.detect__video_state = True
 
     # Initialize empty text and image area
     fps.text(f"FPS: ")
@@ -196,14 +202,14 @@ if ctx.video_receiver:
 
             # Run detector
             fex, img = process_frame(st.session_state.detector, frame)
-            fex["frame"] = st.session_state.frame_counter
-            st.session_state.frame_counter += 1
+            fex["frame"] = st.session_state.detect__frame_counter
+            st.session_state.detect__frame_counter += 1
 
             # Update FPS counter
             now = time.perf_counter()
             current_fps = now - start
-            st.session_state.avg_fps += current_fps
-            st.session_state.avg_fps /= 2
+            st.session_state.detect__avg_fps += current_fps
+            st.session_state.detect__avg_fps /= 2
 
             fps.text(f"FPS: {1 / current_fps:.3f}")
             start = now
@@ -214,17 +220,17 @@ if ctx.video_receiver:
 
             # Update Save Frames
             if st.session_state.save_session:
-                st.session_state.combined_frames.append(frame)
-                st.session_state.combined_fex.append(fex)
+                st.session_state.detect__combined_frames.append(frame)
+                st.session_state.detect__combined_fex.append(fex)
 
         except queue.Empty:
             break
         except Exception as e:
-            st.session_state.video_state = False
+            st.session_state.detect__video_state = False
             print(e)
             break
 else:
-    st.session_state.video_state = False
+    st.session_state.detect__video_state = False
 
     # Save Detections
     with st.container(border=True):
@@ -235,22 +241,26 @@ else:
             st.checkbox("Record Session", key="save_session", value=True)
 
         if not st.session_state.save_session:
-            st.session_state.combined_fex = []
-            st.session_state.combined_frames = []
+            st.session_state.detect__combined_fex = []
+            st.session_state.detect__combined_frames = []
             st.write("")
         else:
             # Check if there is fex data to download
             with save_col2:
                 if (
-                    st.session_state.combined_fex
-                    and st.session_state.combined_frames
-                    and not st.session_state.video_state
+                    st.session_state.detect__combined_fex
+                    and st.session_state.detect__combined_frames
+                    and not st.session_state.detect__video_state
                 ):
+
+                    # Update file-name to current time
+                    st.session_state.detect__start_time = time.strftime("%Y%m%d-%H%M%S")
+
                     # Only create the download button if there is data
                     st.download_button(
                         label="Download Detections",
                         data=make_zip_file(),
-                        file_name=f"pyfeatlive_{st.session_state.start_time}.zip",
+                        file_name=f"pyfeatlive_{st.session_state.detect__start_time}.zip",
                         mime="application/zip",
                     )
                 else:
@@ -258,7 +268,7 @@ else:
 
             with save_col3:
                 if (
-                    st.session_state.combined_frames
-                    and not st.session_state.video_state
+                    st.session_state.detect__combined_frames
+                    and not st.session_state.detect__video_state
                 ):
                     st.button("Clear Recorded Data", on_click=clear_recorded_data)
