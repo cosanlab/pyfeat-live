@@ -20,35 +20,6 @@ from zipfile import ZipFile
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
 
-# Video and plotting dimensions
-# NOTE: doesn't seem to work reliably for some reason let's keep it small for now, when bigger width jumps around and causes a segmentation fault when downloading to video
-WIDTH, HEIGHT = 640, 360
-
-# Counter to keep tracker of processed frames
-if "detect__frame_counter" not in st.session_state:
-    st.session_state.detect__frame_counter = 0
-# If wwebcam is playing and rendering frames
-if "detect__video_state" not in st.session_state:
-    st.session_state.detect__video_state = False
-# List of Fex dfs for each processed frame stored in RAM
-if "detect__combined_fex" not in st.session_state:
-    st.session_state.detect__combined_fex = []
-# List of each input-video frame stored in RAM
-if "detect__combined_frames" not in st.session_state:
-    st.session_state.detect__combined_frames = []
-# Plotly figure width
-if "detect__frame_width" not in st.session_state:
-    st.session_state.detect__frame_width = WIDTH
-# Plotly figure height
-if "detect__frame_height" not in st.session_state:
-    st.session_state.detect__frame_height = HEIGHT
-# Average live FPS used when rendering out video to file
-if "detect__avg_fps" not in st.session_state:
-    st.session_state.detect__avg_fps = 0
-# Date and time of created download file
-if "detect__start_time" not in st.session_state:
-    st.session_state.detect__start_time = time.strftime("%Y%m%d-%H%M%S")
-
 
 def clear_recorded_data():
     st.session_state.detect__combined_fex = []

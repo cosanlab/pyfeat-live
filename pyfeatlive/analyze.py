@@ -6,36 +6,6 @@ ACCEPTED_VIDEOS = [".mp4", ".mov"]
 ACCEPTED_IMAGES = [".jpg", ".jpeg", ".png"]
 ACCEPTED_FILES = ACCEPTED_VIDEOS + ACCEPTED_IMAGES
 
-# State-based UI with 3 states:
-# - 'select' - when user is choosing a file
-# - 'options' - when user is adjusting detection options or py-feat is crunching
-#   - the toggle container has it's own mini-state that handles this
-# - 'results' - when hide the controls and show buttons to download or inspect results
-if "analyze__ui_state" not in st.session_state:
-    st.session_state.analyze__ui_state = "select"
-
-# File handling
-if "analyze__upload_file" not in st.session_state:
-    st.session_state.analyze__upload_file = None
-if "analyze__upload_file_name" not in st.session_state:
-    st.session_state.analyze__upload_file_name = None
-if "analyze__upload_file_type" not in st.session_state:
-    st.session_state.analyze__upload_file_type = None
-
-# For image gallery
-if "analyze__upload_imagelist_idx" not in st.session_state:
-    st.session_state.analyze__upload_imagelist_idx = 0
-# After calling .read() on file
-if "analyze__upload_data" not in st.session_state:
-    st.session_state.analyze__upload_data = None
-# File returned to user
-if "analyze__output" not in st.session_state:
-    st.session_state.analyze__output = None
-if "analyze__output_fex" not in st.session_state:
-    st.session_state.analyze__output_fex = None
-if "analyze_output_file_name" not in st.session_state:
-    st.session_state.analyze__output_file_name = None
-
 
 def handle_file_upload(upload_data):
     if len(upload_data) == 1:

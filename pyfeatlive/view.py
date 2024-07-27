@@ -6,19 +6,6 @@ import pandas as pd
 img_folder = Path("./static/detections")
 fex_file = Path("./static/detections.csv")
 
-if "view__num_images" not in st.session_state:
-    st.session_state.view__num_images = 0
-if "view__img_idx" not in st.session_state:
-    st.session_state.view__img_idx = 0
-if "view__live_data" not in st.session_state:
-    st.session_state.view__live_data = None
-if "view__upload_data" not in st.session_state:
-    st.session_state.view__upload_data = None
-if "view__show_select_container" not in st.session_state:
-    st.session_state.view__show_select_container = True
-if "view__show_save_button" not in st.session_state:
-    st.session_state.view__show_save_button = False
-
 
 def show_save():
     st.session_state.view__show_save_button = True
