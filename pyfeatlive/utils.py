@@ -8,6 +8,11 @@ import torch
 import plotly.graph_objects as go
 import seaborn as sns
 from feat import Detector
+from feat.FastDetector import FastDetector
+import sys
+from feat.au_detectors.StatLearning.SL_test import XGBClassifier
+
+sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
 
 
 def update_state(page, field, value):
@@ -39,6 +44,13 @@ def load_detector():
         au_model=st.session_state.au_model,
         emotion_model=st.session_state.emotion_model,
     )
+
+
+@st.cache_resource(
+    show_spinner="Loading models...these may take a few minutes to download in the background if it's your first time launching pyfeat-live"
+)
+def load_fast_detector():
+    return FastDetector()
 
 
 def reload_detector():
@@ -240,8 +252,14 @@ def process_frame(detector, frame):
     ) = run_pyfeat_detection(detector, img)
     fex = create_fex(detector, faces, poses, landmarks, aus, emotions)
 
-    # data_queue.put(fex)
-    # img_queue.put(img)
+    return fex, img
+
+
+def process_frame_fast(detector, frame):
+    img = frame.to_image()
+    # tensor = convert_image_to_tensor(img, img_type="float32")
+    fex = detector.forward(img)
+    # fex = detector.detect_image(tensor)
     return fex, img
 
 

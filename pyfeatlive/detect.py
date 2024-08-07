@@ -11,7 +11,13 @@ import streamlit as st
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
 import time
 import plotly.graph_objects as go
-from utils import process_frame, make_plotly_fig, fex_to_csv, safe_divide_fps
+from utils import (
+    process_frame,
+    make_plotly_fig,
+    fex_to_csv,
+    safe_divide_fps,
+    process_frame_fast,
+)
 import logging
 import av
 from io import BytesIO
@@ -172,7 +178,8 @@ if ctx.video_receiver:
             frame = ctx.video_receiver.get_frame()
 
             # Run detector
-            fex, img = process_frame(st.session_state.detector, frame)
+            # fex, img = process_frame(st.session_state.detector, frame)
+            fex, img = process_frame_fast(st.session_state.detector, frame)
             fex["frame"] = st.session_state.detect__frame_counter
             st.session_state.detect__frame_counter += 1
 

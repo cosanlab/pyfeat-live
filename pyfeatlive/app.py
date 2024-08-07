@@ -1,8 +1,12 @@
 import streamlit as st
 import os
 from PIL import Image
-from utils import load_detector, reload_detector
+from utils import load_detector, reload_detector, load_fast_detector
 import time
+import sys
+from feat.au_detectors.StatLearning.SL_test import XGBClassifier
+
+sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
 
 # Configure app pages
 live_page = st.Page("detect.py", title="Live Detection")
@@ -100,7 +104,8 @@ for k, v in SESSION_STATE.items():
     st.session_state[k] = v
 
 # Load global detector object (shared across pages)
-st.session_state.detector = load_detector()
+# st.session_state.detector = load_detector()
+st.session_state.detector = load_fast_detector()
 
 # Shared sidebar to change models
 with st.sidebar:
@@ -109,31 +114,31 @@ with st.sidebar:
         "Face Detector",
         key="face_model",
         options=["retinaface", "mtcnn", "faceboxes", "img2pose", "img2pose-c"],
-        on_change=reload_detector,
+        # on_change=reload_detector,
     )
     st.radio(
         "Landmark Detector",
         key="landmark_model",
         options=["mobilefacenet", "mobilenet", "pfld"],
-        on_change=reload_detector,
+        # on_change=reload_detector,
     )
     st.radio(
         "Pose Detector",
         key="facepose_model",
         options=["img2pose", "img2pose-c"],
-        on_change=reload_detector,
+        # on_change=reload_detector,
     )
     st.radio(
         "AU Detector",
         key="au_model",
         options=["svm", "xgb"],
-        on_change=reload_detector,
+        # on_change=reload_detector,
     )
     st.radio(
         "Emotion Detector",
         key="emotion_model",
         options=["resmasknet", "svm"],
-        on_change=reload_detector,
+        # on_change=reload_detector,
     )
 
 # Render route
