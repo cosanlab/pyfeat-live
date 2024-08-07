@@ -4,5 +4,8 @@
     "editor.formatOnSave": true
   },
   "python.defaultInterpreterPath": "${workspaceFolder}/env/bin/python",
-  "black-formatter.path": ["${workspaceFolder}/env/bin/black"],
+  "black-formatter.path": [
+    "${workspaceFolder}/env/bin/black"
+  ],
+  "todo-tree.tree.scanMode": "open files",
 }

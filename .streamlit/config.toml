@@ -1,15 +1,46 @@
 [server]
-enableStaticServing = false
+# always open browser
+headless = false 
+# auto-rerun during dev
+runOnSave = true
+fileWatcherType = "auto"
+# 1.5 GB, in megabytes
+maxUploadSize = 1500
+# Default user-facing port
 port = 8501
-fileWatcherType = "none"
-maxUploadSize = 1000
+# Disable serving files in static dir
+enableStaticServing = false
+# enableXsrfProtection = false
+folderWatchBlacklist = ['.vscode', 'env', 'pyfeatlive.egg-info']
 
 [global]
+# Ignore warning cause we're packaging as CLI app
 showWarningOnDirectExecution = false
-developmentMode = false
+# developmentMode = true
 
 [client]
-toolbarMode = "viewer"
+toolbarMode = "developer"
+
+[browser]
+gatherUsageStats = false
+serverPort = 8501
 
 [theme]
+# Base theme
 base = "light"
+
+# Primary accent color for interactive elements.
+# primaryColor =
+
+# Background color for the main content area.
+# backgroundColor =
+
+# Background color used for the sidebar and most interactive widgets.
+# secondaryBackgroundColor =
+
+# Color used for almost all text.
+# textColor =
+
+# Font family for all text in the app, except code blocks. One of "sans serif",
+# "serif", or "monospace".
+# font =
