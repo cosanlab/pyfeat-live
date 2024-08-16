@@ -40,7 +40,7 @@ WIDTH, HEIGHT = 640, 360
 # fmt: off
 SESSION_STATE = dict(
 
-    # GLOBAL DETECTOR
+    # GLOBAL
     face_model="retinaface",
     landmark_model="mobilefacenet",
     facepose_model="img2pose",
@@ -65,6 +65,8 @@ SESSION_STATE = dict(
     detect__avg_fps=0,
     # Date and time of created download file
     detect__start_time=time.strftime("%Y%m%d-%H%M%S"),
+    # If user wants to save the session
+    detect__save_session=True,
 
     # --ANALYZE PAGE--
 
@@ -101,7 +103,8 @@ SESSION_STATE = dict(
 )
 # fmt: on
 for k, v in SESSION_STATE.items():
-    st.session_state[k] = v
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 # Load global detector object (shared across pages)
 # st.session_state.detector = load_detector()
