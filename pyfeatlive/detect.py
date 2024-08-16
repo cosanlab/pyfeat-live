@@ -12,10 +12,10 @@ from streamlit_webrtc import webrtc_streamer, WebRtcMode
 import time
 import plotly.graph_objects as go
 from utils import (
-    process_frame,
     make_plotly_fig,
     fex_to_csv,
     safe_divide_fps,
+    process_frame,
     process_frame_fast,
 )
 import logging
@@ -172,6 +172,9 @@ if ctx.video_receiver:
     start = time.perf_counter()
     plot.plotly_chart(figure)
 
+    # Only seen in backend-console
+    print("Webcam playing")
+
     while True:
         try:
             # Get video frame
@@ -197,7 +200,7 @@ if ctx.video_receiver:
             plot.plotly_chart(figure, use_container_width=True)
 
             # Update Save Frames
-            if st.session_state.save_session:
+            if st.session_state.detect__save_session:
                 st.session_state.detect__combined_frames.append(frame)
                 st.session_state.detect__combined_fex.append(fex)
 
@@ -208,6 +211,8 @@ if ctx.video_receiver:
             print(e)
             break
 else:
+    # Only seen in backend-console
+    print("Webcam not playing")
     st.session_state.detect__video_state = False
 
     # Save Detections
@@ -216,37 +221,24 @@ else:
 
         save_col1, save_col2, save_col3 = st.columns(3)
         with save_col1:
-            st.checkbox("Record Session", key="save_session", value=True)
+            st.checkbox("Record Session", key="detect__save_session", value=True)
 
-        if not st.session_state.save_session:
-            st.session_state.detect__combined_fex = []
-            st.session_state.detect__combined_frames = []
-            st.write("")
-        else:
-            # Check if there is fex data to download
-            with save_col2:
-                if (
-                    st.session_state.detect__combined_fex
-                    and st.session_state.detect__combined_frames
-                    and not st.session_state.detect__video_state
-                ):
+        with save_col2:
+            if st.session_state.detect__combined_frames:
 
-                    # Update file-name to current time
-                    st.session_state.detect__start_time = time.strftime("%Y%m%d-%H%M%S")
+                # Update file-name to current time
+                st.session_state.detect__start_time = time.strftime("%Y%m%d-%H%M%S")
 
-                    # Only create the download button if there is data
-                    st.download_button(
-                        label="Download Detections",
-                        data=make_zip_file(),
-                        file_name=f"pyfeatlive_{st.session_state.detect__start_time}.zip",
-                        mime="application/zip",
-                    )
-                else:
-                    st.write("No detections recorded")
+                # Only create the download button if there is data
+                st.download_button(
+                    label="Download Detections",
+                    data=make_zip_file(),
+                    file_name=f"pyfeatlive_{st.session_state.detect__start_time}.zip",
+                    mime="application/zip",
+                )
+            else:
+                st.write("No detections recorded")
 
+        if st.session_state.detect__combined_frames:
             with save_col3:
-                if (
-                    st.session_state.detect__combined_frames
-                    and not st.session_state.detect__video_state
-                ):
-                    st.button("Clear Recorded Data", on_click=clear_recorded_data)
+                st.button("Clear Recorded Data", on_click=clear_recorded_data)

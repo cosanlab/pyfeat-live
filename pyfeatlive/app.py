@@ -65,8 +65,6 @@ SESSION_STATE = dict(
     detect__avg_fps=0,
     # Date and time of created download file
     detect__start_time=time.strftime("%Y%m%d-%H%M%S"),
-    # If user wants to save the session
-    detect__save_session=True,
 
     # --ANALYZE PAGE--
 
