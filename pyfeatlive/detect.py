@@ -146,17 +146,20 @@ with st.container(border=True):
     # do selecting processing/rendering without complicated threads and queues
     # Create button row
     st.write("### SELECT DETECTORS")
+    st.write(
+        "*This version of py-feat live make use of `FastDetector` so toggling detectors only shows/hides visualizations rather that enabling/disabling detectors*"
+    )
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.toggle("Faceboxes", key="rects", value=True)
     with col2:
-        st.toggle("Landmarks", key="landmarks", value=True)
+        st.toggle("Landmarks", key="landmarks", value=False)
     with col3:
         st.toggle("Poses", key="poses", value=False)
     with col4:
         st.toggle("AUs", key="aus", value=False)
     with col5:
-        st.toggle("Emotions", key="emotions", value=False)
+        st.toggle("Emotions", key="emotions", value=True)
 
     # Create plot
     plot = st.empty()

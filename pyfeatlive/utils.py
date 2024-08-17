@@ -1482,7 +1482,7 @@ def make_plotly_fig(figure, fex, img):
         sizey=img.height,
         xref="x",
         yref="y",
-        opacity=0.9,  # TODO
+        opacity=0.9,
         layer="below",
         sizing="stretch",
         source=img,

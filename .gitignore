@@ -9,3 +9,4 @@ recordings/
 .env
 environment.yml
 **.egg-info/
+.vscode/bookmarks.json
