@@ -5,9 +5,11 @@ import warnings
 import psutil
 
 RAM = psutil.virtual_memory().total / (1024**3)
+RAM_CAP = 0.7
 available = psutil.virtual_memory().available / (1024**3)
 print(f"Total detected system RAM: {RAM:.2f} GB")
 print(f"Total available system RAM at launch: {available:.2f} GB")
+print(f"Capping in-memory capture to: {available*RAM_CAP:.2f} GB")
 
 print("Checking if pytorch models need to be downloaded...")
 with warnings.catch_warnings():

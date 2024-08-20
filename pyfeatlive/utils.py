@@ -21,33 +21,45 @@ sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
 sys.modules["__main__"].__dict__["SVMClassifier"] = SVMClassifier
 
 
-def estimate_memory_usage(fps, frame, fex, frame_mem_counter, pd_mem_counter):
+class MemoryOverflowError(Exception):
+    pass
+
+
+def estimate_memory_usage(
+    fps, frame, fex, frame_mem_counter, pd_mem_counter, buffer=0.7
+):
+    """
+    Calculates the estimated remaining time and memory usage based on the current frame and fex memory usage. Caps memory usage at 70% of system RAM.
+
+    """
 
     # NOTE: 0.330mb/frame on ejolly's m1 air
     frame_mb = frame.to_ndarray().nbytes / (1024**2)
     pd_mb = fex.memory_usage(deep=True).sum() / (1024**2)
+    mb_per_sec = (frame_mb + pd_mb) * fps
 
-    total_mb = frame_mb + pd_mb
-    mb_per_sec = total_mb * fps
-    available_mb = psutil.virtual_memory().available / (1024**2)
-    remaining_sec = available_mb / mb_per_sec
+    frame_mem_counter += frame_mb
+    pd_mem_counter += pd_mb
+    total_mb = frame_mem_counter + pd_mem_counter
+    capped_available_mb = psutil.virtual_memory().available / (1024**2) * buffer
+    remaining_sec = capped_available_mb / mb_per_sec
     minutes = int(remaining_sec // 60)
     seconds = int(remaining_sec % 60)
 
-    frame_mem_counter += frame_mb
-    print(f"Total frame memory usage: {np.round(frame_mem_counter, 2):.2f} MB")
+    print(f"Memory used: {total_mb / 1024:.3f} GB")
+    print(f"Memory available (capped): {capped_available_mb / 1024:.3f} GB")
+    print(f"Usage %: {total_mb / capped_available_mb * 100:.2f}%")
 
-    pd_mem_counter += pd_mb
-    print(f"Total fex memory usage: {np.round(pd_mem_counter, 2):.2f} MB")
-
-    print(
-        f"Memory % of system RAM: {np.round(((frame_mem_counter + pd_mem_counter) / (st.session_state.ram * 1024)) * 100, 2):.2f}%"
-    )
-    max_frames = (psutil.virtual_memory().available / (1024**2)) / (pd_mb + frame_mb)
+    max_frames = capped_available_mb / (pd_mb + frame_mb)
     remaining_frames = max_frames - len(st.session_state.detect__combined_frames)
-    print(f"Estimated remaining max frame capacity: {int(remaining_frames)}")
+    print(f"Estimated remaining frame capacity: {int(remaining_frames)}")
     print(f"Estimated remaining time: {minutes} minutes {seconds} seconds")
-    return frame_mem_counter, pd_mem_counter
+
+    # Check if we've hit the buffer limit
+    available_mb = psutil.virtual_memory().available / (1024**2)
+    kill_camera = total_mb / available_mb >= buffer
+
+    return frame_mem_counter, pd_mem_counter, minutes, seconds, kill_camera
 
 
 def update_state(page, field, value):

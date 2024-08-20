@@ -17,20 +17,30 @@ from utils import (
     safe_divide_fps,
     process_frame_fast,
     estimate_memory_usage,
+    MemoryOverflowError,
 )
 import logging
 import av
 from io import BytesIO
 from zipfile import ZipFile
-import numpy as np
 
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
 
 
+def toggle_save():
+    if st.session_state.save_checkbox:
+        st.session_state.detect__save_session = True
+        print("Save ENABLED")
+    else:
+        st.session_state.detect__save_session = False
+        print("Save DISABLED")
+
+
 def clear_recorded_data():
     st.session_state.detect__combined_fex = []
     st.session_state.detect__combined_frames = []
+    print("Recordings cleared from memory")
 
 
 def frames_to_video_in_memory(
@@ -129,6 +139,9 @@ with st.container(border=True):
     # FPS counter
     fps = st.empty()
 
+    # Time remaining counter
+    timer = st.empty()
+
     # Create WebRTC cam
     ctx = webrtc_streamer(
         key="sample",
@@ -171,13 +184,15 @@ if ctx.video_receiver:
 
     # Initialize empty text and image area
     fps.text(f"FPS: ")
+    if st.session_state.detect__save_session:
+        timer.text(f"Approx remaining recording limit: ")
 
     # Continually get a frame, process it, and draw a plotly figure
     start = time.perf_counter()
     plot.plotly_chart(figure)
 
     # Only seen in backend-console
-    print("Webcam playing")
+    print("Webcam ENABLED")
 
     # memory usage
     frame_mem_counter = 0
@@ -210,11 +225,27 @@ if ctx.video_receiver:
             if st.session_state.detect__save_session:
                 st.session_state.detect__combined_frames.append(frame)
                 st.session_state.detect__combined_fex.append(fex)
-                frame_mem_counter, pd_mem_counter = estimate_memory_usage(
-                    current_fps, frame, fex, frame_mem_counter, pd_mem_counter
+                frame_mem_counter, pd_mem_counter, minutes, seconds, kill_camera = (
+                    estimate_memory_usage(
+                        current_fps, frame, fex, frame_mem_counter, pd_mem_counter
+                    )
+                )
+                if kill_camera:
+                    ctx.video_receiver.stop()
+                    timer.text(
+                        "Recording limit reached. Please press Stop and download/clear data."
+                    )
+                    raise MemoryOverflowError()
+                    break
+                timer.text(
+                    f"Approx remaining recording limit: {minutes}min {seconds}sec"
                 )
 
         except queue.Empty:
+            break
+        except MemoryOverflowError:
+            print("WARNING: Frame memory capacity reached")
+            st.session_state.detect__video_state = False
             break
         except Exception as e:
             st.session_state.detect__video_state = False
@@ -222,7 +253,7 @@ if ctx.video_receiver:
             break
 else:
     # Only seen in backend-console
-    print("Webcam not playing")
+    print("Webcam DISABLED")
     st.session_state.detect__video_state = False
 
     # Save Detections
@@ -231,7 +262,12 @@ else:
 
         save_col1, save_col2, save_col3 = st.columns(3)
         with save_col1:
-            st.checkbox("Record Session", key="detect__save_session", value=True)
+            st.checkbox(
+                "Record Session",
+                key="save_checkbox",
+                value=st.session_state.detect__save_session,
+                on_change=toggle_save,
+            )
 
         with save_col2:
             if st.session_state.detect__combined_frames:
