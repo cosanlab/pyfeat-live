@@ -257,9 +257,8 @@ def process_frame(detector, frame):
 
 def process_frame_fast(detector, frame):
     img = frame.to_image()
-    # tensor = convert_image_to_tensor(img, img_type="float32")
-    fex = detector.forward(img)
-    # fex = detector.detect_image(tensor)
+    faces_data = detector.detect_faces(img)
+    fex = detector.forward(faces_data)
     return fex, img
 
 
