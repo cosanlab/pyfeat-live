@@ -16,11 +16,13 @@ from utils import (
     fex_to_csv,
     safe_divide_fps,
     process_frame_fast,
+    estimate_memory_usage,
 )
 import logging
 import av
 from io import BytesIO
 from zipfile import ZipFile
+import numpy as np
 
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
@@ -177,13 +179,16 @@ if ctx.video_receiver:
     # Only seen in backend-console
     print("Webcam playing")
 
+    # memory usage
+    frame_mem_counter = 0
+    pd_mem_counter = 0
+
     while True:
         try:
             # Get video frame
             frame = ctx.video_receiver.get_frame()
 
             # Run detector
-            # fex, img = process_frame(st.session_state.detector, frame)
             fex, img = process_frame_fast(st.session_state.detector, frame)
             fex["frame"] = st.session_state.detect__frame_counter
             st.session_state.detect__frame_counter += 1
@@ -205,6 +210,9 @@ if ctx.video_receiver:
             if st.session_state.detect__save_session:
                 st.session_state.detect__combined_frames.append(frame)
                 st.session_state.detect__combined_fex.append(fex)
+                frame_mem_counter, pd_mem_counter = estimate_memory_usage(
+                    current_fps, frame, fex, frame_mem_counter, pd_mem_counter
+                )
 
         except queue.Empty:
             break

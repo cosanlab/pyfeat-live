@@ -4,10 +4,15 @@ from PIL import Image
 from utils import load_detector, reload_detector, load_fast_detector
 import time
 import sys
-from feat.au_detectors.StatLearning.SL_test import XGBClassifier
+from feat.au_detectors.StatLearning.SL_test import XGBClassifier, SVMClassifier
 import warnings
+import psutil
 
 sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
+sys.modules["__main__"].__dict__["SVMClassifier"] = SVMClassifier
+
+# Get max system memory
+RAM = psutil.virtual_memory().total / (1024**3)
 
 # Configure app pages
 live_page = st.Page("detect.py", title="Live Detection")
@@ -48,6 +53,7 @@ SESSION_STATE = dict(
     au_model="xgb",
     emotion_model="resmasknet",
     detector=None,
+    ram=RAM,
 
     # --DETECT PAGE--
     # Counter to keep tracker of processed frames

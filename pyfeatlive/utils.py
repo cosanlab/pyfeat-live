@@ -12,12 +12,42 @@ from feat.FastDetector import FastDetector
 import sys
 from feat.au_detectors.StatLearning.SL_test import XGBClassifier, SVMClassifier
 from time import sleep
+import psutil
 import xgboost as xgb
 
 xgb.set_config(verbosity=0)
 
 sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
 sys.modules["__main__"].__dict__["SVMClassifier"] = SVMClassifier
+
+
+def estimate_memory_usage(fps, frame, fex, frame_mem_counter, pd_mem_counter):
+
+    # NOTE: 0.330mb/frame on ejolly's m1 air
+    frame_mb = frame.to_ndarray().nbytes / (1024**2)
+    pd_mb = fex.memory_usage(deep=True).sum() / (1024**2)
+
+    total_mb = frame_mb + pd_mb
+    mb_per_sec = total_mb * fps
+    available_mb = psutil.virtual_memory().available / (1024**2)
+    remaining_sec = available_mb / mb_per_sec
+    minutes = int(remaining_sec // 60)
+    seconds = int(remaining_sec % 60)
+
+    frame_mem_counter += frame_mb
+    print(f"Total frame memory usage: {np.round(frame_mem_counter, 2):.2f} MB")
+
+    pd_mem_counter += pd_mb
+    print(f"Total fex memory usage: {np.round(pd_mem_counter, 2):.2f} MB")
+
+    print(
+        f"Memory % of system RAM: {np.round(((frame_mem_counter + pd_mem_counter) / (st.session_state.ram * 1024)) * 100, 2):.2f}%"
+    )
+    max_frames = (psutil.virtual_memory().available / (1024**2)) / (pd_mb + frame_mb)
+    remaining_frames = max_frames - len(st.session_state.detect__combined_frames)
+    print(f"Estimated remaining max frame capacity: {int(remaining_frames)}")
+    print(f"Estimated remaining time: {minutes} minutes {seconds} seconds")
+    return frame_mem_counter, pd_mem_counter
 
 
 def update_state(page, field, value):
