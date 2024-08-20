@@ -15,7 +15,6 @@ from utils import (
     make_plotly_fig,
     fex_to_csv,
     safe_divide_fps,
-    process_frame,
     process_frame_fast,
 )
 import logging

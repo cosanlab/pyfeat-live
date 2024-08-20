@@ -114,34 +114,28 @@ with warnings.catch_warnings():
 with st.sidebar:
     st.write("### SWAP MODELS")
     st.radio(
-        "Face Detector",
-        key="face_model",
-        options=["retinaface", "mtcnn", "faceboxes", "img2pose", "img2pose-c"],
-        # on_change=reload_detector,
-    )
-    st.radio(
         "Landmark Detector",
         key="landmark_model",
-        options=["mobilefacenet", "mobilenet", "pfld"],
-        # on_change=reload_detector,
-    )
-    st.radio(
-        "Pose Detector",
-        key="facepose_model",
-        options=["img2pose", "img2pose-c"],
-        # on_change=reload_detector,
+        options=["mobilefacenet", "mobilenet", "pfld", None],
+        on_change=reload_detector,
     )
     st.radio(
         "AU Detector",
         key="au_model",
-        options=["svm", "xgb"],
-        # on_change=reload_detector,
+        options=["xgb", "svm", None],
+        on_change=reload_detector,
     )
     st.radio(
         "Emotion Detector",
         key="emotion_model",
-        options=["resmasknet", "svm"],
-        # on_change=reload_detector,
+        options=["resmasknet", "svm", None],
+        on_change=reload_detector,
+    )
+    st.radio(
+        "Identity Detector",
+        key="identity_model",
+        options=["facenet", None],
+        on_change=reload_detector,
     )
 
 # Render route

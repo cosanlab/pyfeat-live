@@ -10,12 +10,14 @@ import seaborn as sns
 from feat import Detector
 from feat.FastDetector import FastDetector
 import sys
-from feat.au_detectors.StatLearning.SL_test import XGBClassifier
+from feat.au_detectors.StatLearning.SL_test import XGBClassifier, SVMClassifier
+from time import sleep
 import xgboost as xgb
 
 xgb.set_config(verbosity=0)
 
 sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
+sys.modules["__main__"].__dict__["SVMClassifier"] = SVMClassifier
 
 
 def update_state(page, field, value):
@@ -53,12 +55,26 @@ def load_fast_detector():
 
 
 def reload_detector():
+    if (
+        st.session_state.landmark_model is None
+        and st.session_state.au_model is not None
+    ):
+        st.session_state.landmark_model = "mobilefacenet"
+        st.toast(
+            "**Landmark detector is required for AU detector! Defaulting to mobilefacenet.**",
+            icon="⚠️",
+        )
+
+    import sys
+
+    sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
+    sys.modules["__main__"].__dict__["SVMClassifier"] = SVMClassifier
+
     st.session_state.detector.change_model(
-        face_model=st.session_state.face_model,
         landmark_model=st.session_state.landmark_model,
-        facepose_model=st.session_state.facepose_model,
         au_model=st.session_state.au_model,
         emotion_model=st.session_state.emotion_model,
+        identity_model=st.session_state.identity_model,
     )
     st.toast("**Detector swap complete!**", icon="✅")
 
