@@ -1,12 +1,12 @@
 from setuptools import setup
 
-with open("requirements.txt") as f:
-    requirements = f.read().splitlines()
+# with open("requirements.txt") as f:
+#     requirements = f.read().splitlines()
 
 setup(
     name="pyfeatlive",
     version="1.0",
-    install_requires=requirements,
+    # install_requires=requirements,
     packages=["pyfeatlive"],
     package_data={"pyfeatlive": ["*.png"]},
     entry_points={

@@ -5,6 +5,7 @@ from utils import load_detector, reload_detector, load_fast_detector
 import time
 import sys
 from feat.au_detectors.StatLearning.SL_test import XGBClassifier
+import warnings
 
 sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
 
@@ -105,8 +106,9 @@ for k, v in SESSION_STATE.items():
         st.session_state[k] = v
 
 # Load global detector object (shared across pages)
-# st.session_state.detector = load_detector()
-st.session_state.detector = load_fast_detector()
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    st.session_state.detector = load_fast_detector()
 
 # Shared sidebar to change models
 with st.sidebar:

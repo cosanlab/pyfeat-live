@@ -1,6 +1,16 @@
 import os
 import runpy
 import sys
+import warnings
+
+print("Checking if pytorch models need to be downloaded...")
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    from feat.FastDetector import FastDetector
+
+    tmp = FastDetector()
+print("All models found on disk and ready to use!")
+del tmp
 
 import pyfeatlive
 

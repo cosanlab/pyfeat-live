@@ -11,6 +11,9 @@ from feat import Detector
 from feat.FastDetector import FastDetector
 import sys
 from feat.au_detectors.StatLearning.SL_test import XGBClassifier
+import xgboost as xgb
+
+xgb.set_config(verbosity=0)
 
 sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
 
@@ -31,9 +34,7 @@ def fex_to_csv(fex_data, video_file_name=None, concat=True):
 
 
 # Helper function
-@st.cache_resource(
-    show_spinner="Loading models...these may take a few minutes to download in the background if it's your first time launching pyfeat-live"
-)
+@st.cache_resource(show_spinner="Loading models...")
 def load_detector():
     """Load detector once on app boot"""
 
@@ -46,9 +47,7 @@ def load_detector():
     )
 
 
-@st.cache_resource(
-    show_spinner="Loading models...these may take a few minutes to download in the background if it's your first time launching pyfeat-live"
-)
+@st.cache_resource(show_spinner="Loading models...")
 def load_fast_detector():
     return FastDetector()
 
