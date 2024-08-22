@@ -2,6 +2,7 @@ import os
 import runpy
 import sys
 import warnings
+
 import psutil
 
 RAM = psutil.virtual_memory().total / (1024**3)

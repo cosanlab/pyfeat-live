@@ -1,7 +1,8 @@
+from pathlib import Path
+
+import pandas as pd
 import streamlit as st
 from feat.utils.io import read_feat
-from pathlib import Path
-import pandas as pd
 
 img_folder = Path("./static/detections")
 fex_file = Path("./static/detections.csv")
@@ -15,9 +16,7 @@ def show_uploaded_data():
     """Render uploaded data or live detection data"""
     if st.session_state.view__upload_data is not None:
         button_placeholder = st.empty()
-        new_fex = st.data_editor(
-            st.session_state.view__upload_data, on_change=show_save
-        )
+        new_fex = st.data_editor(st.session_state.view__upload_data, on_change=show_save)
         if st.session_state.view__show_save_button:
             button_placeholder.button("Save", on_click=save_fex, args=[new_fex])
 

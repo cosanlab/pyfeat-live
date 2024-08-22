@@ -1,11 +1,20 @@
 {
   "[python]": {
-    "editor.defaultFormatter": "ms-python.black-formatter",
-    "editor.formatOnSave": true
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.formatOnSaveMode": "modifications",
+    "editor.formatOnType": true,
+    "editor.tabSize": 4,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports.ruff": "explicit",
+      "source.fixAll.ruff": "explicit"
+    },
   },
+  "ruff.lineLength": 90,
+  "ruff.format.args": ["--line-length=90"],
   "python.defaultInterpreterPath": "${workspaceFolder}/env/bin/python",
+  "python.analysis.autoImportCompletions": true,
   "black-formatter.path": [
     "${workspaceFolder}/env/bin/black"
   ],
-  "todo-tree.tree.scanMode": "open files",
 }

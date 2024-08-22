@@ -1,12 +1,13 @@
-import streamlit as st
 import os
-from PIL import Image
-from utils import load_detector, reload_detector, load_fast_detector
-import time
 import sys
-from feat.au_detectors.StatLearning.SL_test import XGBClassifier, SVMClassifier
+import time
 import warnings
+
 import psutil
+import streamlit as st
+from feat.au_detectors.StatLearning.SL_test import SVMClassifier, XGBClassifier
+from PIL import Image
+from utils import load_fast_detector, reload_detector
 
 sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
 sys.modules["__main__"].__dict__["SVMClassifier"] = SVMClassifier

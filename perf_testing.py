@@ -1,14 +1,15 @@
 # %%
-from feat import Detector
-from feat.utils.image_operations import convert_image_to_tensor
-from feat.data import _inverse_face_transform, _inverse_landmark_transform
-import torch
-import os
-from torchvision.io import read_image
-from feat.utils.io import get_test_data_path
-import numpy as np
 import cProfile
+import os
 import pstats
+
+import numpy as np
+import torch
+from feat import Detector
+from feat.data import _inverse_face_transform, _inverse_landmark_transform
+from feat.utils.image_operations import convert_image_to_tensor
+from feat.utils.io import get_test_data_path
+from torchvision.io import read_image
 
 img = read_image(os.path.join(get_test_data_path(), "single_face.jpg"))
 detector = Detector(au_model='svm')

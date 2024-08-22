@@ -6,23 +6,24 @@
 # How modify opening webRTC stream
 # https://discuss.streamlit.io/t/new-component-streamlit-webrtc-a-new-way-to-deal-with-real-time-media-streams/8669/73?u=whitphx
 
-import queue
-import streamlit as st
-from streamlit_webrtc import webrtc_streamer, WebRtcMode
-import time
-import plotly.graph_objects as go
-from utils import (
-    make_plotly_fig,
-    fex_to_csv,
-    safe_divide_fps,
-    process_frame_fast,
-    estimate_memory_usage,
-    MemoryOverflowError,
-)
 import logging
-import av
+import queue
+import time
 from io import BytesIO
 from zipfile import ZipFile
+
+import av
+import plotly.graph_objects as go
+import streamlit as st
+from streamlit_webrtc import WebRtcMode, webrtc_streamer
+from utils import (
+    MemoryOverflowError,
+    estimate_memory_usage,
+    fex_to_csv,
+    make_plotly_fig,
+    process_frame_fast,
+    safe_divide_fps,
+)
 
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)

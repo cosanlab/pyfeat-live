@@ -1,19 +1,18 @@
-import streamlit as st
+import sys
+
 import numpy as np
 import pandas as pd
-from feat import Fex
-from feat.utils.image_operations import convert_image_to_tensor
-from feat.data import _inverse_face_transform, _inverse_landmark_transform
-import torch
 import plotly.graph_objects as go
-import seaborn as sns
-from feat import Detector
-from feat.FastDetector import FastDetector
-import sys
-from feat.au_detectors.StatLearning.SL_test import XGBClassifier, SVMClassifier
-from time import sleep
 import psutil
+import seaborn as sns
+import streamlit as st
+import torch
 import xgboost as xgb
+from feat import Detector, Fex
+from feat.au_detectors.StatLearning.SL_test import SVMClassifier, XGBClassifier
+from feat.data import _inverse_face_transform, _inverse_landmark_transform
+from feat.FastDetector import FastDetector
+from feat.utils.image_operations import convert_image_to_tensor
 
 xgb.set_config(verbosity=0)
 
@@ -25,9 +24,7 @@ class MemoryOverflowError(Exception):
     pass
 
 
-def estimate_memory_usage(
-    fps, frame, fex, frame_mem_counter, pd_mem_counter, buffer=0.7
-):
+def estimate_memory_usage(fps, frame, fex, frame_mem_counter, pd_mem_counter, buffer=0.7):
     """
     Calculates the estimated remaining time and memory usage based on the current frame and fex memory usage. Caps memory usage at 70% of system RAM.
 
@@ -97,10 +94,7 @@ def load_fast_detector():
 
 
 def reload_detector():
-    if (
-        st.session_state.landmark_model is None
-        and st.session_state.au_model is not None
-    ):
+    if st.session_state.landmark_model is None and st.session_state.au_model is not None:
         st.session_state.landmark_model = "mobilefacenet"
         st.toast(
             "**Landmark detector is required for AU detector! Defaulting to mobilefacenet.**",
@@ -194,9 +188,7 @@ def run_pyfeat_detection(
     return faces, poses, landmarks, aus, emotions
 
 
-def create_fex(
-    detector, faces=None, poses=None, landmarks=None, aus=None, emotions=None
-):
+def create_fex(detector, faces=None, poses=None, landmarks=None, aus=None, emotions=None):
     """Like detector._create_fex() but handles different detector combos"""
 
     out = []
@@ -478,9 +470,7 @@ def draw_plotly_landmark(
         return fig
 
     elif output == "dictionary":
-        return dict(
-            type="path", path=path, line=dict(color=line_color, width=line_width)
-        )
+        return dict(type="path", path=path, line=dict(color=line_color, width=line_width))
 
     else:
         raise ValueError('output can only be ["figure","dictionary"]')
@@ -519,16 +509,14 @@ def draw_plotly_pose(row, img_height, fig, line_width=2, output="dictionary"):
     # X-Axis pointing to right. drawn in red
     x1 = size * (np.cos(yaw) * np.cos(roll)) + tdx
     y1 = (
-        size
-        * (np.cos(pitch) * np.sin(roll) + np.cos(roll) * np.sin(pitch) * np.sin(yaw))
+        size * (np.cos(pitch) * np.sin(roll) + np.cos(roll) * np.sin(pitch) * np.sin(yaw))
         + tdy
     )
 
     # Y-Axis | drawn in green
     x2 = size * (-np.cos(yaw) * np.sin(roll)) + tdx
     y2 = (
-        size
-        * (np.cos(pitch) * np.cos(roll) - np.sin(pitch) * np.sin(yaw) * np.sin(roll))
+        size * (np.cos(pitch) * np.cos(roll) - np.sin(pitch) * np.sin(yaw) * np.sin(roll))
         + tdy
     )
 
@@ -1218,9 +1206,7 @@ def draw_plotly_au(
             if np.isnan(row[aus[muscle_au_dict[muscle]]]):
                 au_intensity = 0
             else:
-                au_intensity = int(
-                    row[aus[muscle_au_dict[muscle]]] * heatmap_resolution
-                )
+                au_intensity = int(row[aus[muscle_au_dict[muscle]]] * heatmap_resolution)
             color = cmap.as_hex()[au_intensity]
 
             muscles.append(

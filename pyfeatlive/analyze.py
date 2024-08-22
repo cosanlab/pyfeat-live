@@ -1,6 +1,7 @@
+from tempfile import NamedTemporaryFile
+
 import streamlit as st
 from utils import fex_to_csv, update_state
-from tempfile import NamedTemporaryFile
 
 ACCEPTED_VIDEOS = [".mp4", ".mov"]
 ACCEPTED_IMAGES = [".jpg", ".jpeg", ".png"]

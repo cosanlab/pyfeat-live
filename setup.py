@@ -1,5 +1,6 @@
 from setuptools import setup
 
+# TODO: Re-enable before merging
 # with open("requirements.txt") as f:
 #     requirements = f.read().splitlines()
 
