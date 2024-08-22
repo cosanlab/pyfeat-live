@@ -69,8 +69,6 @@ def update_idx(how):
     st.session_state.analyze__upload_imagelist_idx = new_idx
 
 
-# %%
-
 # FILE SELECT UI
 if st.session_state.analyze__ui_state == "select":
     st.write(
@@ -129,7 +127,6 @@ elif st.session_state.analyze__upload_file_type == "imagelist":
 
 # OPTIONS UI
 if st.session_state.analyze__ui_state == "options":
-
     # OPTIONS UI
     st.write("## Detector Options")
 
@@ -210,7 +207,6 @@ if st.session_state.analyze__ui_state == "options":
 # PROCESSING UI
 if st.session_state.analyze__ui_state == "processing":
     with st.spinner("**Processing**"):
-
         if st.session_state.analyze__upload_file_type == "video":
             # Create a temporary filepath to pass to py-feat
             with NamedTemporaryFile(suffix=".mp4") as temp:
@@ -236,7 +232,6 @@ if st.session_state.analyze__ui_state == "processing":
             st.session_state.analyze__output_file_name = f"pyfeatlive_fex_{fname}_.csv"
 
         elif st.session_state.analyze__upload_file_type == "image":
-
             # Create a temporary filepath to pass to py-feat
             with NamedTemporaryFile(suffix=".jpg") as temp:
                 temp.write(st.session_state.analyze__upload_file.getvalue())
@@ -260,7 +255,6 @@ if st.session_state.analyze__ui_state == "processing":
             st.session_state.analyze__output_file_name = f"pyfeatlive_fex_{fname}_.csv"
 
         elif st.session_state.analyze__upload_file_type == "imagelist":
-
             # Create a temporary filepath to pass to py-feat
             temp_list = []
             temp_name_list = []
@@ -283,11 +277,9 @@ if st.session_state.analyze__ui_state == "processing":
 
             # Prepare file
             st.session_state.analyze__output_fex = output
-            st.session_state.analyze__output = output.to_csv(index=False).encode(
-                "utf-8"
-            )
+            st.session_state.analyze__output = output.to_csv(index=False).encode("utf-8")
             # TODO: how to handle file name with image list?
-            st.session_state.analyze__output_file_name = f"pyfeatlive_fex.csv"
+            st.session_state.analyze__output_file_name = "pyfeatlive_fex.csv"
 
         # Update state
         update_state("analyze", "ui_state", "results")

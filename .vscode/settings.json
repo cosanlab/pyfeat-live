@@ -2,7 +2,7 @@
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,
-    "editor.formatOnSaveMode": "modifications",
+    "editor.formatOnSaveMode": "file",
     "editor.formatOnType": true,
     "editor.tabSize": 4,
     "editor.codeActionsOnSave": {

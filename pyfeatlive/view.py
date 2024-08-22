@@ -64,6 +64,8 @@ def decrement_idx():
     st.session_state.view__live_data = True
 
 
+# TODO: Handle different file combos: if user provides csv check if video file exists and if so load it to visualize frames for viewer; otherwise just plot with default face
+# NOTE: May need to update `iplot_detections` if it doesn’t have an option for just drawing the default face
 def show_images():
     imgs = sorted(map(str, img_folder.glob("*.png")))
     st.session_state.view__num_images = len(imgs)
@@ -90,7 +92,7 @@ def handle_file_upload(upload_data):
     st.session_state.view__show_select_container = False
 
 
-# TODO:
+# TODO: video upload; figure out how to index into video-frames for `iplot_detections` which needs to be able to load then up. Currently this happens with the `load_pil_img` helper function in `pyfeat`
 def handle_video_upload(upload_data):
     # st.session_state.upload_data = read_feat(upload_data)
     st.session_state.view__show_select_container = False
@@ -111,8 +113,6 @@ def handle_reset():
 def render_plotly():
     return st.session_state.analyze__output.iplot_detections()
 
-
-# %%
 
 # File select container
 if st.session_state.view__show_select_container:
@@ -140,6 +140,7 @@ if st.session_state.view__show_select_container:
 else:
     st.button("Upload New File", on_click=handle_reset)
 
+# TODO: Update UI copying from analyze
 # Render data
 show_live_data()
 show_uploaded_data()

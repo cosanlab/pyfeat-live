@@ -1,4 +1,3 @@
-# %%
 # Makes use of:
 # https://github.com/whitphx/streamlit-webrtc
 # See example of drawing on webrtc frames:
@@ -90,7 +89,6 @@ def frames_to_video_in_memory(
 
 
 def make_zip_file():
-
     video_filename = f"pyfeatlive_video_{st.session_state.detect__start_time}.mp4"
     csv_filename = f"pyfeatlive_fex_{st.session_state.detect__start_time}.csv"
 
@@ -130,6 +128,7 @@ figure.update_layout(
 )
 
 # Instructions
+# TODO: Make sure check-box toggle works for viz only
 with st.expander(label="Usage Guide", expanded=False):
     st.write(
         "Automatically detect facial expression from your live camera feed. \n1. Choose your device by clicking on `SELECT DEVICE`\n2. Toggle checkboxes to enable or disable specific detectors (speeds up processing)\n3. Video recording and detections are saved by default and can be downloaded or cleared using the buttons below",
@@ -184,9 +183,9 @@ if ctx.video_receiver:
     st.session_state.detect__video_state = True
 
     # Initialize empty text and image area
-    fps.text(f"FPS: ")
+    fps.text("FPS: ")
     if st.session_state.detect__save_session:
-        timer.text(f"Approx remaining recording limit: ")
+        timer.text("Approx remaining recording limit: ")
 
     # Continually get a frame, process it, and draw a plotly figure
     start = time.perf_counter()
@@ -238,9 +237,7 @@ if ctx.video_receiver:
                     )
                     raise MemoryOverflowError()
                     break
-                timer.text(
-                    f"Approx remaining recording limit: {minutes}min {seconds}sec"
-                )
+                timer.text(f"Approx remaining recording limit: {minutes}min {seconds}sec")
 
         except queue.Empty:
             break
@@ -272,7 +269,6 @@ else:
 
         with save_col2:
             if st.session_state.detect__combined_frames:
-
                 # Update file-name to current time
                 st.session_state.detect__start_time = time.strftime("%Y%m%d-%H%M%S")
 
