@@ -1,8 +1,10 @@
 from pathlib import Path
 
-import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 from feat.utils.io import read_feat
+from PIL import Image
+from utils import analyze2view, make_plotly_fig
 
 img_folder = Path("./static/detections")
 fex_file = Path("./static/detections.csv")
@@ -10,15 +12,6 @@ fex_file = Path("./static/detections.csv")
 
 def show_save():
     st.session_state.view__show_save_button = True
-
-
-def show_uploaded_data():
-    """Render uploaded data or live detection data"""
-    if st.session_state.view__upload_data is not None:
-        button_placeholder = st.empty()
-        new_fex = st.data_editor(st.session_state.view__upload_data, on_change=show_save)
-        if st.session_state.view__show_save_button:
-            button_placeholder.button("Save", on_click=save_fex, args=[new_fex])
 
 
 def save_fex(new_fex):
@@ -52,34 +45,20 @@ def show_live_data():
                 button_placeholder.button("Save", on_click=save_fex, args=[new_fex])
 
 
-def increment_idx():
-    st.session_state.view__img_idx = min(
-        st.session_state.view__img_idx + 1, st.session_state.view__num_images - 1
-    )
-    st.session_state.view__live_data = True
-
-
-def decrement_idx():
-    st.session_state.view__img_idx = max(st.session_state.view__img_idx - 1, 0)
-    st.session_state.view__live_data = True
-
-
-# TODO: Handle different file combos: if user provides csv check if video file exists and if so load it to visualize frames for viewer; otherwise just plot with default face
-# NOTE: May need to update `iplot_detections` if it doesn’t have an option for just drawing the default face
-def show_images():
-    imgs = sorted(map(str, img_folder.glob("*.png")))
-    st.session_state.view__num_images = len(imgs)
-
-    st.image(imgs[st.session_state.view__img_idx])
-
-    left, center, right = st.columns(3, gap="large")
-    with left:
-        if st.button("Previous"):
-            decrement_idx()
-    with center:
-        st.write(f"**Frame:** {st.session_state.view__img_idx}")
-    with right:
-        st.button("Next", on_click=increment_idx)
+def update_idx(how):
+    if how == "increment":
+        new_idx = st.session_state.view__upload_imagelist_idx + 1
+        # Wrap-around
+        if new_idx == st.session_state.view__reference_output_fex.shape[0]:
+            new_idx = 0
+        # new_idx = min(new_idx, len(st.session_state.analyze__upload_data) - 1)
+    if how == "decrement":
+        new_idx = st.session_state.view__upload_imagelist_idx - 1
+        # Wrap around
+        if new_idx == -1:
+            new_idx = len(st.session_state.view__reference_output_fex.shape[0]) - 1
+        # new_idx = max(new_idx, 0)
+    st.session_state.view__upload_imagelist_idx = new_idx
 
 
 @st.cache_data
@@ -110,21 +89,32 @@ def handle_reset():
     st.session_state.view__upload_data = None
 
 
-def render_plotly():
-    return st.session_state.analyze__output.iplot_detections()
+def toggleviz(feature):
+    st.session_state[f"view__{feature}"] = not st.session_state[f"view__{feature}"]
+
+
+def make_iplot(figure, xoffset_adjust=1):
+    if st.session_state.view__reference_input_type == "image":
+        to_plot = st.session_state.view__reference_output_fex
+    elif st.session_state.view__reference_input_type == "imagelist":
+        to_plot = st.session_state.view__reference_output_fex.iloc[
+            st.session_state.view__upload_imagelist_idx : st.session_state.view__upload_imagelist_idx
+            + 1,
+            :,
+        ]
+    img = Image.open(to_plot["input"].to_list()[0])
+    make_plotly_fig(
+        figure, to_plot, img, emotions_position="right", xoffset_adjust=xoffset_adjust
+    )
+    # figure.update_layout(width=img.width * scale, height=img.height * scale)
+    figure.update_layout(width=600, height=400)
 
 
 # File select container
 if st.session_state.view__show_select_container:
-    # We have Fex data in-memory from Analysis tab
     # TODO: add support for using in-memory Detect tab
     if st.session_state.analyze__output is not None:
-        if st.button("Use recent analysis", type="primary"):
-            st.dataframe(pd.DataFrame(st.session_state.analyze__output_fex))
-            # TODO: Fixme - not currently working because torch tries to reach a video file it doesn't have on disk within the load_pil_img helper function. We'll need to adjust this function to take a path or write a custom image loader and pass it into .iplot_detections
-            # plotly_fig = st.session_state.analyze__output_fex.iplot_detections()
-            # st.plotly_chart(plotly_fig)
-
+        st.button("Use recent analysis", type="primary", on_click=analyze2view)
     st.write(
         "Drag and drop an existing CSV file of detections and optionally the original video they came from, to interactively explore."
     )
@@ -140,7 +130,75 @@ if st.session_state.view__show_select_container:
 else:
     st.button("Upload New File", on_click=handle_reset)
 
-# TODO: Update UI copying from analyze
-# Render data
-show_live_data()
-show_uploaded_data()
+# FRAME VIEWER - UI state independent as long as we have upload_data
+# Create initial plotly figure of correct dimensions
+figure = go.Figure()
+figure.update_layout(
+    width=st.session_state.detect__frame_width,
+    height=st.session_state.detect__frame_height,
+    xaxis=dict(visible=False, range=[0, st.session_state.detect__frame_width]),
+    yaxis=dict(
+        visible=False, range=[0, st.session_state.detect__frame_height], scaleanchor="x"
+    ),
+    margin={"l": 0, "r": 0, "t": 0, "b": 0},
+    showlegend=False,
+)
+
+
+if st.session_state.view__reference_input_type == "video":
+    st.video(st.session_state.view__upload_data)
+
+elif st.session_state.view__reference_input_type == "image":
+    make_iplot(figure, xoffset_adjust=4.5)
+    st.plotly_chart(figure, use_container_width=True)
+
+elif st.session_state.view__reference_input_type == "imagelist":
+    with st.container(border=True):
+        # Iplot
+        make_iplot(figure, xoffset_adjust=4.5)
+        st.plotly_chart(figure, use_container_width=True)
+
+        # Button control row
+        # Re-using widget keynames from detect, which should be comptabile with
+        # make_plotly_fig() which references them, e.g. st.session_state.get('rects')
+        # shouldn't interfere across pages since widgets are torn-down on page-switch
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.toggle("Faceboxes", key="rects", value=True)
+        with col2:
+            st.toggle("Landmarks", key="landmarks", value=False)
+        with col3:
+            st.toggle("Poses", key="poses", value=False)
+        with col4:
+            st.toggle("AUs", key="aus", value=False)
+        with col5:
+            st.toggle("Emotions", key="emotions", value=True)
+
+        # Gallery controls
+        left, center, right = st.columns(3)
+        with left:
+            st.button(
+                "⏪ ",
+                on_click=update_idx,
+                args=["decrement"],
+                use_container_width=True,
+            )
+        with center:
+            st.write(
+                f"**File:** {st.session_state.view__reference_input_data_name[st.session_state.view__upload_imagelist_idx]}",
+            )
+        with right:
+            st.button(
+                " ⏩",
+                on_click=update_idx,
+                args=["increment"],
+                use_container_width=True,
+            )
+
+button_placeholder = st.empty()
+if st.session_state.view__reference_output_fex is not None:
+    new_fex = st.data_editor(
+        st.session_state.view__reference_output_fex, on_change=show_save
+    )
+if st.session_state.view__show_save_button:
+    button_placeholder.button("Save", on_click=save_fex, args=[new_fex])

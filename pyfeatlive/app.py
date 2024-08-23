@@ -88,7 +88,9 @@ SESSION_STATE = dict(
     # File-handling
     analyze__upload_file=None,
     analyze__upload_file_name=None,
+    analyze__upload_data_file_name=None, # name per imglist
     analyze__upload_file_type=None,
+    analyze__tempfile2orig=dict(),
 
     # For image gallery
     analyze__upload_imagelist_idx=0,
@@ -102,12 +104,26 @@ SESSION_STATE = dict(
     analyze_output_file_name=None,
 
     # --VIEW PAGE--
+    view__reference_input=None,
+    view__reference_input_name=None,
+    view__reference_input_data_name=None, # name per imglist
+    view__reference_input_type=None,
+    view__reference_output_fex=None,
+    view_reference_output=None,
+    view__upload_data=None,
     view__num_images=0,
     view__img_idx=0,
+    view__upload_imagelist_idx=0,
     view__live_data=None,
-    view__upload_data=None,
     view__show_select_container=True,
     view__show_save_button=False,
+
+    # Iplot config to persist across frames
+    view__faceboxes = True,
+    view__landmarks = False,
+    view__poses = False,
+    view__aus = False,
+    view__emotions = False
 )
 # fmt: on
 for k, v in SESSION_STATE.items():
@@ -149,6 +165,12 @@ with st.sidebar:
 
 # Render route
 pg.run()
+
+# TODO: figure out scroll-bouncing issue on detector
+# CSS classes that the webcam plotly fig is in
+# .stFullScreenFrame
+# .stPlotlyChart
+# .plot-container
 
 # Hide menus
 st.markdown(

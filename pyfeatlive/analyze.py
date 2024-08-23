@@ -1,7 +1,7 @@
 from tempfile import NamedTemporaryFile
 
 import streamlit as st
-from utils import fex_to_csv, update_state
+from utils import analyze2view, fex_to_csv, update_state
 
 ACCEPTED_VIDEOS = [".mp4", ".mov"]
 ACCEPTED_IMAGES = [".jpg", ".jpeg", ".png"]
@@ -212,7 +212,7 @@ if st.session_state.analyze__ui_state == "processing":
             with NamedTemporaryFile(suffix=".mp4") as temp:
                 temp.write(st.session_state.analyze__upload_file.getvalue())
                 temp.seek(0)
-                output = st.session_state.detector.detect_video(
+                output = st.session_state.detector.detect(
                     temp.name,
                     face_detection_threshold=st.session_state.analyze__face_detection_threshold,
                     face_identity_threshold=st.session_state.analyze__face_identity_threshold,
@@ -236,7 +236,11 @@ if st.session_state.analyze__ui_state == "processing":
             with NamedTemporaryFile(suffix=".jpg") as temp:
                 temp.write(st.session_state.analyze__upload_file.getvalue())
                 temp.seek(0)
-                output = st.session_state.detector.detect_image(
+                # Store name
+                st.session_state.analyze__tempfile2orig[temp.name] = (
+                    st.session_state.analyze__upload_file_name
+                )
+                output = st.session_state.detector.detect(
                     temp.name,
                     face_detection_threshold=st.session_state.analyze__face_detection_threshold,
                     face_identity_threshold=st.session_state.analyze__face_identity_threshold,
@@ -258,14 +262,19 @@ if st.session_state.analyze__ui_state == "processing":
             # Create a temporary filepath to pass to py-feat
             temp_list = []
             temp_name_list = []
-            for f in st.session_state.analyze__upload_file:
+            for f, fname in zip(
+                st.session_state.analyze__upload_file,
+                st.session_state.analyze__upload_data_file_name,
+            ):
                 temp = NamedTemporaryFile(suffix=".jpg")
                 temp.write(f.getvalue())
                 temp.seek(0)
                 temp_list.append(temp)
                 temp_name_list.append(temp.name)
+                # Store name
+                st.session_state.analyze__tempfile2orig[temp.name] = fname
 
-            output = st.session_state.detector.detect_image(
+            output = st.session_state.detector.detect(
                 temp_name_list,
                 face_detection_threshold=st.session_state.analyze__face_detection_threshold,
                 face_identity_threshold=st.session_state.analyze__face_identity_threshold,
@@ -297,8 +306,8 @@ if st.session_state.analyze__ui_state == "results":
         )
     with col2:
         if st.button("See in Viewer"):
+            analyze2view()
             st.switch_page("view.py")
-        # st.page_link("view.py", label="See detections in Viewer")
     with col3:
         st.button("Reanalyze", on_click=prepare_reanalysis)
     with col4:

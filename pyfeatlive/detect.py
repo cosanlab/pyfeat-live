@@ -127,13 +127,6 @@ figure.update_layout(
     showlegend=False,
 )
 
-# Instructions
-# TODO: Make sure check-box toggle works for viz only
-with st.expander(label="Usage Guide", expanded=False):
-    st.write(
-        "Automatically detect facial expression from your live camera feed. \n1. Choose your device by clicking on `SELECT DEVICE`\n2. Toggle checkboxes to enable or disable specific detectors (speeds up processing)\n3. Video recording and detections are saved by default and can be downloaded or cleared using the buttons below",
-    )
-
 # Webcam container
 with st.container(border=True):
     # FPS counter
@@ -155,14 +148,13 @@ with st.container(border=True):
         },
         async_processing=True,
     )
+    # Create plot
+    plot = st.empty()
+
     # Each button is has two-way binding it's key kwarg in st.session_state.key
     # st.session_state can then be used to read values within functions above to
     # do selecting processing/rendering without complicated threads and queues
     # Create button row
-    st.write("### SELECT DETECTORS")
-    st.write(
-        "*This version of py-feat live make use of `FastDetector` so toggling detectors only shows/hides visualizations rather that enabling/disabling detectors*"
-    )
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.toggle("Faceboxes", key="rects", value=True)
@@ -175,8 +167,6 @@ with st.container(border=True):
     with col5:
         st.toggle("Emotions", key="emotions", value=True)
 
-    # Create plot
-    plot = st.empty()
 
 # If webcam is playing process and render frames
 if ctx.video_receiver:
@@ -219,6 +209,7 @@ if ctx.video_receiver:
 
             # Make figure
             make_plotly_fig(figure, fex, img)
+            # figure.update_layout(width=600, height=400)
             plot.plotly_chart(figure, use_container_width=True)
 
             # Update Save Frames
@@ -285,3 +276,9 @@ else:
         if st.session_state.detect__combined_frames:
             with save_col3:
                 st.button("Clear Recorded Data", on_click=clear_recorded_data)
+
+# Instructions
+with st.expander(label="**Usage Guide**", expanded=True):
+    st.write(
+        "Automatically detect facial expression from your live camera feed. \n1. Choose your device by clicking on `SELECT DEVICE`\n2. Toggle checkboxes to enable or disable specific detector visualization overlays. You can fully disable a detector from the sidebar (speeds up processing)\n3. Video recording and detections are saved by default and can be downloaded or cleared using the buttons below",
+    )

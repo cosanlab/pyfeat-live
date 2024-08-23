@@ -24,6 +24,26 @@ class MemoryOverflowError(Exception):
     pass
 
 
+def analyze2view():
+    # Input img, video, or imglist
+    st.session_state.view__reference_input = st.session_state.analyze__upload_data
+    st.session_state.view__reference_input_name = (
+        st.session_state.analyze__upload_file_name
+    )
+    st.session_state.view__reference_input_data_name = (
+        st.session_state.analyze__upload_data_file_name
+    )
+    st.session_state.view__reference_input_type = (
+        st.session_state.analyze__upload_file_type
+    )
+
+    # Output fex and csvs
+    st.session_state.view__reference_output_fex = st.session_state.analyze__output_fex
+    st.session_state.view__reference_output = st.session_state.analyze__output
+
+    st.session_state.view__show_select_container = False
+
+
 def estimate_memory_usage(fps, frame, fex, frame_mem_counter, pd_mem_counter, buffer=0.7):
     """
     Calculates the estimated remaining time and memory usage based on the current frame and fex memory usage. Caps memory usage at 70% of system RAM.
@@ -1254,7 +1274,12 @@ def draw_plotly_au(
 
 
 def emotion_annotation_position(
-    row, img_height, img_width, emotions_size=12, emotions_position="bottom"
+    row,
+    img_height,
+    img_width,
+    emotions_size=12,
+    emotions_position="bottom",
+    x_offset_adjust=1.0,
 ):
     """Helper function to adjust position of emotion annotations
 
@@ -1273,7 +1298,7 @@ def emotion_annotation_position(
     """
 
     y_spacing = img_height * 0.01 * emotions_size * 0.5
-    x_spacing = img_width * 0.02 * emotions_size * 0.18
+    x_spacing = img_width * 0.02 * x_offset_adjust * emotions_size * 0.18
 
     if emotions_position.lower() == "bottom":
         x_position = row["FaceRectX"] + row["FaceRectWidth"] / 2
@@ -1336,6 +1361,7 @@ def _create_detector_elements(
     au_heatmap_resolution=1000,
     au_opacity=0.9,
     au_cmap="Blues",
+    xoffset_adjust=1.0,
 ):
     """Helper function to create all of the various detector elements for plotting
 
@@ -1451,6 +1477,7 @@ def _create_detector_elements(
                 img_width,
                 emotions_size=emotions_size,
                 emotions_position=emotions_position,
+                x_offset_adjust=xoffset_adjust,
             )
 
             emotion_text = ""
@@ -1516,7 +1543,7 @@ def update_figure_elements(
         fig.layout.images = new_images
 
 
-def make_plotly_fig(figure, fex, img):
+def make_plotly_fig(figure, fex, img, emotions_position="left", xoffset_adjust=1.0):
     image_frame = dict(
         x=0,
         y=img.height,
@@ -1569,13 +1596,14 @@ def make_plotly_fig(figure, fex, img):
         pose_width=2,
         landmark_color="white",
         landmark_width=2,
-        emotions_position="left",
+        emotions_position=emotions_position,
         emotions_opacity=1.0,
         emotions_color="white",
         emotions_size=20,
         au_heatmap_resolution=150,
         au_opacity=0.75,
         au_cmap="Blues",
+        xoffset_adjust=xoffset_adjust,
     )
 
     update_figure_elements(
