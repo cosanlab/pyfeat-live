@@ -7,6 +7,7 @@ import psutil
 import streamlit as st
 from feat.au_detectors.StatLearning.SL_test import SVMClassifier, XGBClassifier
 from PIL import Image
+from streamlit import session_state as state
 from utils import load_fast_detector, reload_detector
 
 sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
@@ -42,7 +43,7 @@ WIDTH, HEIGHT = 640, 360
 # We put all session state variables in a single dictionary to make it easier to manage and update and so they're all initialized when the app starts (app.py is like an entry-point file)
 # Think of this as in-memory global variables that can be accessed and modified in multiple places to allow things like passing data between pages and reactively updating the UI
 # Aside from the detector, we use the PAGE__KEY naming convention, e.g. detect__frame_counter
-# These values can be references and updated in any part of the app like: st.session_state.detect__frame_counter = 1
+# These values can be references and updated in any part of the app like: state.detect__frame_counter = 1
 # Or using the utils.update_state('page', 'key', new_val) function
 # fmt: off
 SESSION_STATE = dict(
@@ -127,13 +128,13 @@ SESSION_STATE = dict(
 )
 # fmt: on
 for k, v in SESSION_STATE.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+    if k not in state:
+        state[k] = v
 
 # Load global detector object (shared across pages)
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    st.session_state.detector = load_fast_detector()
+    state.detector = load_fast_detector()
 
 # Shared sidebar to change models
 with st.sidebar:

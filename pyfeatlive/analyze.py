@@ -1,6 +1,7 @@
 from tempfile import NamedTemporaryFile
 
 import streamlit as st
+from streamlit import session_state as state
 from utils import analyze2view, fex_to_csv, update_state
 
 ACCEPTED_VIDEOS = [".mp4", ".mov"]
@@ -12,20 +13,20 @@ def handle_file_upload(upload_data):
     if len(upload_data) == 1:
         upload_data = upload_data[0]
         if any(upload_data.name.endswith(suffix) for suffix in ACCEPTED_VIDEOS):
-            st.session_state.analyze__upload_file_type = "video"
+            state.analyze__upload_file_type = "video"
 
         if any(upload_data.name.endswith(suffix) for suffix in ACCEPTED_IMAGES):
-            st.session_state.analyze__upload_file_type = "image"
+            state.analyze__upload_file_type = "image"
 
         # Read in data
-        st.session_state.analyze__upload_file = upload_data
-        st.session_state.analyze__upload_file_name = upload_data.name
-        st.session_state.analyze__upload_data = upload_data.read()
+        state.analyze__upload_file = upload_data
+        state.analyze__upload_file_name = upload_data.name
+        state.analyze__upload_data = upload_data.read()
     else:
-        st.session_state.analyze__upload_file_type = "imagelist"
-        st.session_state.analyze__upload_file = upload_data
-        st.session_state.analyze__upload_data_file_name = [e.name for e in upload_data]
-        st.session_state.analyze__upload_data = [e.read() for e in upload_data]
+        state.analyze__upload_file_type = "imagelist"
+        state.analyze__upload_file = upload_data
+        state.analyze__upload_data_file_name = [e.name for e in upload_data]
+        state.analyze__upload_data = [e.read() for e in upload_data]
 
     # Set UI
     update_state("analyze", "ui_state", "options")
@@ -55,22 +56,22 @@ def reset():
 
 def update_idx(how):
     if how == "increment":
-        new_idx = st.session_state.analyze__upload_imagelist_idx + 1
+        new_idx = state.analyze__upload_imagelist_idx + 1
         # Wrap-around
-        if new_idx == len(st.session_state.analyze__upload_data):
+        if new_idx == len(state.analyze__upload_data):
             new_idx = 0
-        # new_idx = min(new_idx, len(st.session_state.analyze__upload_data) - 1)
+        # new_idx = min(new_idx, len(state.analyze__upload_data) - 1)
     if how == "decrement":
-        new_idx = st.session_state.analyze__upload_imagelist_idx - 1
+        new_idx = state.analyze__upload_imagelist_idx - 1
         # Wrap around
         if new_idx == -1:
-            new_idx = len(st.session_state.analyze__upload_data) - 1
+            new_idx = len(state.analyze__upload_data) - 1
         # new_idx = max(new_idx, 0)
-    st.session_state.analyze__upload_imagelist_idx = new_idx
+    state.analyze__upload_imagelist_idx = new_idx
 
 
 # FILE SELECT UI
-if st.session_state.analyze__ui_state == "select":
+if state.analyze__ui_state == "select":
     st.write(
         "Drag and drop an existing image or video file to run analysis with Py-Feat. Adjust the options below to change how detections are performed"
     )
@@ -87,21 +88,19 @@ if st.session_state.analyze__ui_state == "select":
         )
 
 # UPLOADED FILE VIEWER - UI state independent as long as we have upload_data
-if st.session_state.analyze__upload_file_type == "video":
-    st.video(st.session_state.analyze__upload_data)
+if state.analyze__upload_file_type == "video":
+    st.video(state.analyze__upload_data)
 
-elif st.session_state.analyze__upload_file_type == "image":
-    st.image(st.session_state.analyze__upload_data)
+elif state.analyze__upload_file_type == "image":
+    st.image(state.analyze__upload_data)
 
-elif st.session_state.analyze__upload_file_type == "imagelist":
+elif state.analyze__upload_file_type == "imagelist":
     with st.container(border=True):
         # Center image in container
         l, c, r = st.columns(3)
         with c:
             st.image(
-                st.session_state.analyze__upload_data[
-                    st.session_state.analyze__upload_imagelist_idx
-                ],
+                state.analyze__upload_data[state.analyze__upload_imagelist_idx],
             )
 
         # Gallery controls
@@ -115,7 +114,7 @@ elif st.session_state.analyze__upload_file_type == "imagelist":
             )
         with center:
             st.write(
-                f"**File:** {st.session_state.analyze__upload_data_file_name[st.session_state.analyze__upload_imagelist_idx]}",
+                f"**File:** {state.analyze__upload_data_file_name[state.analyze__upload_imagelist_idx]}",
             )
         with right:
             st.button(
@@ -126,7 +125,7 @@ elif st.session_state.analyze__upload_file_type == "imagelist":
             )
 
 # OPTIONS UI
-if st.session_state.analyze__ui_state == "options":
+if state.analyze__ui_state == "options":
     # OPTIONS UI
     st.write("## Detector Options")
 
@@ -205,66 +204,64 @@ if st.session_state.analyze__ui_state == "options":
         )
 
 # PROCESSING UI
-if st.session_state.analyze__ui_state == "processing":
+if state.analyze__ui_state == "processing":
     with st.spinner("**Processing**"):
-        if st.session_state.analyze__upload_file_type == "video":
+        if state.analyze__upload_file_type == "video":
             # Create a temporary filepath to pass to py-feat
             with NamedTemporaryFile(suffix=".mp4") as temp:
-                temp.write(st.session_state.analyze__upload_file.getvalue())
+                temp.write(state.analyze__upload_file.getvalue())
                 temp.seek(0)
-                output = st.session_state.detector.detect(
+                output = state.detector.detect(
                     temp.name,
-                    face_detection_threshold=st.session_state.analyze__face_detection_threshold,
-                    face_identity_threshold=st.session_state.analyze__face_identity_threshold,
-                    batch_size=st.session_state.analyze__batch_size,
-                    skip_frames=st.session_state.analyze__skip_frames,
-                    output_size=st.session_state.analyze__output_size,
-                    num_workers=st.session_state.analyze__num_workers,
-                    pin_memory=st.session_state.analyze__pin_memory,
+                    face_detection_threshold=state.analyze__face_detection_threshold,
+                    face_identity_threshold=state.analyze__face_identity_threshold,
+                    batch_size=state.analyze__batch_size,
+                    skip_frames=state.analyze__skip_frames,
+                    output_size=state.analyze__output_size,
+                    num_workers=state.analyze__num_workers,
+                    pin_memory=state.analyze__pin_memory,
                 )
 
             # Prepare file
-            fname = st.session_state.analyze__upload_file.name.split(".")[0]
-            st.session_state.analyze__output_fex = output
-            st.session_state.analyze__output = fex_to_csv(
+            fname = state.analyze__upload_file.name.split(".")[0]
+            state.analyze__output_fex = output
+            state.analyze__output = fex_to_csv(
                 output, video_file_name=fname, concat=False
             )
-            st.session_state.analyze__output_file_name = f"pyfeatlive_fex_{fname}_.csv"
+            state.analyze__output_file_name = f"pyfeatlive_fex_{fname}_.csv"
 
-        elif st.session_state.analyze__upload_file_type == "image":
+        elif state.analyze__upload_file_type == "image":
             # Create a temporary filepath to pass to py-feat
             with NamedTemporaryFile(suffix=".jpg") as temp:
-                temp.write(st.session_state.analyze__upload_file.getvalue())
+                temp.write(state.analyze__upload_file.getvalue())
                 temp.seek(0)
                 # Store name
-                st.session_state.analyze__tempfile2orig[temp.name] = (
-                    st.session_state.analyze__upload_file_name
-                )
-                output = st.session_state.detector.detect(
+                state.analyze__tempfile2orig[temp.name] = state.analyze__upload_file_name
+                output = state.detector.detect(
                     temp.name,
-                    face_detection_threshold=st.session_state.analyze__face_detection_threshold,
-                    face_identity_threshold=st.session_state.analyze__face_identity_threshold,
-                    batch_size=st.session_state.analyze__batch_size,
-                    output_size=st.session_state.analyze__output_size,
-                    num_workers=st.session_state.analyze__num_workers,
-                    pin_memory=st.session_state.analyze__pin_memory,
+                    face_detection_threshold=state.analyze__face_detection_threshold,
+                    face_identity_threshold=state.analyze__face_identity_threshold,
+                    batch_size=state.analyze__batch_size,
+                    output_size=state.analyze__output_size,
+                    num_workers=state.analyze__num_workers,
+                    pin_memory=state.analyze__pin_memory,
                 )
 
             # Prepare file
-            fname = st.session_state.analyze__upload_file.name.split(".")[0]
-            st.session_state.analyze__output_fex = output
-            st.session_state.analyze__output = fex_to_csv(
+            fname = state.analyze__upload_file.name.split(".")[0]
+            state.analyze__output_fex = output
+            state.analyze__output = fex_to_csv(
                 output, video_file_name=fname, concat=False
             )
-            st.session_state.analyze__output_file_name = f"pyfeatlive_fex_{fname}_.csv"
+            state.analyze__output_file_name = f"pyfeatlive_fex_{fname}_.csv"
 
-        elif st.session_state.analyze__upload_file_type == "imagelist":
+        elif state.analyze__upload_file_type == "imagelist":
             # Create a temporary filepath to pass to py-feat
             temp_list = []
             temp_name_list = []
             for f, fname in zip(
-                st.session_state.analyze__upload_file,
-                st.session_state.analyze__upload_data_file_name,
+                state.analyze__upload_file,
+                state.analyze__upload_data_file_name,
             ):
                 temp = NamedTemporaryFile(suffix=".jpg")
                 temp.write(f.getvalue())
@@ -272,35 +269,35 @@ if st.session_state.analyze__ui_state == "processing":
                 temp_list.append(temp)
                 temp_name_list.append(temp.name)
                 # Store name
-                st.session_state.analyze__tempfile2orig[temp.name] = fname
+                state.analyze__tempfile2orig[temp.name] = fname
 
-            output = st.session_state.detector.detect(
+            output = state.detector.detect(
                 temp_name_list,
-                face_detection_threshold=st.session_state.analyze__face_detection_threshold,
-                face_identity_threshold=st.session_state.analyze__face_identity_threshold,
-                batch_size=st.session_state.analyze__batch_size,
-                output_size=st.session_state.analyze__output_size,
-                num_workers=st.session_state.analyze__num_workers,
-                pin_memory=st.session_state.analyze__pin_memory,
+                face_detection_threshold=state.analyze__face_detection_threshold,
+                face_identity_threshold=state.analyze__face_identity_threshold,
+                batch_size=state.analyze__batch_size,
+                output_size=state.analyze__output_size,
+                num_workers=state.analyze__num_workers,
+                pin_memory=state.analyze__pin_memory,
             )
 
             # Prepare file
-            st.session_state.analyze__output_fex = output
-            st.session_state.analyze__output = output.to_csv(index=False).encode("utf-8")
+            state.analyze__output_fex = output
+            state.analyze__output = output.to_csv(index=False).encode("utf-8")
             # TODO: how to handle file name with image list?
-            st.session_state.analyze__output_file_name = "pyfeatlive_fex.csv"
+            state.analyze__output_file_name = "pyfeatlive_fex.csv"
 
         # Update state
         update_state("analyze", "ui_state", "results")
 
 # RESULTS UI
-if st.session_state.analyze__ui_state == "results":
+if state.analyze__ui_state == "results":
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.download_button(
             label="Download",
-            data=st.session_state.analyze__output,
-            file_name=st.session_state.analyze__output_file_name,
+            data=state.analyze__output,
+            file_name=state.analyze__output_file_name,
             mime="text/csv",
             type="primary",
         )

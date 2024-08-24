@@ -13,6 +13,7 @@ from feat.au_detectors.StatLearning.SL_test import SVMClassifier, XGBClassifier
 from feat.data import _inverse_face_transform, _inverse_landmark_transform
 from feat.FastDetector import FastDetector
 from feat.utils.image_operations import convert_image_to_tensor
+from streamlit import session_state as state
 
 xgb.set_config(verbosity=0)
 
@@ -26,22 +27,16 @@ class MemoryOverflowError(Exception):
 
 def analyze2view():
     # Input img, video, or imglist
-    st.session_state.view__reference_input = st.session_state.analyze__upload_data
-    st.session_state.view__reference_input_name = (
-        st.session_state.analyze__upload_file_name
-    )
-    st.session_state.view__reference_input_data_name = (
-        st.session_state.analyze__upload_data_file_name
-    )
-    st.session_state.view__reference_input_type = (
-        st.session_state.analyze__upload_file_type
-    )
+    state.view__reference_input = state.analyze__upload_data
+    state.view__reference_input_name = state.analyze__upload_file_name
+    state.view__reference_input_data_name = state.analyze__upload_data_file_name
+    state.view__reference_input_type = state.analyze__upload_file_type
 
     # Output fex and csvs
-    st.session_state.view__reference_output_fex = st.session_state.analyze__output_fex
-    st.session_state.view__reference_output = st.session_state.analyze__output
+    state.view__reference_output_fex = state.analyze__output_fex
+    state.view__reference_output = state.analyze__output
 
-    st.session_state.view__show_select_container = False
+    state.view__show_select_container = False
 
 
 def estimate_memory_usage(fps, frame, fex, frame_mem_counter, pd_mem_counter, buffer=0.7):
@@ -68,7 +63,7 @@ def estimate_memory_usage(fps, frame, fex, frame_mem_counter, pd_mem_counter, bu
     print(f"Usage %: {total_mb / capped_available_mb * 100:.2f}%")
 
     max_frames = capped_available_mb / (pd_mb + frame_mb)
-    remaining_frames = max_frames - len(st.session_state.detect__combined_frames)
+    remaining_frames = max_frames - len(state.detect__combined_frames)
     print(f"Estimated remaining frame capacity: {int(remaining_frames)}")
     print(f"Estimated remaining time: {minutes} minutes {seconds} seconds")
 
@@ -80,7 +75,7 @@ def estimate_memory_usage(fps, frame, fex, frame_mem_counter, pd_mem_counter, bu
 
 
 def update_state(page, field, value):
-    st.session_state[f"{page}__{field}"] = value
+    state[f"{page}__{field}"] = value
 
 
 def safe_divide_fps(numerator, denominator, default_value=0.1):
@@ -100,11 +95,11 @@ def load_detector():
     """Load detector once on app boot"""
 
     return Detector(
-        face_model=st.session_state.face_model,
-        landmark_model=st.session_state.landmark_model,
-        facepose_model=st.session_state.facepose_model,
-        au_model=st.session_state.au_model,
-        emotion_model=st.session_state.emotion_model,
+        face_model=state.face_model,
+        landmark_model=state.landmark_model,
+        facepose_model=state.facepose_model,
+        au_model=state.au_model,
+        emotion_model=state.emotion_model,
     )
 
 
@@ -114,8 +109,8 @@ def load_fast_detector():
 
 
 def reload_detector():
-    if st.session_state.landmark_model is None and st.session_state.au_model is not None:
-        st.session_state.landmark_model = "mobilefacenet"
+    if state.landmark_model is None and state.au_model is not None:
+        state.landmark_model = "mobilefacenet"
         st.toast(
             "**Landmark detector is required for AU detector! Defaulting to mobilefacenet.**",
             icon="⚠️",
@@ -126,11 +121,11 @@ def reload_detector():
     sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
     sys.modules["__main__"].__dict__["SVMClassifier"] = SVMClassifier
 
-    st.session_state.detector.change_model(
-        landmark_model=st.session_state.landmark_model,
-        au_model=st.session_state.au_model,
-        emotion_model=st.session_state.emotion_model,
-        identity_model=st.session_state.identity_model,
+    state.detector.change_model(
+        landmark_model=state.landmark_model,
+        au_model=state.au_model,
+        emotion_model=state.emotion_model,
+        identity_model=state.identity_model,
     )
     st.toast("**Detector swap complete!**", icon="✅")
 
@@ -175,18 +170,18 @@ def run_pyfeat_detection(
         detected_faces=faces,
     )
 
-    if st.session_state.get("poses"):
+    if state.get("poses"):
         poses_dict = detector.detect_facepose(batch_data["Image"], landmarks)
     else:
         poses_dict = None
         poses = None
 
-    if st.session_state.get("aus"):
+    if state.get("aus"):
         aus = detector.detect_aus(batch_data["Image"], landmarks)
     else:
         aus = None
 
-    if st.session_state.get("emotions"):
+    if state.get("emotions"):
         emotions = detector.detect_emotions(batch_data["Image"], faces, landmarks)
     else:
         emotions = None
@@ -200,7 +195,7 @@ def run_pyfeat_detection(
     landmarks = _inverse_landmark_transform(landmarks, batch_data)
 
     # match faces to poses - sometimes face detector finds different faces than pose detector.
-    if st.session_state.get("poses"):
+    if state.get("poses"):
         faces, poses = detector._match_faces_to_poses(
             faces, poses_dict["faces"], poses_dict["poses"]
         )
@@ -1401,7 +1396,7 @@ def _create_detector_elements(
         [],
     )
     # Faceboxes path
-    if st.session_state.get("rects"):
+    if state.get("rects"):
         faceboxes_path = [
             dict(
                 type="rect",
@@ -1415,7 +1410,7 @@ def _create_detector_elements(
         ]
 
     # Landmarks path
-    if st.session_state.get("landmarks"):
+    if state.get("landmarks"):
         landmarks_path = [
             draw_plotly_landmark(
                 row,
@@ -1428,7 +1423,7 @@ def _create_detector_elements(
         ]
 
     # Pose path
-    if st.session_state.get("poses"):
+    if state.get("poses"):
         poses_path = flatten_list(
             [
                 draw_plotly_pose(row, img_height, fig, line_width=pose_width)
@@ -1437,7 +1432,7 @@ def _create_detector_elements(
         )
 
     # AU Heatmaps
-    if st.session_state.get("aus"):
+    if state.get("aus"):
         aus_path = flatten_list(
             [
                 draw_plotly_au(
@@ -1453,7 +1448,7 @@ def _create_detector_elements(
         )
 
     # Emotions annotations
-    if st.session_state.get("emotions"):
+    if state.get("emotions"):
         for i, row in frame_fex.iterrows():
             emotion_dict = (
                 row[

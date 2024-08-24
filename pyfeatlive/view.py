@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from feat.utils.io import read_feat
 from PIL import Image
+from streamlit import session_state as state
 from utils import analyze2view, make_plotly_fig
 
 img_folder = Path("./static/detections")
@@ -11,7 +12,7 @@ fex_file = Path("./static/detections.csv")
 
 
 def show_save():
-    st.session_state.view__show_save_button = True
+    state.view__show_save_button = True
 
 
 def save_fex(new_fex):
@@ -19,7 +20,7 @@ def save_fex(new_fex):
 
 
 def show_live_data():
-    if st.session_state.view__live_data:
+    if state.view__live_data:
         if not fex_file.exists():
             return st.error(
                 "No live detections found! Collect some data and save it on the Detect page."
@@ -32,7 +33,7 @@ def show_live_data():
             fex["frame"].apply(lambda x: f"app/static/detections/{x}.png"),
         )
 
-        show_images()
+        # show_images()
         if st.toggle("Display csv"):
             button_placeholder = st.empty()
             new_fex = st.data_editor(
@@ -41,24 +42,24 @@ def show_live_data():
                 hide_index=True,
                 on_change=show_save,
             )
-            if st.session_state.view__show_save_button:
+            if state.view__show_save_button:
                 button_placeholder.button("Save", on_click=save_fex, args=[new_fex])
 
 
 def update_idx(how):
     if how == "increment":
-        new_idx = st.session_state.view__upload_imagelist_idx + 1
+        new_idx = state.view__upload_imagelist_idx + 1
         # Wrap-around
-        if new_idx == st.session_state.view__reference_output_fex.shape[0]:
+        if new_idx == state.view__reference_output_fex.shape[0]:
             new_idx = 0
-        # new_idx = min(new_idx, len(st.session_state.analyze__upload_data) - 1)
+        # new_idx = min(new_idx, len(state.analyze__upload_data) - 1)
     if how == "decrement":
-        new_idx = st.session_state.view__upload_imagelist_idx - 1
+        new_idx = state.view__upload_imagelist_idx - 1
         # Wrap around
         if new_idx == -1:
-            new_idx = len(st.session_state.view__reference_output_fex.shape[0]) - 1
+            new_idx = len(state.view__reference_output_fex.shape[0]) - 1
         # new_idx = max(new_idx, 0)
-    st.session_state.view__upload_imagelist_idx = new_idx
+    state.view__upload_imagelist_idx = new_idx
 
 
 @st.cache_data
@@ -67,39 +68,38 @@ def convert_live_data(df):
 
 
 def handle_file_upload(upload_data):
-    st.session_state.view__upload_data = read_feat(upload_data)
-    st.session_state.view__show_select_container = False
+    state.view__upload_data = read_feat(upload_data)
+    state.view__show_select_container = False
 
 
 # TODO: video upload; figure out how to index into video-frames for `iplot_detections` which needs to be able to load then up. Currently this happens with the `load_pil_img` helper function in `pyfeat`
 def handle_video_upload(upload_data):
-    # st.session_state.upload_data = read_feat(upload_data)
-    st.session_state.view__show_select_container = False
+    # state.upload_data = read_feat(upload_data)
+    state.view__show_select_container = False
     pass
 
 
 def handle_use_live():
-    st.session_state.view__live_data = True
-    st.session_state.view__show_select_container = False
+    state.view__live_data = True
+    state.view__show_select_container = False
 
 
 def handle_reset():
-    st.session_state.view__show_select_container = True
-    st.session_state.view__live_data = None
-    st.session_state.view__upload_data = None
+    state.view__show_select_container = True
+    state.view__live_data = None
+    state.view__upload_data = None
 
 
 def toggleviz(feature):
-    st.session_state[f"view__{feature}"] = not st.session_state[f"view__{feature}"]
+    state[f"view__{feature}"] = not state[f"view__{feature}"]
 
 
 def make_iplot(figure, xoffset_adjust=1):
-    if st.session_state.view__reference_input_type == "image":
-        to_plot = st.session_state.view__reference_output_fex
-    elif st.session_state.view__reference_input_type == "imagelist":
-        to_plot = st.session_state.view__reference_output_fex.iloc[
-            st.session_state.view__upload_imagelist_idx : st.session_state.view__upload_imagelist_idx
-            + 1,
+    if state.view__reference_input_type == "image":
+        to_plot = state.view__reference_output_fex
+    elif state.view__reference_input_type == "imagelist":
+        to_plot = state.view__reference_output_fex.iloc[
+            state.view__upload_imagelist_idx : state.view__upload_imagelist_idx + 1,
             :,
         ]
     img = Image.open(to_plot["input"].to_list()[0])
@@ -111,9 +111,9 @@ def make_iplot(figure, xoffset_adjust=1):
 
 
 # File select container
-if st.session_state.view__show_select_container:
+if state.view__show_select_container:
     # TODO: add support for using in-memory Detect tab
-    if st.session_state.analyze__output is not None:
+    if state.analyze__output is not None:
         st.button("Use recent analysis", type="primary", on_click=analyze2view)
     st.write(
         "Drag and drop an existing CSV file of detections and optionally the original video they came from, to interactively explore."
@@ -134,25 +134,24 @@ else:
 # Create initial plotly figure of correct dimensions
 figure = go.Figure()
 figure.update_layout(
-    width=st.session_state.detect__frame_width,
-    height=st.session_state.detect__frame_height,
-    xaxis=dict(visible=False, range=[0, st.session_state.detect__frame_width]),
-    yaxis=dict(
-        visible=False, range=[0, st.session_state.detect__frame_height], scaleanchor="x"
-    ),
+    width=state.detect__frame_width,
+    height=state.detect__frame_height,
+    xaxis=dict(visible=False, range=[0, state.detect__frame_width]),
+    yaxis=dict(visible=False, range=[0, state.detect__frame_height], scaleanchor="x"),
     margin={"l": 0, "r": 0, "t": 0, "b": 0},
     showlegend=False,
 )
 
 
-if st.session_state.view__reference_input_type == "video":
-    st.video(st.session_state.view__upload_data)
+if state.view__reference_input_type == "video":
+    st.video(state.view__upload_data)
 
-elif st.session_state.view__reference_input_type == "image":
+elif state.view__reference_input_type == "image":
+    # TODO: fix me
     make_iplot(figure, xoffset_adjust=4.5)
     st.plotly_chart(figure, use_container_width=True)
 
-elif st.session_state.view__reference_input_type == "imagelist":
+elif state.view__reference_input_type == "imagelist":
     with st.container(border=True):
         # Iplot
         make_iplot(figure, xoffset_adjust=4.5)
@@ -160,7 +159,7 @@ elif st.session_state.view__reference_input_type == "imagelist":
 
         # Button control row
         # Re-using widget keynames from detect, which should be comptabile with
-        # make_plotly_fig() which references them, e.g. st.session_state.get('rects')
+        # make_plotly_fig() which references them, e.g. state.get('rects')
         # shouldn't interfere across pages since widgets are torn-down on page-switch
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
@@ -185,7 +184,7 @@ elif st.session_state.view__reference_input_type == "imagelist":
             )
         with center:
             st.write(
-                f"**File:** {st.session_state.view__reference_input_data_name[st.session_state.view__upload_imagelist_idx]}",
+                f"**File:** {state.view__reference_input_data_name[state.view__upload_imagelist_idx]}",
             )
         with right:
             st.button(
@@ -196,9 +195,7 @@ elif st.session_state.view__reference_input_type == "imagelist":
             )
 
 button_placeholder = st.empty()
-if st.session_state.view__reference_output_fex is not None:
-    new_fex = st.data_editor(
-        st.session_state.view__reference_output_fex, on_change=show_save
-    )
-if st.session_state.view__show_save_button:
+if state.view__reference_output_fex is not None:
+    new_fex = st.data_editor(state.view__reference_output_fex, on_change=show_save)
+if state.view__show_save_button:
     button_placeholder.button("Save", on_click=save_fex, args=[new_fex])

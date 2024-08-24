@@ -14,6 +14,7 @@ from zipfile import ZipFile
 import av
 import plotly.graph_objects as go
 import streamlit as st
+from streamlit import session_state as state
 from streamlit_webrtc import WebRtcMode, webrtc_streamer
 from utils import (
     MemoryOverflowError,
@@ -29,17 +30,17 @@ webrtc_logger.setLevel(logging.ERROR)
 
 
 def toggle_save():
-    if st.session_state.save_checkbox:
-        st.session_state.detect__save_session = True
+    if state.save_checkbox:
+        state.detect__save_session = True
         print("Save ENABLED")
     else:
-        st.session_state.detect__save_session = False
+        state.detect__save_session = False
         print("Save DISABLED")
 
 
 def clear_recorded_data():
-    st.session_state.detect__combined_fex = []
-    st.session_state.detect__combined_frames = []
+    state.detect__combined_fex = []
+    state.detect__combined_frames = []
     print("Recordings cleared from memory")
 
 
@@ -57,7 +58,7 @@ def frames_to_video_in_memory(
     output = av.open(buffer, "w", format=format)
 
     # Add a video stream to the container using avg fps of capture
-    video_stream = output.add_stream("h264", rate=int(st.session_state.detect__avg_fps))
+    video_stream = output.add_stream("h264", rate=int(state.detect__avg_fps))
     video_stream.width = frames[0].width
     video_stream.height = frames[0].height
     video_stream.pix_fmt = frames[0].format.name
@@ -89,18 +90,18 @@ def frames_to_video_in_memory(
 
 
 def make_zip_file():
-    video_filename = f"pyfeatlive_video_{st.session_state.detect__start_time}.mp4"
-    csv_filename = f"pyfeatlive_fex_{st.session_state.detect__start_time}.csv"
+    video_filename = f"pyfeatlive_video_{state.detect__start_time}.mp4"
+    csv_filename = f"pyfeatlive_fex_{state.detect__start_time}.csv"
 
     # Compile in-memory frames to video
     video_buffer = frames_to_video_in_memory(
-        st.session_state.detect__combined_frames,
-        fps=int(safe_divide_fps(1, st.session_state.detect__avg_fps)),
+        state.detect__combined_frames,
+        fps=int(safe_divide_fps(1, state.detect__avg_fps)),
     )
 
     # Create in-memory CSV file
     fex_data = fex_to_csv(
-        st.session_state.detect__combined_fex,
+        state.detect__combined_fex,
         video_file_name=video_filename,
     )
 
@@ -117,12 +118,10 @@ def make_zip_file():
 # Create initial plotly figure of correct dimensions
 figure = go.Figure()
 figure.update_layout(
-    width=st.session_state.detect__frame_width,
-    height=st.session_state.detect__frame_height,
-    xaxis=dict(visible=False, range=[0, st.session_state.detect__frame_width]),
-    yaxis=dict(
-        visible=False, range=[0, st.session_state.detect__frame_height], scaleanchor="x"
-    ),
+    width=state.detect__frame_width,
+    height=state.detect__frame_height,
+    xaxis=dict(visible=False, range=[0, state.detect__frame_width]),
+    yaxis=dict(visible=False, range=[0, state.detect__frame_height], scaleanchor="x"),
     margin={"l": 0, "r": 0, "t": 0, "b": 0},
     showlegend=False,
 )
@@ -141,8 +140,8 @@ with st.container(border=True):
         mode=WebRtcMode.SENDONLY,
         media_stream_constraints={
             "video": {
-                "width": st.session_state.detect__frame_width,
-                "height": st.session_state.detect__frame_height,
+                "width": state.detect__frame_width,
+                "height": state.detect__frame_height,
             },
             "audio": False,
         },
@@ -151,8 +150,8 @@ with st.container(border=True):
     # Create plot
     plot = st.empty()
 
-    # Each button is has two-way binding it's key kwarg in st.session_state.key
-    # st.session_state can then be used to read values within functions above to
+    # Each button is has two-way binding it's key kwarg in state.key
+    # state can then be used to read values within functions above to
     # do selecting processing/rendering without complicated threads and queues
     # Create button row
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -170,11 +169,11 @@ with st.container(border=True):
 
 # If webcam is playing process and render frames
 if ctx.video_receiver:
-    st.session_state.detect__video_state = True
+    state.detect__video_state = True
 
     # Initialize empty text and image area
     fps.text("FPS: ")
-    if st.session_state.detect__save_session:
+    if state.detect__save_session:
         timer.text("Approx remaining recording limit: ")
 
     # Continually get a frame, process it, and draw a plotly figure
@@ -194,15 +193,15 @@ if ctx.video_receiver:
             frame = ctx.video_receiver.get_frame()
 
             # Run detector
-            fex, img = process_frame_fast(st.session_state.detector, frame)
-            fex["frame"] = st.session_state.detect__frame_counter
-            st.session_state.detect__frame_counter += 1
+            fex, img = process_frame_fast(state.detector, frame)
+            fex["frame"] = state.detect__frame_counter
+            state.detect__frame_counter += 1
 
             # Update FPS counter
             now = time.perf_counter()
             current_fps = now - start
-            st.session_state.detect__avg_fps += current_fps
-            st.session_state.detect__avg_fps /= 2
+            state.detect__avg_fps += current_fps
+            state.detect__avg_fps /= 2
 
             fps.text(f"FPS: {1 / current_fps:.3f}")
             start = now
@@ -213,9 +212,9 @@ if ctx.video_receiver:
             plot.plotly_chart(figure, use_container_width=True)
 
             # Update Save Frames
-            if st.session_state.detect__save_session:
-                st.session_state.detect__combined_frames.append(frame)
-                st.session_state.detect__combined_fex.append(fex)
+            if state.detect__save_session:
+                state.detect__combined_frames.append(frame)
+                state.detect__combined_fex.append(fex)
                 frame_mem_counter, pd_mem_counter, minutes, seconds, kill_camera = (
                     estimate_memory_usage(
                         current_fps, frame, fex, frame_mem_counter, pd_mem_counter
@@ -234,16 +233,16 @@ if ctx.video_receiver:
             break
         except MemoryOverflowError:
             print("WARNING: Frame memory capacity reached")
-            st.session_state.detect__video_state = False
+            state.detect__video_state = False
             break
         except Exception as e:
-            st.session_state.detect__video_state = False
+            state.detect__video_state = False
             print(e)
             break
 else:
     # Only seen in backend-console
     print("Webcam DISABLED")
-    st.session_state.detect__video_state = False
+    state.detect__video_state = False
 
     # Save Detections
     with st.container(border=True):
@@ -254,26 +253,26 @@ else:
             st.checkbox(
                 "Record Session",
                 key="save_checkbox",
-                value=st.session_state.detect__save_session,
+                value=state.detect__save_session,
                 on_change=toggle_save,
             )
 
         with save_col2:
-            if st.session_state.detect__combined_frames:
+            if state.detect__combined_frames:
                 # Update file-name to current time
-                st.session_state.detect__start_time = time.strftime("%Y%m%d-%H%M%S")
+                state.detect__start_time = time.strftime("%Y%m%d-%H%M%S")
 
                 # Only create the download button if there is data
                 st.download_button(
                     label="Download Detections",
                     data=make_zip_file(),
-                    file_name=f"pyfeatlive_{st.session_state.detect__start_time}.zip",
+                    file_name=f"pyfeatlive_{state.detect__start_time}.zip",
                     mime="application/zip",
                 )
             else:
                 st.write("No detections recorded")
 
-        if st.session_state.detect__combined_frames:
+        if state.detect__combined_frames:
             with save_col3:
                 st.button("Clear Recorded Data", on_click=clear_recorded_data)
 
