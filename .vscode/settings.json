@@ -14,7 +14,4 @@
   "ruff.format.args": ["--line-length=90"],
   "python.defaultInterpreterPath": "${workspaceFolder}/env/bin/python",
   "python.analysis.autoImportCompletions": true,
-  "black-formatter.path": [
-    "${workspaceFolder}/env/bin/black"
-  ],
 }

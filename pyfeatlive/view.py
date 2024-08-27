@@ -57,7 +57,7 @@ def update_idx(how):
         new_idx = state.view__upload_imagelist_idx - 1
         # Wrap around
         if new_idx == -1:
-            new_idx = len(state.view__reference_output_fex.shape[0]) - 1
+            new_idx = state.view__reference_output_fex.shape[0] - 1
         # new_idx = max(new_idx, 0)
     state.view__upload_imagelist_idx = new_idx
 
@@ -97,16 +97,22 @@ def toggleviz(feature):
 def make_iplot(figure, xoffset_adjust=1):
     if state.view__reference_input_type == "image":
         to_plot = state.view__reference_output_fex
+        # NOTE: for some reason we need to do this just for single images
+        correct_img_path = list(state.analyze__tempfile2orig.keys())[0]
+        to_plot["input"] = (
+            correct_img_path
+            if to_plot["input"].item() != correct_img_path
+            else to_plot["input"].item()
+        )
     elif state.view__reference_input_type == "imagelist":
         to_plot = state.view__reference_output_fex.iloc[
             state.view__upload_imagelist_idx : state.view__upload_imagelist_idx + 1,
             :,
         ]
-    img = Image.open(to_plot["input"].to_list()[0])
+    img = Image.open(to_plot["input"].item())
     make_plotly_fig(
         figure, to_plot, img, emotions_position="right", xoffset_adjust=xoffset_adjust
     )
-    # figure.update_layout(width=img.width * scale, height=img.height * scale)
     figure.update_layout(width=600, height=400)
 
 
@@ -143,17 +149,13 @@ figure.update_layout(
 )
 
 
+# TODO: video upload
 if state.view__reference_input_type == "video":
-    st.video(state.view__upload_data)
+    # st.video(state.view__upload_data)
+    pass
 
-elif state.view__reference_input_type == "image":
-    # TODO: fix me
-    make_iplot(figure, xoffset_adjust=4.5)
-    st.plotly_chart(figure, use_container_width=True)
-
-elif state.view__reference_input_type == "imagelist":
+else:
     with st.container(border=True):
-        # Iplot
         make_iplot(figure, xoffset_adjust=4.5)
         st.plotly_chart(figure, use_container_width=True)
 
@@ -163,7 +165,7 @@ elif state.view__reference_input_type == "imagelist":
         # shouldn't interfere across pages since widgets are torn-down on page-switch
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
-            st.toggle("Faceboxes", key="rects", value=True)
+            st.toggle("Faceboxes", key="rects", value=False)
         with col2:
             st.toggle("Landmarks", key="landmarks", value=False)
         with col3:
@@ -171,29 +173,31 @@ elif state.view__reference_input_type == "imagelist":
         with col4:
             st.toggle("AUs", key="aus", value=False)
         with col5:
-            st.toggle("Emotions", key="emotions", value=True)
+            st.toggle("Emotions", key="emotions", value=False)
 
-        # Gallery controls
-        left, center, right = st.columns(3)
-        with left:
-            st.button(
-                "⏪ ",
-                on_click=update_idx,
-                args=["decrement"],
-                use_container_width=True,
-            )
-        with center:
-            st.write(
-                f"**File:** {state.view__reference_input_data_name[state.view__upload_imagelist_idx]}",
-            )
-        with right:
-            st.button(
-                " ⏩",
-                on_click=update_idx,
-                args=["increment"],
-                use_container_width=True,
-            )
+        if state.view__reference_input_type == "imageList":
+            # Gallery controls
+            left, center, right = st.columns(3)
+            with left:
+                st.button(
+                    "⏪ ",
+                    on_click=update_idx,
+                    args=["decrement"],
+                    use_container_width=True,
+                )
+            with center:
+                st.write(
+                    f"**File:** {state.view__reference_input_data_name[state.view__upload_imagelist_idx]}",
+                )
+            with right:
+                st.button(
+                    " ⏩",
+                    on_click=update_idx,
+                    args=["increment"],
+                    use_container_width=True,
+                )
 
+st.write("## Data")
 button_placeholder = st.empty()
 if state.view__reference_output_fex is not None:
     new_fex = st.data_editor(state.view__reference_output_fex, on_change=show_save)

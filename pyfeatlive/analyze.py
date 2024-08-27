@@ -46,6 +46,7 @@ def reset():
         upload_file_name=None,
         upload_file_type=None,
         upload_data=None,
+        tempfile2orig=dict(),
         output=None,
         output_file_name=None,
         ui_state="select",
@@ -232,20 +233,20 @@ if state.analyze__ui_state == "processing":
 
         elif state.analyze__upload_file_type == "image":
             # Create a temporary filepath to pass to py-feat
-            with NamedTemporaryFile(suffix=".jpg") as temp:
-                temp.write(state.analyze__upload_file.getvalue())
-                temp.seek(0)
-                # Store name
-                state.analyze__tempfile2orig[temp.name] = state.analyze__upload_file_name
-                output = state.detector.detect(
-                    temp.name,
-                    face_detection_threshold=state.analyze__face_detection_threshold,
-                    face_identity_threshold=state.analyze__face_identity_threshold,
-                    batch_size=state.analyze__batch_size,
-                    output_size=state.analyze__output_size,
-                    num_workers=state.analyze__num_workers,
-                    pin_memory=state.analyze__pin_memory,
-                )
+            temp = NamedTemporaryFile(suffix=".jpg")
+            temp.write(state.analyze__upload_file.getvalue())
+            temp.seek(0)
+            # Store name
+            state.analyze__tempfile2orig[temp.name] = state.analyze__upload_file_name
+            output = state.detector.detect(
+                temp.name,
+                face_detection_threshold=state.analyze__face_detection_threshold,
+                face_identity_threshold=state.analyze__face_identity_threshold,
+                batch_size=state.analyze__batch_size,
+                output_size=state.analyze__output_size,
+                num_workers=state.analyze__num_workers,
+                pin_memory=state.analyze__pin_memory,
+            )
 
             # Prepare file
             fname = state.analyze__upload_file.name.split(".")[0]
