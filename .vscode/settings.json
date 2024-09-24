@@ -14,4 +14,5 @@
   "ruff.format.args": ["--line-length=90"],
   "python.defaultInterpreterPath": "${workspaceFolder}/env/bin/python",
   "python.analysis.autoImportCompletions": true,
+  "todo-tree.tree.scanMode": "workspace",
 }

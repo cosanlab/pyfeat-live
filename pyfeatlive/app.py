@@ -1,3 +1,8 @@
+"""
+App entry point for pyfeat-live.
+This file configures all the app global settings, pages, common sidebar, and shared SESSION_STATE.
+"""
+
 import os
 import sys
 import time

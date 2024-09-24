@@ -1,7 +1,12 @@
+"""
+The "analyze" page that allows a user to upload an image or video file and process it with py-feat. This page is one-to-one GUI mapping of the Detector.detect() method.
+"""
+
 from tempfile import NamedTemporaryFile
 
 import streamlit as st
 from streamlit import session_state as state
+from streamlit.types import UploadedFile
 from utils import analyze2view, fex_to_csv, update_state
 
 ACCEPTED_VIDEOS = [".mp4", ".mov"]
@@ -9,7 +14,7 @@ ACCEPTED_IMAGES = [".jpg", ".jpeg", ".png"]
 ACCEPTED_FILES = ACCEPTED_VIDEOS + ACCEPTED_IMAGES
 
 
-def handle_file_upload(upload_data):
+def handle_file_upload(upload_data: UploadedFile) -> None:
     if len(upload_data) == 1:
         upload_data = upload_data[0]
         if any(upload_data.name.endswith(suffix) for suffix in ACCEPTED_VIDEOS):
@@ -32,14 +37,14 @@ def handle_file_upload(upload_data):
     update_state("analyze", "ui_state", "options")
 
 
-def prepare_reanalysis():
+def prepare_reanalysis() -> None:
     # Free up memory and update UI state
     update_state("analyze", "output", None)
     update_state("analyze", "output_file_name", None)
     update_state("analyze", "ui_state", "options")
 
 
-def reset():
+def reset() -> None:
     # Free up memory and update UI state
     default_vals = dict(
         upload_file=None,
@@ -55,7 +60,7 @@ def reset():
         update_state("analyze", k, v)
 
 
-def update_idx(how):
+def update_idx(how: str) -> None:
     if how == "increment":
         new_idx = state.analyze__upload_imagelist_idx + 1
         # Wrap-around
@@ -76,7 +81,7 @@ if state.analyze__ui_state == "select":
     st.write(
         "Drag and drop an existing image or video file to run analysis with Py-Feat. Adjust the options below to change how detections are performed"
     )
-    upload_data = st.file_uploader(
+    upload_data: UploadedFile = st.file_uploader(
         "Choose an image or video file", type=ACCEPTED_FILES, accept_multiple_files=True
     )
     if upload_data is not None and len(upload_data) > 0:

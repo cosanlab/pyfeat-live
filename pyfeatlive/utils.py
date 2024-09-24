@@ -1,3 +1,7 @@
+"""
+Utility functions used across the app.
+"""
+
 import sys
 
 import numpy as np

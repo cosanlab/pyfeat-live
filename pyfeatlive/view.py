@@ -1,3 +1,11 @@
+"""
+The "view" page allows a user to upload their Fex csv file (and optionally associated images/video) and inspect the detections.
+
+If no images or video are uploaded, pyfeat-live will render line faces by default. Otherwise, it will overlay detections on the images/videoframes that match the 'input' column of the Fex csv.
+
+This "view" page is aware of whether a user has recentely captured detections on the "live" page or uploaded and analyzed images/video on the "detect" page. If so, it will display an option to use this in-memory data thus avoiding the need to download/upload any additional files.
+"""
+
 from pathlib import Path
 
 import plotly.graph_objects as go
@@ -148,6 +156,8 @@ figure.update_layout(
     showlegend=False,
 )
 
+# TODO: Handle cases where we don't have the orignal image(s) or video ->
+# plot with lineface
 
 # TODO: video upload
 if state.view__reference_input_type == "video":
@@ -155,6 +165,7 @@ if state.view__reference_input_type == "video":
     pass
 
 else:
+    # Single or multiple images
     with st.container(border=True):
         make_iplot(figure, xoffset_adjust=4.5)
         st.plotly_chart(figure, use_container_width=True)
@@ -197,6 +208,7 @@ else:
                     use_container_width=True,
                 )
 
+# Data-frame of detections
 st.write("## Data")
 button_placeholder = st.empty()
 if state.view__reference_output_fex is not None:

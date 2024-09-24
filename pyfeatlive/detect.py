@@ -1,14 +1,15 @@
-# Makes use of:
-# https://github.com/whitphx/streamlit-webrtc
-# See example of drawing on webrtc frames:
-# https://github.com/whitphx/streamlit-webrtc-example/blob/main/app.py
-# How modify opening webRTC stream
-# https://discuss.streamlit.io/t/new-component-streamlit-webrtc-a-new-way-to-deal-with-real-time-media-streams/8669/73?u=whitphx
+"""
+The "live" page that processes a user's webcam feed in real-time.
+Optionally also allows for saving of the detections to zip file containing an mp4 and csv file of detections.
+
+Until cleared from memory, any live detections will be available to the "view" page, allowing a user to quickly view their recording/detections without having to download any files.
+"""
 
 import logging
 import queue
 import time
 from io import BytesIO
+from typing import TypeVar
 from zipfile import ZipFile
 
 import av
@@ -25,11 +26,13 @@ from utils import (
     safe_divide_fps,
 )
 
-webrtc_logger = logging.getLogger("streamlit_webrtc")
-webrtc_logger.setLevel(logging.ERROR)
+FrameT = TypeVar("FrameT", av.VideoFrame, av.AudioFrame)
+
+WEBRTC_LOGGER = logging.getLogger("streamlit_webrtc")
+WEBRTC_LOGGER.setLevel(logging.ERROR)
 
 
-def toggle_save():
+def toggle_save() -> None:
     if state.save_checkbox:
         state.detect__save_session = True
         print("Save ENABLED")
@@ -38,19 +41,19 @@ def toggle_save():
         print("Save DISABLED")
 
 
-def clear_recorded_data():
+def clear_recorded_data() -> None:
     state.detect__combined_fex = []
     state.detect__combined_frames = []
     print("Recordings cleared from memory")
 
 
 def frames_to_video_in_memory(
-    frames,
-    fps=20,
-    format="mp4",
-    bit_rate=1024000,
-    bit_rate_tolerance=4000000,
-):
+    frames: list[FrameT],
+    fps: int = 20,
+    format: str = "mp4",
+    bit_rate: int = 1024000,
+    bit_rate_tolerance: int = 4000000,
+) -> BytesIO:
     # Create an in-memory bytes buffer
     buffer = BytesIO()
 
@@ -89,7 +92,7 @@ def frames_to_video_in_memory(
     return buffer
 
 
-def make_zip_file():
+def make_zip_file() -> bytes:
     video_filename = f"pyfeatlive_video_{state.detect__start_time}.mp4"
     csv_filename = f"pyfeatlive_fex_{state.detect__start_time}.csv"
 
