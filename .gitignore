@@ -9,3 +9,18 @@ recordings/
 .env
 environment.yml
 **.egg-info/
+
+# Tauri / Rust
+tauri/node_modules/
+tauri/src-tauri/target/
+tauri/src-tauri/gen/schemas/
+
+# Build artifacts
+*.dmg
+*.app/
+
+# Local sessions
+sessions/
+
+# Streamlit local cache
+.streamlit/secrets.toml

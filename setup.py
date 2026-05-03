@@ -6,6 +6,7 @@ with open("requirements.txt") as f:
 setup(
     name="pyfeatlive",
     version="1.0",
+    python_requires=">=3.11",
     install_requires=requirements,
     packages=["pyfeatlive"],
     package_data={"pyfeatlive": ["*.png"]},

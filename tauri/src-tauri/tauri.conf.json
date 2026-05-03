@@ -1,0 +1,67 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Py-feat Live",
+  "version": "1.0.0",
+  "identifier": "com.cosanlab.pyfeatlive",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": null,
+    "beforeDevCommand": null,
+    "beforeBuildCommand": null
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    },
+    "withGlobalTauri": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Education",
+    "shortDescription": "Real-time facial expression analysis",
+    "longDescription": "Py-feat Live is a desktop application for real-time facial expression detection and analysis powered by py-feat. Detects faces, landmarks, action units, head pose, gaze, and emotion from webcam feeds and uploaded media.",
+    "externalBin": [
+      "../../vendor/uv/uv"
+    ],
+    "resources": {
+      "../../sidecar/sidecar.py": "runtime/sidecar.py",
+      "../../sidecar/runtime/requirements.txt": "runtime/requirements.txt",
+      "../../pyfeatlive": "pyfeatlive"
+    },
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "11.0",
+      "exceptionDomain": "127.0.0.1",
+      "entitlements": "entitlements.plist"
+    },
+    "windows": {
+      "wix": {
+        "language": ["en-US"]
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/cosanlab/pyfeat-live/releases/latest/download/latest.json"
+      ],
+      "dialog": false,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdFRDE1NUM5NUVBQjg0RTkKUldUcGhLdGV5VlhSZmtDeXJlUU1zdTJrLytzRXhjSzZTUm1TTE9MTEJnNnNWLzQ1RjZPc0czcCsK"
+    }
+  }
+}

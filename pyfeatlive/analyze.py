@@ -215,8 +215,9 @@ if st.session_state.analyze__ui_state == "processing":
             with NamedTemporaryFile(suffix=".mp4") as temp:
                 temp.write(st.session_state.analyze__upload_file.getvalue())
                 temp.seek(0)
-                output = st.session_state.detector.detect_video(
+                output = st.session_state.detector.detect(
                     temp.name,
+                    data_type="video",
                     face_detection_threshold=st.session_state.analyze__face_detection_threshold,
                     face_identity_threshold=st.session_state.analyze__face_identity_threshold,
                     batch_size=st.session_state.analyze__batch_size,
@@ -240,8 +241,9 @@ if st.session_state.analyze__ui_state == "processing":
             with NamedTemporaryFile(suffix=".jpg") as temp:
                 temp.write(st.session_state.analyze__upload_file.getvalue())
                 temp.seek(0)
-                output = st.session_state.detector.detect_image(
+                output = st.session_state.detector.detect(
                     temp.name,
+                    data_type="image",
                     face_detection_threshold=st.session_state.analyze__face_detection_threshold,
                     face_identity_threshold=st.session_state.analyze__face_identity_threshold,
                     batch_size=st.session_state.analyze__batch_size,
@@ -270,8 +272,9 @@ if st.session_state.analyze__ui_state == "processing":
                 temp_list.append(temp)
                 temp_name_list.append(temp.name)
 
-            output = st.session_state.detector.detect_image(
+            output = st.session_state.detector.detect(
                 temp_name_list,
+                data_type="image",
                 face_detection_threshold=st.session_state.analyze__face_detection_threshold,
                 face_identity_threshold=st.session_state.analyze__face_identity_threshold,
                 batch_size=st.session_state.analyze__batch_size,
