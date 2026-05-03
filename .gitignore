@@ -1,26 +1,91 @@
-env/
-build/
-*.DS*
-py-feat/
+# --- Python ---
 __pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+**.egg-info/
+build/
+dist/
+.eggs/
+*.egg
+
+# Virtual envs
+env/
+venv/
+.venv/
+ENV/
+
+# Test / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Profiler output (perf_testing.py)
+*.prof
+*.pstats
+
+# Jupyter
+.ipynb_checkpoints/
+
+# --- Secrets & local config ---
+.env
+.env.*
+*.env
+.streamlit/secrets.toml
+
+# Apple signing artifacts that should never be committed
+*.p12
+*.p8
+*.pem
+*.cer
+*.mobileprovision
+
+# --- Editor / OS ---
+*.DS*
+*.swp
+*.swo
+.vscode/
+.idea/
+*.iml
+
+# --- Project-specific ---
+py-feat/
 detections/
 recordings/
 *.csv
-.env
 environment.yml
-**.egg-info/
 
-# Tauri / Rust
+# Local recording sessions land in ~/Documents by default, but if a
+# user configures a project-relative path we want it ignored.
+sessions/
+
+# --- Tauri / Rust ---
 tauri/node_modules/
 tauri/src-tauri/target/
 tauri/src-tauri/gen/schemas/
+tauri/src-tauri/WixTools/
+
+# Vendored uv binaries — fetched by .github/workflows/release.yml
+# at build time and installed to vendor/uv/ during dev via the
+# instructions in vendor/uv/README.md. Keeping them out of the repo
+# avoids 40MB+ binaries in git history.
+vendor/uv/uv-*
 
 # Build artifacts
 *.dmg
 *.app/
+*.AppImage
+*.msi
+*.deb
+*.rpm
+*.exe.zip
 
-# Local sessions
-sessions/
-
-# Streamlit local cache
-.streamlit/secrets.toml
+# --- Tauri-generated frontend cache ---
+tauri/dist/index.html.bak
