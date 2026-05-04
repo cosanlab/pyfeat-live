@@ -267,7 +267,12 @@ with st.container(border=True):
         mode=WebRtcMode.SENDRECV,
         video_processor_factory=PyfeatVideoProcessor,
         media_stream_constraints={
-            "video": {"width": WIDTH, "height": HEIGHT},
+            # ``frameRate: {ideal: 30}`` locks the WebRTC negotiation so
+            # the camera delivers ~30fps. The recorder hardcodes 30 in
+            # _build_recorder_config to match — without this hint a
+            # browser might give us 24 or 60 and the recorded MP4's
+            # wall-clock duration would be wrong.
+            "video": {"width": WIDTH, "height": HEIGHT, "frameRate": {"ideal": 30}},
             "audio": False,
         },
         async_processing=True,
@@ -311,7 +316,11 @@ def _build_recorder_config() -> RecorderConfig:
         record_video=rv,
         record_fex=rf,
         video_mode=video_mode if rv else "clean",
-        fps=20,
+        # 30 matches the WebRTC frameRate constraint above. The encoder
+        # rate must match actual capture rate or the MP4 plays back
+        # time-distorted; the previous hardcoded 20 made every recording
+        # appear ~67% of its real-time duration.
+        fps=30,
         width=WIDTH,
         height=HEIGHT,
         detector_info=detector_info,
