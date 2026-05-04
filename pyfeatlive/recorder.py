@@ -160,9 +160,19 @@ class SessionRecorder:
             return None
 
         meta = {
+            # ``type`` lets the Viewer's session picker distinguish live
+            # recordings from analyze-page outputs (analyze writes
+            # ``analyze_video`` / ``analyze_image`` / ``analyze_imagelist``
+            # via pyfeatlive.sessions.save_analyze_session).
+            "type": "live",
             "started_at": self._started_at,
             "ended_at": time.time(),
             "duration_seconds": time.time() - self._started_at,
+            # ``fps`` mirrors the analyze-page metadata key so the Viewer
+            # has one place to look for "frames-per-second of the recorded
+            # video" regardless of source. ``fps_target`` is kept for
+            # backwards-compat with already-recorded sessions.
+            "fps": self.config.fps,
             "fps_target": self.config.fps,
             "width": self.config.width,
             "height": self.config.height,

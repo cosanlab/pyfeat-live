@@ -55,6 +55,10 @@ coverage.xml
 .idea/
 *.iml
 
+# Playwright MCP test artifacts (page snapshots / console logs from
+# in-session browser automation). Never want these in git history.
+.playwright-mcp/
+
 # --- Project-specific ---
 py-feat/
 detections/

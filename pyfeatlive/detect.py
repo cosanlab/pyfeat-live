@@ -69,6 +69,27 @@ class PyfeatVideoProcessor(VideoProcessorBase):
         self.avg_fps = 0.0
         self.frame_counter = 0
 
+        # Adaptive detection throttle. Detection is the slowest thing
+        # in recv() — 30-100ms depending on detector + device — and
+        # blocks the WebRTC pipeline, so the user's preview lags by the
+        # detection cost. By running detection at most once per its own
+        # measured duration and reusing the previous Fex for overlay
+        # drawing on the in-between frames, the display rate decouples
+        # from the detection rate: on a CPU-only machine where
+        # detection takes 200ms, the user still sees their face at
+        # 30fps with overlays that update ~5 times per second instead
+        # of a synchronized-but-laggy 5fps.
+        #
+        # The cached Fex feeds overlays only — we pass an empty Fex to
+        # the recorder on skip frames so fex.csv stays sparse-but-
+        # correct (same shape as analyze-page output with skip_frames
+        # set). The video stream remains contiguous.
+        self._cached_fex = None
+        self._next_detection_at = 0.0  # perf_counter target
+        self._last_detection_dur = 0.0
+        self.detection_runs = 0
+        self.detection_skips = 0
+
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         try:
             rgb = frame.to_ndarray(format="rgb24")
@@ -81,22 +102,48 @@ class PyfeatVideoProcessor(VideoProcessorBase):
 
         pil_img = PILImage.fromarray(rgb)
 
-        try:
-            fex, _ = process_frame_batch(
-                self.detector, [pil_img], frame_offset=self.frame_counter
-            )
-        except Exception as e:
-            webrtc_logger.error(f"detection failed on frame {self.frame_counter}: {e}")
-            self.frame_counter += 1
-            return frame
+        # Run detection if we're past the throttle deadline; otherwise
+        # reuse the most recent Fex. On the very first frame
+        # (_next_detection_at == 0.0) the condition is trivially true,
+        # so we always do an initial detection.
+        now_sched = time.perf_counter()
+        run_detection = now_sched >= self._next_detection_at
 
-        pil_img = draw_overlays_pil(
-            pil_img,
-            fex,
-            self.toggles,
-            mp_landmarks=self.mp_landmarks,
-            landmark_style=self.landmark_style,
-        )
+        fex_for_record = None
+        if run_detection:
+            t0 = time.perf_counter()
+            try:
+                fex, _ = process_frame_batch(
+                    self.detector, [pil_img], frame_offset=self.frame_counter
+                )
+                self._cached_fex = fex
+                fex_for_record = fex
+                self.detection_runs += 1
+            except Exception as e:
+                webrtc_logger.error(
+                    f"detection failed on frame {self.frame_counter}: {e}"
+                )
+            self._last_detection_dur = time.perf_counter() - t0
+            # Schedule next detection for "right after this one would
+            # have finished if we ran it back-to-back". Self-pacing —
+            # fast hardware runs detection nearly every frame, slow
+            # hardware naturally throttles down.
+            self._next_detection_at = now_sched + self._last_detection_dur
+        else:
+            self.detection_skips += 1
+
+        # Always draw overlay (cheap, ~5-30ms). On skip frames the
+        # cached Fex is one-or-more frames stale — overlays appear to
+        # "track" with a small natural lag, which is what we want.
+        fex_for_overlay = self._cached_fex
+        if fex_for_overlay is not None:
+            pil_img = draw_overlays_pil(
+                pil_img,
+                fex_for_overlay,
+                self.toggles,
+                mp_landmarks=self.mp_landmarks,
+                landmark_style=self.landmark_style,
+            )
 
         # Recording. We always create the recorder when streaming so
         # the capture button works regardless of record toggles; an
@@ -118,7 +165,10 @@ class PyfeatVideoProcessor(VideoProcessorBase):
             else:
                 video_frame = frame  # clean source — recorder ignores
                                      # if record_video is False
-            self.recorder.offer_frame(video_frame, fex)
+            # Pass fex_for_record (None on skip frames) so fex.csv stays
+            # sparse-but-correct. The video stream is contiguous —
+            # video_frame is offered every recv().
+            self.recorder.offer_frame(video_frame, fex_for_record)
             if self.capture_requested:
                 # Match the screenshot to the current video_mode so
                 # captures and the MP4 stay visually consistent.
@@ -298,10 +348,22 @@ if ctx.video_processor:
     # the toggles between sessions takes effect on the next START.
     ctx.video_processor.recorder_config = _build_recorder_config()
 
-# Live FPS readout.
+# Live FPS readout. With the adaptive throttle, display rate ≠
+# detection rate — surface both so the user can confirm the throttle
+# is helping (e.g. on slow hardware they'll see display ~30fps but
+# detection 5-10fps).
 if ctx.state.playing and ctx.video_processor:
-    fps_display.text(f"FPS: {ctx.video_processor.avg_fps:.1f}")
-    st.session_state.detect__avg_fps = ctx.video_processor.avg_fps
+    vp = ctx.video_processor
+    det_dur = getattr(vp, "_last_detection_dur", 0.0)
+    det_rate = (1.0 / det_dur) if det_dur > 0 else 0.0
+    runs = getattr(vp, "detection_runs", 0)
+    skips = getattr(vp, "detection_skips", 0)
+    skip_pct = (100.0 * skips / (runs + skips)) if (runs + skips) else 0.0
+    fps_display.text(
+        f"Display {vp.avg_fps:.1f} fps  •  Detection {det_rate:.1f} fps  "
+        f"•  {skip_pct:.0f}% frames use cached overlay"
+    )
+    st.session_state.detect__avg_fps = vp.avg_fps
 else:
     fps_display.text("FPS: --")
 

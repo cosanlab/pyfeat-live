@@ -93,11 +93,6 @@ SESSION_STATE = dict(
     identity_model="arcface",
     device=_AVAILABLE_DEVICES[0],
     detector=None,
-    # Live-mode batch size: how many webcam frames to buffer before dispatching
-    # detection. N=2 captures most of py-feat 0.7's batched-extraction win
-    # (~25-40% throughput on multi-face frames) at the cost of ~33ms added
-    # latency at 30fps; N=4 is faster still but starts to feel laggy.
-    live_batch_n=2,
     # Live overlay landmark style. Options handled in
     # utils._create_detector_elements:
     #   "mesh"         - Delaunay wireframe (dlib-68) or MP Face Mesh
@@ -149,18 +144,44 @@ SESSION_STATE = dict(
     # After calling .read() on file
     analyze__upload_data=None,
 
-    # File returned to user
+    # File returned to user. ``output`` is the raw CSV bytes for the
+    # download button; ``output_fex`` is the in-memory Fex used to jump
+    # straight into the Viewer without round-tripping through disk.
     analyze__output=None,
     analyze__output_fex=None,
-    analyze_output_file_name=None,
+    analyze__output_file_name=None,
+    # When True (default), the analyze page persists results as a session
+    # folder under ~/Documents/pyfeat-live/sessions/ so they show up in
+    # the Viewer alongside live recordings. When False the user only gets
+    # the CSV download.
+    analyze__save_session=True,
+    # Path of the session written by the most recent Process click.
+    # Used by the "See in Viewer" button to pre-select that session.
+    analyze__last_session_dir=None,
 
     # --VIEW PAGE--
-    view__num_images=0,
-    view__img_idx=0,
-    view__live_data=None,
-    view__upload_data=None,
-    view__show_select_container=True,
-    view__show_save_button=False,
+    # Currently-selected session directory (string path) or None if the
+    # user is in upload-CSV mode. The Viewer turns this into a Session
+    # via pyfeatlive.sessions.list_sessions / Session.load_fex.
+    view__current_session=None,
+    # Currently-displayed frame index. Driven by the slider; reset to 0
+    # when the source changes.
+    view__current_frame=0,
+    # Per-overlay toggles for the Viewer (mirrors the Detect page's
+    # toggles so users see consistent annotation choices across pages).
+    view__overlay_rects=True,
+    view__overlay_landmarks=True,
+    view__overlay_poses=False,
+    view__overlay_aus=False,
+    view__overlay_emotions=False,
+    view__overlay_gaze=False,
+    # Uploaded ad-hoc CSV / video for the "no session, just files" path.
+    # Bytes (not the UploadedFile) so they survive reruns; cleared on
+    # source-change.
+    view__upload_fex_bytes=None,
+    view__upload_fex_name=None,
+    view__upload_video_bytes=None,
+    view__upload_video_name=None,
 )
 # fmt: on
 # Initialise session state on first render only. Streamlit re-runs the
@@ -249,18 +270,6 @@ with st.sidebar:
     )
 
     st.write("### LIVE MODE")
-    st.slider(
-        "Live batch size",
-        key="live_batch_n",
-        min_value=1,
-        max_value=4,
-        step=1,
-        help=(
-            "Number of webcam frames to buffer before running detection. "
-            "Larger = more throughput; smaller = lower latency. Each step "
-            "above 1 adds ~33ms (one frame at 30fps) of head-of-line delay."
-        ),
-    )
     # Three landmark styles, identical name set for both detectors so
     # the user doesn't have to relearn the radio when they switch:
     #   "points" - per-landmark dots
