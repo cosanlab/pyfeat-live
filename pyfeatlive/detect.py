@@ -134,18 +134,14 @@ class PyfeatVideoProcessor(VideoProcessorBase):
         else:
             self.detection_skips += 1
 
-        # Always draw overlay (cheap, ~5-30ms). On skip frames the
-        # cached Fex is one-or-more frames stale — overlays appear to
-        # "track" with a small natural lag, which is what we want.
+        # Display path is now CLEAN — we return the unmodified source
+        # frame. Overlays are drawn client-side by the live_overlay
+        # component reading from /api/live/fex (see _live_state.publish
+        # below). The PIL overlay path is only invoked when the user
+        # has explicitly chosen ``video_mode = "overlay"`` for
+        # recording, in which case we generate a one-off baked frame
+        # for the encoder rather than swapping it into the display.
         fex_for_overlay = self._cached_fex
-        if fex_for_overlay is not None:
-            pil_img = draw_overlays_pil(
-                pil_img,
-                fex_for_overlay,
-                self.toggles,
-                mp_landmarks=self.mp_landmarks,
-                landmark_style=self.landmark_style,
-            )
 
         # Recording. We always create the recorder when streaming so
         # the capture button works regardless of record toggles; an
@@ -155,30 +151,31 @@ class PyfeatVideoProcessor(VideoProcessorBase):
             self._open_recorder(frame)
         if self.recorder is not None:
             cfg = self.recorder.config
-            # Choose which frame to persist for video. "clean" =
-            # source webcam (default — Viewer can overlay from
-            # fex.csv); "overlay" = the annotated view the user sees
-            # on-screen (good for share-out exports). The capture
-            # button always saves whichever the current mode shows.
-            if cfg.record_video and cfg.video_mode == "overlay":
-                video_frame = av.VideoFrame.from_ndarray(
-                    np.asarray(pil_img), format="rgb24"
+            # "overlay" mode is the only path that still bakes
+            # overlays into pixel data — and only into the recorder's
+            # input, not the display.
+            overlay_frame = None
+            if (cfg.record_video and cfg.video_mode == "overlay"
+                    and fex_for_overlay is not None):
+                baked = draw_overlays_pil(
+                    pil_img,
+                    fex_for_overlay,
+                    self.toggles,
+                    mp_landmarks=self.mp_landmarks,
+                    landmark_style=self.landmark_style,
                 )
-            else:
-                video_frame = frame  # clean source — recorder ignores
-                                     # if record_video is False
+                overlay_frame = av.VideoFrame.from_ndarray(
+                    np.asarray(baked), format="rgb24"
+                )
+
+            video_frame = overlay_frame if overlay_frame is not None else frame
             # Pass fex_for_record (None on skip frames) so fex.csv stays
-            # sparse-but-correct. The video stream is contiguous —
-            # video_frame is offered every recv().
+            # sparse-but-correct. The video stream is contiguous.
             self.recorder.offer_frame(video_frame, fex_for_record)
             if self.capture_requested:
                 # Match the screenshot to the current video_mode so
                 # captures and the MP4 stay visually consistent.
-                shot_frame = (
-                    video_frame
-                    if cfg.video_mode == "overlay"
-                    else frame
-                )
+                shot_frame = overlay_frame if overlay_frame is not None else frame
                 try:
                     self.recorder.screenshot(shot_frame)
                 except Exception as e:
@@ -215,11 +212,9 @@ class PyfeatVideoProcessor(VideoProcessorBase):
         except Exception as e:
             webrtc_logger.error(f"_live_state.publish failed: {e}")
 
-        out_array = np.asarray(pil_img)
-        new_frame = av.VideoFrame.from_ndarray(out_array, format="rgb24")
-        new_frame.pts = frame.pts
-        new_frame.time_base = frame.time_base
-        return new_frame
+        # Return the original source frame; overlays are rendered by
+        # the live_overlay component, not baked into the WebRTC stream.
+        return frame
 
     def _open_recorder(self, frame: av.VideoFrame) -> None:
         cfg = self.recorder_config
