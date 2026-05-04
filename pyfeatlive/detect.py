@@ -318,6 +318,28 @@ with st.container(border=True):
     with col6:
         st.toggle("Gaze", key="gaze", value=False)
 
+    # Sidecar live overlay component. Polls /api/live/fex and renders
+    # the same overlay primitives the Viewer uses, but driven by
+    # streaming detection state from recv() instead of a CSV.
+    # Currently displayed BELOW the streamlit-webrtc widget so the
+    # data channel is observable; layering it directly over the
+    # camera <video> is the next step (cross-iframe positioning).
+    from components.live_overlay import live_overlay_player
+
+    live_overlay_player(
+        toggles={
+            "rects": st.session_state.get("rects", True),
+            "landmarks": st.session_state.get("landmarks", True),
+            "aus": st.session_state.get("aus", False),
+            "emotions": st.session_state.get("emotions", False),
+            "poses": st.session_state.get("poses", False),
+            "gaze": st.session_state.get("gaze", False),
+        },
+        landmark_style=st.session_state.get("landmark_style", "mesh"),
+        width=WIDTH,
+        height=HEIGHT,
+    )
+
 
 def _build_recorder_config() -> RecorderConfig:
     """Read sidebar toggles + detector state into a RecorderConfig.
