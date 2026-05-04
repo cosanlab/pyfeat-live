@@ -1,21 +1,25 @@
-"""Tiny localhost file server backing the fex_video Streamlit component.
+"""Tiny localhost HTTP server backing the pyfeat-live Streamlit components.
 
-The component's ``<video>`` element needs an HTTP URL it can stream and
-range-seek for fast scrubbing. Streamlit doesn't expose a public API for
-serving arbitrary user files, and base64-encoding session videos (tens of
-MB) into the component args is wasteful and slow. Instead we run a
-daemon-thread ``http.server`` bound to ``127.0.0.1`` on an ephemeral port
-that serves files only under :func:`recorder.default_sessions_root` —
-refusing any path that escapes it via symlink or ``..``.
+Two responsibilities, both served by a single daemon-thread server bound
+to an ephemeral 127.0.0.1 port:
 
-We hand-roll Range request support on top of ``SimpleHTTPRequestHandler``
-because the stdlib doesn't honor ``Range:`` headers — a 200-only response
-makes browsers populate ``video.seekable`` with ``[0, 0]`` and refuse to
-seek anywhere except time zero.
+1. Static files under :func:`recorder.default_sessions_root` for the
+   Viewer's ``<video>`` element. Hand-rolled byte-range support because
+   ``SimpleHTTPRequestHandler`` doesn't honor ``Range:`` headers and a
+   200-only response makes browsers refuse to seek past time zero.
+2. JSON API at ``/api/live/fex`` for the Live page's planned
+   client-side overlay renderer. Returns the latest detection result
+   from :mod:`components._live_state` so a polling component can draw
+   overlays at near-real-time rate without triggering Streamlit reruns.
+
+Path traversal defense is layered: the ``directory=`` arg blocks naive
+``..``, the post-resolve ``relative_to(root)`` check catches symlinks
+that escape via the sessions root.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import threading
@@ -23,6 +27,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from recorder import default_sessions_root
+
+from components import _live_state
 
 _LOCK = threading.Lock()
 _SERVER: ThreadingHTTPServer | None = None
@@ -75,7 +81,35 @@ class _SessionFileHandler(SimpleHTTPRequestHandler):
             return None
         return resolved
 
+    # ------------------------------------------------------------------
+    # API routes. Matched before file serving so ``/api/live/fex``
+    # never resolves through translate_path's session-root check.
+    # ------------------------------------------------------------------
+    def _try_api(self) -> bool:
+        if self.path.rstrip("/") == "/api/live/fex":
+            payload = json.dumps(_live_state.snapshot()).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            try:
+                self.wfile.write(payload)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return True
+        return False
+
     def do_HEAD(self):
+        if self.path.startswith("/api/"):
+            # API endpoints are tiny JSON; HEAD just mirrors the GET
+            # status without a body.
+            if self.path.rstrip("/") == "/api/live/fex":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                return
+            self.send_error(404, "Not Found")
+            return
         resolved = self._resolve_for_serve()
         if resolved is None:
             return
@@ -87,6 +121,8 @@ class _SessionFileHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if self._try_api():
+            return
         resolved = self._resolve_for_serve()
         if resolved is None:
             return

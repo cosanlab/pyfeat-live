@@ -30,6 +30,8 @@ from recorder import (
 )
 from pathlib import Path
 
+from components import _live_state
+
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
 
@@ -196,6 +198,23 @@ class PyfeatVideoProcessor(VideoProcessorBase):
         self._last_t = now
         self.frame_counter += 1
 
+        # Publish the latest fex for the planned client-side Live
+        # overlay renderer. We push on EVERY recv() (not just detection
+        # ticks) so the consumer sees a heartbeat — but on skip ticks
+        # we publish the cached fex unchanged, with the new frame
+        # index so the consumer can tell time is advancing.
+        try:
+            _live_state.publish(
+                fex=fex_for_overlay,
+                frame_index=self.frame_counter,
+                ts=now,
+                mp_landmarks=self.mp_landmarks,
+                video_width=frame.width or 0,
+                video_height=frame.height or 0,
+            )
+        except Exception as e:
+            webrtc_logger.error(f"_live_state.publish failed: {e}")
+
         out_array = np.asarray(pil_img)
         new_frame = av.VideoFrame.from_ndarray(out_array, format="rgb24")
         new_frame.pts = frame.pts
@@ -233,6 +252,12 @@ class PyfeatVideoProcessor(VideoProcessorBase):
         except Exception as e:
             webrtc_logger.error(f"recorder close failed: {e}")
         self.recorder = None
+        # Stop publishing — without this a stale Fex would keep
+        # showing on the (future) Live overlay until the next stream.
+        try:
+            _live_state.reset()
+        except Exception as e:
+            webrtc_logger.error(f"_live_state.reset failed: {e}")
         return out
 
 
