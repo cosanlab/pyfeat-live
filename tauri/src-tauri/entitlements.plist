@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- Camera access for streamlit-webrtc live detection. The
+         NSCameraUsageDescription string in Info.plist (set via
+         tauri.conf.json) is the user-visible prompt. -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
+    <!-- Hardened runtime exceptions needed by the bundled Python
+         sidecar:
+           - allow-jit / allow-unsigned-executable-memory:
+               PyTorch's MPS / CoreML backends and parts of NumPy
+               (vendored OpenBLAS) write executable pages at runtime.
+           - disable-library-validation:
+               PyInstaller-bundled .dylibs (torch, mediapipe, xgboost)
+               aren't signed with the same Team ID as the parent .app;
+               without this exception they fail to load under the
+               hardened runtime.
+           - allow-dyld-environment-variables:
+               Lets the Rust shell pass OMP_NUM_THREADS / HF_HOME /
+               etc. into the sidecar via the environment. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+  </dict>
+</plist>

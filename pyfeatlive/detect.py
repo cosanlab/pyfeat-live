@@ -1,146 +1,305 @@
-# %%
-# Makes use of:
-# https://github.com/whitphx/streamlit-webrtc
-# See example of drawing on webrtc frames:
-# https://github.com/whitphx/streamlit-webrtc-example/blob/main/app.py
-# How modify opening webRTC stream
-# https://discuss.streamlit.io/t/new-component-streamlit-webrtc-a-new-way-to-deal-with-real-time-media-streams/8669/73?u=whitphx
+# Live detection page.
+#
+# Uses streamlit-webrtc's VideoProcessor pattern: every webcam frame
+# arrives in `recv()` (in a worker thread), we run pyfeat detection
+# on it, draw overlays directly onto the frame's numpy array via PIL,
+# and return the modified frame. streamlit-webrtc renders the result
+# in a native HTML5 <video> element at native fps — no plotly chart
+# rebuild per frame, so no flicker.
+#
+# Recording is streaming-write via SessionRecorder: video and Fex are
+# written to a session folder under ~/Documents/pyfeat-live/sessions/
+# as the stream runs, instead of buffered in RAM and re-encoded at the
+# end. See pyfeatlive/recorder.py.
 
-import queue
-import streamlit as st
-from streamlit_webrtc import webrtc_streamer, WebRtcMode
-import time
-import plotly.graph_objects as go
-from utils import process_frame, make_plotly_fig, fex_to_csv, safe_divide_fps
 import logging
+import time
+
 import av
-from io import BytesIO
-from zipfile import ZipFile
+import numpy as np
+import streamlit as st
+from streamlit_webrtc import VideoProcessorBase, WebRtcMode, webrtc_streamer
+from PIL import Image as PILImage
+
+from utils import draw_overlays_pil, process_frame_batch
+from recorder import (
+    RecorderConfig,
+    SessionRecorder,
+    default_sessions_root,
+    reveal_in_file_manager,
+)
+from pathlib import Path
+
+from components import _live_state
 
 webrtc_logger = logging.getLogger("streamlit_webrtc")
 webrtc_logger.setLevel(logging.ERROR)
 
 
-def clear_recorded_data():
-    st.session_state.detect__combined_fex = []
-    st.session_state.detect__combined_frames = []
+# ---------------------------------------------------------------------
+# Video processor: runs in streamlit-webrtc's worker thread, one recv()
+# call per webcam frame. Has to be picklable across the streamlit rerun
+# boundary; the recorder holds its own writer thread so recv() stays
+# real-time.
+# ---------------------------------------------------------------------
+class PyfeatVideoProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.detector = None
+        self.toggles = {
+            "rects": True,
+            "landmarks": True,
+            "poses": False,
+            "aus": False,
+            "emotions": False,
+        }
+        self.mp_landmarks = False
+        self.landmark_style = "mesh"
 
+        # Recorder lifecycle. Created lazily on first recv() so we
+        # have the actual frame dimensions, and only if at least one
+        # of (video, fex) is enabled. None means "not recording".
+        self.recorder: SessionRecorder | None = None
+        self.recorder_config: RecorderConfig | None = None
+        self.sessions_root: Path = default_sessions_root()
 
-def frames_to_video_in_memory(
-    frames,
-    fps=20,
-    format="mp4",
-    bit_rate=1024000,
-    bit_rate_tolerance=4000000,
-):
-    # Create an in-memory bytes buffer
-    buffer = BytesIO()
+        # Capture-frame request flag. Set from the main thread when
+        # the user clicks the button; consumed in recv().
+        self.capture_requested = False
 
-    # Open an output container in memory, specifying the format (e.g., 'mp4')
-    output = av.open(buffer, "w", format=format)
+        # FPS smoothing.
+        self._last_t = None
+        self.avg_fps = 0.0
+        self.frame_counter = 0
 
-    # Add a video stream to the container using avg fps of capture
-    video_stream = output.add_stream("h264", rate=int(st.session_state.detect__avg_fps))
-    video_stream.width = frames[0].width
-    video_stream.height = frames[0].height
-    video_stream.pix_fmt = frames[0].format.name
-    video_stream.bit_rate = bit_rate
-    video_stream.bit_rate_tolerance = bit_rate_tolerance
+        # Adaptive detection throttle. Detection is the slowest thing
+        # in recv() — 30-100ms depending on detector + device — and
+        # blocks the WebRTC pipeline, so the user's preview lags by the
+        # detection cost. By running detection at most once per its own
+        # measured duration and reusing the previous Fex for overlay
+        # drawing on the in-between frames, the display rate decouples
+        # from the detection rate: on a CPU-only machine where
+        # detection takes 200ms, the user still sees their face at
+        # 30fps with overlays that update ~5 times per second instead
+        # of a synchronized-but-laggy 5fps.
+        #
+        # The cached Fex feeds overlays only — we pass an empty Fex to
+        # the recorder on skip frames so fex.csv stays sparse-but-
+        # correct (same shape as analyze-page output with skip_frames
+        # set). The video stream remains contiguous.
+        self._cached_fex = None
+        self._next_detection_at = 0.0  # perf_counter target
+        self._last_detection_dur = 0.0
+        self.detection_runs = 0
+        self.detection_skips = 0
 
-    pts = frames[0].time_base.denominator
-    for frame in frames:
-        frame.pts = pts
-        pts += int(safe_divide_fps(1, fps) * frame.time_base.denominator)
-
-        # Convert PyAV frame to a packet and write to the container
-        # Sometimes this throws a PermissionError, but that doesn't seem to affect the final video, so we just continue
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         try:
-            packets = video_stream.encode(frame)
-            for packet in packets:
-                output.mux(packet)
-        except PermissionError:
-            continue
+            rgb = frame.to_ndarray(format="rgb24")
+        except Exception as e:
+            webrtc_logger.error(f"frame.to_ndarray failed: {e}")
+            return frame
 
-    # Finalize and close the container
-    for packet in video_stream.encode():
-        output.mux(packet)
-    output.close()
+        if self.detector is None:
+            return frame
 
-    # Go to the beginning of the buffer
-    buffer.seek(0)
-    return buffer
+        pil_img = PILImage.fromarray(rgb)
+
+        # Run detection if we're past the throttle deadline; otherwise
+        # reuse the most recent Fex. On the very first frame
+        # (_next_detection_at == 0.0) the condition is trivially true,
+        # so we always do an initial detection.
+        now_sched = time.perf_counter()
+        run_detection = now_sched >= self._next_detection_at
+
+        fex_for_record = None
+        if run_detection:
+            t0 = time.perf_counter()
+            try:
+                fex, _ = process_frame_batch(
+                    self.detector, [pil_img], frame_offset=self.frame_counter
+                )
+                self._cached_fex = fex
+                fex_for_record = fex
+                self.detection_runs += 1
+            except Exception as e:
+                webrtc_logger.error(
+                    f"detection failed on frame {self.frame_counter}: {e}"
+                )
+            self._last_detection_dur = time.perf_counter() - t0
+            # Schedule next detection for "right after this one would
+            # have finished if we ran it back-to-back". Self-pacing —
+            # fast hardware runs detection nearly every frame, slow
+            # hardware naturally throttles down.
+            self._next_detection_at = now_sched + self._last_detection_dur
+        else:
+            self.detection_skips += 1
+
+        # Display path is now CLEAN — we return the unmodified source
+        # frame. Overlays are drawn client-side by the live_overlay
+        # component reading from /api/live/fex (see _live_state.publish
+        # below). The PIL overlay path is only invoked when the user
+        # has explicitly chosen ``video_mode = "overlay"`` for
+        # recording, in which case we generate a one-off baked frame
+        # for the encoder rather than swapping it into the display.
+        fex_for_overlay = self._cached_fex
+
+        # Recording. We always create the recorder when streaming so
+        # the capture button works regardless of record toggles; an
+        # empty session (no video, no fex, no captures) is cleaned up
+        # by SessionRecorder.close().
+        if self.recorder_config is not None and self.recorder is None:
+            self._open_recorder(frame)
+        if self.recorder is not None:
+            cfg = self.recorder.config
+            # "overlay" mode is the only path that still bakes
+            # overlays into pixel data — and only into the recorder's
+            # input, not the display.
+            overlay_frame = None
+            if (cfg.record_video and cfg.video_mode == "overlay"
+                    and fex_for_overlay is not None):
+                baked = draw_overlays_pil(
+                    pil_img,
+                    fex_for_overlay,
+                    self.toggles,
+                    mp_landmarks=self.mp_landmarks,
+                    landmark_style=self.landmark_style,
+                )
+                overlay_frame = av.VideoFrame.from_ndarray(
+                    np.asarray(baked), format="rgb24"
+                )
+
+            video_frame = overlay_frame if overlay_frame is not None else frame
+            # Pass fex_for_record (None on skip frames) so fex.csv stays
+            # sparse-but-correct. The video stream is contiguous.
+            self.recorder.offer_frame(video_frame, fex_for_record)
+            if self.capture_requested:
+                # Match the screenshot to the current video_mode so
+                # captures and the MP4 stay visually consistent.
+                shot_frame = overlay_frame if overlay_frame is not None else frame
+                try:
+                    self.recorder.screenshot(shot_frame)
+                except Exception as e:
+                    webrtc_logger.error(f"screenshot failed: {e}")
+                self.capture_requested = False
+
+        # FPS smoothing.
+        now = time.perf_counter()
+        if self._last_t is not None:
+            inst = now - self._last_t
+            if inst > 0:
+                self.avg_fps = (
+                    0.9 * self.avg_fps + 0.1 * (1.0 / inst)
+                    if self.avg_fps
+                    else 1.0 / inst
+                )
+        self._last_t = now
+        self.frame_counter += 1
+
+        # Publish the latest fex for the planned client-side Live
+        # overlay renderer. We push on EVERY recv() (not just detection
+        # ticks) so the consumer sees a heartbeat — but on skip ticks
+        # we publish the cached fex unchanged, with the new frame
+        # index so the consumer can tell time is advancing.
+        try:
+            _live_state.publish(
+                fex=fex_for_overlay,
+                frame_index=self.frame_counter,
+                ts=now,
+                mp_landmarks=self.mp_landmarks,
+                video_width=frame.width or 0,
+                video_height=frame.height or 0,
+            )
+        except Exception as e:
+            webrtc_logger.error(f"_live_state.publish failed: {e}")
+
+        # Return the original source frame; overlays are rendered by
+        # the live_overlay component, not baked into the WebRTC stream.
+        return frame
+
+    def _open_recorder(self, frame: av.VideoFrame) -> None:
+        cfg = self.recorder_config
+        if cfg is None:
+            return
+        # Patch real frame dimensions in case the constraint was a hint
+        # not a guarantee.
+        cfg = RecorderConfig(
+            record_video=cfg.record_video,
+            record_fex=cfg.record_fex,
+            fps=cfg.fps,
+            width=frame.width or cfg.width,
+            height=frame.height or cfg.height,
+            bit_rate=cfg.bit_rate,
+            queue_size=cfg.queue_size,
+            detector_info=cfg.detector_info,
+        )
+        try:
+            self.recorder = SessionRecorder(self.sessions_root, cfg)
+        except Exception as e:
+            webrtc_logger.error(f"recorder open failed: {e}")
+            self.recorder = None
+
+    def close_recorder(self) -> Path | None:
+        if self.recorder is None:
+            return None
+        out = self.recorder.dir
+        try:
+            self.recorder.close()
+        except Exception as e:
+            webrtc_logger.error(f"recorder close failed: {e}")
+        self.recorder = None
+        # Stop publishing — without this a stale Fex would keep
+        # showing on the (future) Live overlay until the next stream.
+        try:
+            _live_state.reset()
+        except Exception as e:
+            webrtc_logger.error(f"_live_state.reset failed: {e}")
+        return out
 
 
-def make_zip_file():
+# ---------------------------------------------------------------------
+# UI
+# ---------------------------------------------------------------------
+WIDTH = st.session_state.detect__frame_width
+HEIGHT = st.session_state.detect__frame_height
 
-    video_filename = f"pyfeatlive_video_{st.session_state.detect__start_time}.mp4"
-    csv_filename = f"pyfeatlive_fex_{st.session_state.detect__start_time}.csv"
-
-    # Compile in-memory frames to video
-    video_buffer = frames_to_video_in_memory(
-        st.session_state.detect__combined_frames,
-        fps=int(safe_divide_fps(1, st.session_state.detect__avg_fps)),
-    )
-
-    # Create in-memory CSV file
-    fex_data = fex_to_csv(
-        st.session_state.detect__combined_fex,
-        video_file_name=video_filename,
-    )
-
-    # Create in-memory zip file buffer
-    buf = BytesIO()
-    with ZipFile(buf, "x") as z:
-        z.writestr(csv_filename, fex_data)
-        z.writestr(video_filename, video_buffer.read())
-
-    # Return contents of buffer for download
-    return buf.getvalue()
-
-
-# Create initial plotly figure of correct dimensions
-figure = go.Figure()
-figure.update_layout(
-    width=st.session_state.detect__frame_width,
-    height=st.session_state.detect__frame_height,
-    xaxis=dict(visible=False, range=[0, st.session_state.detect__frame_width]),
-    yaxis=dict(
-        visible=False, range=[0, st.session_state.detect__frame_height], scaleanchor="x"
-    ),
-    margin={"l": 0, "r": 0, "t": 0, "b": 0},
-    showlegend=False,
-)
-
-# Instructions
 with st.expander(label="Usage Guide", expanded=False):
     st.write(
-        "Automatically detect facial expression from your live camera feed. \n1. Choose your device by clicking on `SELECT DEVICE`\n2. Toggle checkboxes to enable or disable specific detectors (speeds up processing)\n3. Video recording and detections are saved by default and can be downloaded or cleared using the buttons below",
+        "Automatically detect facial expression from your live camera feed.\n\n"
+        "1. Click **SELECT DEVICE** / **START** to begin streaming.\n"
+        "2. Toggle which annotations to display on the live preview.\n"
+        "3. Choose what to record:\n"
+        "   - **Video — Clean**: source camera, no overlays. Use this if you'll "
+        "load the session into the Viewer page and want the overlays applied "
+        "from the Fex CSV.\n"
+        "   - **Video — With overlays**: bakes the displayed annotations into "
+        "the MP4 (good for share-out exports; not for re-analysis).\n"
+        "   - **Fex CSV**: per-frame detection data.\n"
+        "4. Click **📸 Capture frame** any time to save the current view as a "
+        "JPG. Captures always work, even with both record options off.\n"
+        "5. After **STOP**, click **Reveal in Finder** to open the session folder."
     )
 
-# Webcam container
 with st.container(border=True):
-    # FPS counter
-    fps = st.empty()
+    fps_display = st.empty()
 
-    # Create WebRTC cam
     ctx = webrtc_streamer(
         key="sample",
-        mode=WebRtcMode.SENDONLY,
+        mode=WebRtcMode.SENDRECV,
+        video_processor_factory=PyfeatVideoProcessor,
         media_stream_constraints={
-            "video": {
-                "width": st.session_state.detect__frame_width,
-                "height": st.session_state.detect__frame_height,
-            },
+            # ``frameRate: {ideal: 30}`` locks the WebRTC negotiation so
+            # the camera delivers ~30fps. The recorder hardcodes 30 in
+            # _build_recorder_config to match — without this hint a
+            # browser might give us 24 or 60 and the recorded MP4's
+            # wall-clock duration would be wrong.
+            "video": {"width": WIDTH, "height": HEIGHT, "frameRate": {"ideal": 30}},
             "audio": False,
         },
         async_processing=True,
     )
-    # Each button is has two-way binding it's key kwarg in st.session_state.key
-    # st.session_state can then be used to read values within functions above to
-    # do selecting processing/rendering without complicated threads and queues
-    # Create button row
-    st.write("### SELECT DETECTORS")
-    col1, col2, col3, col4, col5 = st.columns(5)
+
+    st.write("### OVERLAY")
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
         st.toggle("Faceboxes", key="rects", value=True)
     with col2:
@@ -151,95 +310,210 @@ with st.container(border=True):
         st.toggle("AUs", key="aus", value=False)
     with col5:
         st.toggle("Emotions", key="emotions", value=False)
+    with col6:
+        st.toggle("Gaze", key="gaze", value=False)
 
-    # Create plot
-    plot = st.empty()
+    # Sidecar live overlay component. Polls /api/live/fex and renders
+    # the same overlay primitives the Viewer uses, but driven by
+    # streaming detection state from recv() instead of a CSV.
+    # Currently displayed BELOW the streamlit-webrtc widget so the
+    # data channel is observable; layering it directly over the
+    # camera <video> is the next step (cross-iframe positioning).
+    from components.live_overlay import live_overlay_player
 
-# If webcam is playing process and render frames
-if ctx.video_receiver:
-    st.session_state.detect__video_state = True
+    live_overlay_player(
+        toggles={
+            "rects": st.session_state.get("rects", True),
+            "landmarks": st.session_state.get("landmarks", True),
+            "aus": st.session_state.get("aus", False),
+            "emotions": st.session_state.get("emotions", False),
+            "poses": st.session_state.get("poses", False),
+            "gaze": st.session_state.get("gaze", False),
+        },
+        landmark_style=st.session_state.get("landmark_style", "mesh"),
+        width=WIDTH,
+        height=HEIGHT,
+    )
 
-    # Initialize empty text and image area
-    fps.text(f"FPS: ")
 
-    # Continually get a frame, process it, and draw a plotly figure
-    start = time.perf_counter()
-    plot.plotly_chart(figure)
+def _build_recorder_config() -> RecorderConfig:
+    """Read sidebar toggles + detector state into a RecorderConfig.
+    Always returns a config — even with all record options off — so
+    the capture-frame button works independently of recording. Empty
+    sessions (no video, no fex, no screenshots) are cleaned up inside
+    SessionRecorder.close()."""
+    video_mode = st.session_state.get("detect__video_mode", "clean")
+    rv = video_mode in ("clean", "overlay")
+    rf = bool(st.session_state.get("detect__record_fex", True))
+    detector_info = {
+        "detector_type": st.session_state.get("detector_type"),
+        "face_model": st.session_state.get("face_model"),
+        "landmark_model": st.session_state.get("landmark_model"),
+        "au_model": st.session_state.get("au_model"),
+        "emotion_model": st.session_state.get("emotion_model"),
+        "identity_model": st.session_state.get("identity_model"),
+        "device": st.session_state.get("device"),
+    }
+    return RecorderConfig(
+        record_video=rv,
+        record_fex=rf,
+        video_mode=video_mode if rv else "clean",
+        # 30 matches the WebRTC frameRate constraint above. The encoder
+        # rate must match actual capture rate or the MP4 plays back
+        # time-distorted; the previous hardcoded 20 made every recording
+        # appear ~67% of its real-time duration.
+        fps=30,
+        width=WIDTH,
+        height=HEIGHT,
+        detector_info=detector_info,
+    )
 
-    while True:
-        try:
-            # Get video frame
-            frame = ctx.video_receiver.get_frame()
 
-            # Run detector
-            fex, img = process_frame(st.session_state.detector, frame)
-            fex["frame"] = st.session_state.detect__frame_counter
-            st.session_state.detect__frame_counter += 1
+def _request_capture():
+    """Main-thread → worker-thread capture request. Worker picks it up
+    on next recv() and saves the JPG synchronously."""
+    if ctx.video_processor and ctx.video_processor.recorder is not None:
+        ctx.video_processor.capture_requested = True
+        st.toast("Frame captured", icon="📸")
 
-            # Update FPS counter
-            now = time.perf_counter()
-            current_fps = now - start
-            st.session_state.detect__avg_fps += current_fps
-            st.session_state.detect__avg_fps /= 2
 
-            fps.text(f"FPS: {1 / current_fps:.3f}")
-            start = now
+# Push current state into the running processor on every script rerun.
+if ctx.video_processor:
+    ctx.video_processor.detector = st.session_state.detector
+    ctx.video_processor.toggles = {
+        "rects": st.session_state.get("rects", True),
+        "landmarks": st.session_state.get("landmarks", True),
+        "poses": st.session_state.get("poses", False),
+        "aus": st.session_state.get("aus", False),
+        "emotions": st.session_state.get("emotions", False),
+        "gaze": st.session_state.get("gaze", False),
+    }
+    ctx.video_processor.mp_landmarks = (
+        st.session_state.get("landmark_model") == "mp_facemesh_v2"
+    )
+    ctx.video_processor.landmark_style = st.session_state.get(
+        "landmark_style", "mesh"
+    )
+    # Build / refresh the recorder_config — only consumed when the
+    # recorder is actually opened (lazy on first recv()), so changing
+    # the toggles between sessions takes effect on the next START.
+    ctx.video_processor.recorder_config = _build_recorder_config()
 
-            # Make figure
-            make_plotly_fig(figure, fex, img)
-            plot.plotly_chart(figure, use_container_width=True)
-
-            # Update Save Frames
-            if st.session_state.save_session:
-                st.session_state.detect__combined_frames.append(frame)
-                st.session_state.detect__combined_fex.append(fex)
-
-        except queue.Empty:
-            break
-        except Exception as e:
-            st.session_state.detect__video_state = False
-            print(e)
-            break
+# Live FPS readout. With the adaptive throttle, display rate ≠
+# detection rate — surface both so the user can confirm the throttle
+# is helping (e.g. on slow hardware they'll see display ~30fps but
+# detection 5-10fps).
+if ctx.state.playing and ctx.video_processor:
+    vp = ctx.video_processor
+    det_dur = getattr(vp, "_last_detection_dur", 0.0)
+    det_rate = (1.0 / det_dur) if det_dur > 0 else 0.0
+    runs = getattr(vp, "detection_runs", 0)
+    skips = getattr(vp, "detection_skips", 0)
+    skip_pct = (100.0 * skips / (runs + skips)) if (runs + skips) else 0.0
+    fps_display.text(
+        f"Display {vp.avg_fps:.1f} fps  •  Detection {det_rate:.1f} fps  "
+        f"•  {skip_pct:.0f}% frames use cached overlay"
+    )
+    st.session_state.detect__avg_fps = vp.avg_fps
 else:
-    st.session_state.detect__video_state = False
+    fps_display.text("FPS: --")
 
-    # Save Detections
-    with st.container(border=True):
-        st.write("### SAVE DETECTIONS")
+# Capture-frame button: visible whenever a recorder exists (i.e. the
+# stream has been running long enough for the first frame to land).
+# Independent of the video / fex record toggles — captures always work.
+if ctx.state.playing and ctx.video_processor and ctx.video_processor.recorder:
+    cap_col1, cap_col2 = st.columns([1, 4])
+    with cap_col1:
+        st.button("📸 Capture frame", on_click=_request_capture)
+    with cap_col2:
+        rec = ctx.video_processor.recorder
+        bits = []
+        if rec.config.record_video:
+            bits.append(f"video ({rec.config.video_mode})")
+        if rec.config.record_fex:
+            bits.append("fex")
+        if not bits:
+            bits.append("captures only")
+        st.caption(
+            f"Session `{rec.dir.name}` — {', '.join(bits)} "
+            f"(captures: {rec.captures_taken}, dropped: {rec.dropped_frames})"
+        )
 
-        save_col1, save_col2, save_col3 = st.columns(3)
-        with save_col1:
-            st.checkbox("Record Session", key="save_session", value=True)
+# When the user stops streaming, close the recorder and remember the
+# session path for the post-stop UI. Run this whenever we transition
+# from playing → not playing.
+if (
+    not ctx.state.playing
+    and ctx.video_processor
+    and ctx.video_processor.recorder is not None
+):
+    last_dir = ctx.video_processor.close_recorder()
+    if last_dir is not None:
+        st.session_state.detect__last_session_dir = str(last_dir)
 
-        if not st.session_state.save_session:
-            st.session_state.detect__combined_fex = []
-            st.session_state.detect__combined_frames = []
-            st.write("")
-        else:
-            # Check if there is fex data to download
-            with save_col2:
-                if (
-                    st.session_state.detect__combined_fex
-                    and st.session_state.detect__combined_frames
-                    and not st.session_state.detect__video_state
-                ):
+# ---------------------------------------------------------------------
+# Recording controls + post-session UI.
+# ---------------------------------------------------------------------
+with st.container(border=True):
+    st.write("### RECORD")
+    rec_col1, rec_col2, rec_col3 = st.columns([2, 1, 2])
+    with rec_col1:
+        st.radio(
+            "Video",
+            key="detect__video_mode",
+            options=["off", "clean", "overlay"],
+            format_func=lambda x: {
+                "off": "Don't record video",
+                "clean": "Clean (source camera)",
+                "overlay": "With overlays burned in",
+            }[x],
+            horizontal=False,
+            help=(
+                "**Clean** records the raw camera feed; the Viewer page "
+                "can re-apply overlays from the Fex CSV later. **With "
+                "overlays** burns the on-screen annotations into the "
+                "MP4 — useful for share-out clips but the overlays can "
+                "no longer be toggled off."
+            ),
+        )
+    with rec_col2:
+        st.checkbox(
+            "Fex CSV",
+            key="detect__record_fex",
+            value=True,
+            help=(
+                "Save per-frame detection data as CSV. Required if "
+                "you want to use the Viewer page to overlay annotations "
+                "on a clean recording."
+            ),
+        )
+    with rec_col3:
+        st.caption(
+            "Capture-frame is always available while streaming, "
+            "even with both options off.\n\nSessions land in:\n\n"
+            f"`{default_sessions_root()}`"
+        )
 
-                    # Update file-name to current time
-                    st.session_state.detect__start_time = time.strftime("%Y%m%d-%H%M%S")
+    last_dir = st.session_state.get("detect__last_session_dir")
+    if not ctx.state.playing and last_dir:
+        st.divider()
+        last_path = Path(last_dir)
+        st.write(f"**Last session:** `{last_path.name}`")
+        meta_path = last_path / "metadata.json"
+        if meta_path.exists():
+            try:
+                import json as _json
 
-                    # Only create the download button if there is data
-                    st.download_button(
-                        label="Download Detections",
-                        data=make_zip_file(),
-                        file_name=f"pyfeatlive_{st.session_state.detect__start_time}.zip",
-                        mime="application/zip",
-                    )
-                else:
-                    st.write("No detections recorded")
+                meta = _json.loads(meta_path.read_text())
+                cols = st.columns(4)
+                cols[0].metric("Frames", meta.get("frames_written", 0))
+                cols[1].metric("Captures", meta.get("captures_taken", 0))
+                cols[2].metric("Dropped", meta.get("frames_dropped", 0))
+                cols[3].metric("Duration", f"{meta.get('duration_seconds', 0):.1f}s")
+            except Exception:
+                pass
 
-            with save_col3:
-                if (
-                    st.session_state.detect__combined_frames
-                    and not st.session_state.detect__video_state
-                ):
-                    st.button("Clear Recorded Data", on_click=clear_recorded_data)
+        btn_col1, btn_col2 = st.columns([1, 4])
+        with btn_col1:
+            if st.button("Reveal in Finder"):
+                reveal_in_file_manager(last_path)

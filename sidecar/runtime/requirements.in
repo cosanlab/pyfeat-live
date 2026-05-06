@@ -1,0 +1,20 @@
+# Pinned dependency manifest installed into the user-data venv on first
+# launch (see tauri/src-tauri/src/lib.rs::bootstrap_runtime). Distinct
+# from the repo-root requirements.txt because:
+#   - ships in the .app, must be reproducible across builds
+#   - explicitly excludes pyfeatlive itself (the source ships in the
+#     bundle as resources, loaded via PYTHONPATH; not installed)
+#   - pins exact versions for first-run determinism
+#
+# Bumping a pin: edit the version, then `uv pip compile
+# sidecar/runtime/requirements.in --output-file sidecar/runtime/
+# requirements.txt --generate-hashes` once we add a .in input. For now
+# this file is the source of truth.
+py-feat @ git+https://github.com/cosanlab/py-feat@437b651
+streamlit==1.57.0
+streamlit-webrtc==0.64.6
+plotly==6.7.0
+watchdog==6.0.0
+tornado==6.5.5
+av==16.1.0
+pillow==12.2.0
