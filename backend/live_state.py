@@ -30,6 +30,16 @@ class LiveSession:
     toggles: dict[str, bool] = field(default_factory=dict)
     landmark_style: str = "mesh"
     mp_landmarks: bool = False
+    # Decoupled-detection state used by /api/live/frame's bake-and-
+    # return loop. The handler reads ``_cached_fex`` to draw overlays
+    # on EVERY uploaded frame, and launches a fresh detection in
+    # ``run_in_executor`` only when both ``_detection_in_flight`` is
+    # False and ``time.perf_counter() >= _next_detection_at`` — that
+    # way detection runs at its own rate (~10 Hz) while display
+    # tracks the upload rate (capped by camera fps + jpeg encode time).
+    _cached_fex: object = None
+    _next_detection_at: float = 0.0
+    _detection_in_flight: bool = False
     _state: dict = field(default_factory=lambda: {
         "frame_index": -1,
         "ts": 0.0,
