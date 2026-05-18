@@ -3,23 +3,21 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import { liveApi, systemApi } from '../lib/api';
-  import type { LiveConfigure, LiveStateMsg, ComputeInfo, OverlayEdgeSets, AuTable } from '../lib/api';
-  import type { Face, OverlayToggles } from '../lib/overlay/types';
+  import type { LiveConfigure, ComputeInfo } from '../lib/api';
+  import type { OverlayToggles } from '../lib/overlay/types';
   import { cameraStore, refreshDevices, startCamera, stopCamera } from '../lib/webrtc/useCamera.svelte';
   import LiveSidebar from '../lib/components/LiveSidebar.svelte';
   import LiveControlBar from '../lib/components/LiveControlBar.svelte';
-  import OverlayCanvas from '../lib/components/OverlayCanvas.svelte';
 
-  // Display dimensions — always render the captured frame at this size
-  // regardless of what resolution we detect at. This decouples visual
-  // quality from detection cost.
+  // Display dimensions — always render at this size regardless of what
+  // resolution detection runs at. The backend bakes overlays onto the
+  // uploaded frame and returns it, so what we paint IS the frame
+  // detection ran on.
   const WIDTH = 640, HEIGHT = 360;
 
   // Detection resolution presets. Lower = faster detection but coarser
-  // landmark precision (still visually fine because we scale up to
-  // display coords for rendering). The backend's per-frame cost scales
-  // roughly linearly with pixel count for retinaface and the landmark
-  // forward pass, so 320x180 cuts most of the detection cost vs 640x360.
+  // landmark precision. Forwarded to the backend on configure() so the
+  // bake matches the detection coordinate space.
   type DetectionRes = { label: string; w: number; h: number };
   const DETECTION_PRESETS: readonly DetectionRes[] = [
     { label: '640 × 360', w: 640, h: 360 },
@@ -40,122 +38,43 @@
   });
 
   let compute: ComputeInfo | null = $state(null);
-  let auTable: AuTable | null = $state(null);
   let sidebarCollapsed = $state(false);
   let apiError: string | null = $state(null);
 
   type LandmarkStyle = 'points' | 'lines' | 'mesh';
   let landmarkStyle: LandmarkStyle = $state('mesh');
-  let edgeSets: OverlayEdgeSets | null = $state(null);
-
-  // Pick the right edge list for the current detector + style.
-  // points → no edges (drawLandmarks handles it as dots).
-  // lines  → dlib face-parts (Detector) OR MP contours (MPDetector).
-  // mesh   → dlib Delaunay (Detector) OR MP tessellation (MPDetector).
-  const currentEdges = $derived.by((): number[][] | undefined => {
-    if (!edgeSets || landmarkStyle === 'points') return undefined;
-    if (mpLandmarks) {
-      return landmarkStyle === 'lines' ? edgeSets.mp_contours : edgeSets.mp_tess;
-    }
-    return landmarkStyle === 'lines' ? edgeSets.dlib_parts : edgeSets.dlib_mesh;
-  });
 
   let toggles: OverlayToggles = $state({
     rects: true, landmarks: true, poses: false,
     gaze: true, aus: false, emotions: false,
   });
 
-  let video: HTMLVideoElement | null = $state(null);
+  // Hidden <video> element — holds the camera MediaStream. We never
+  // display it directly; the visible frame is whatever the backend
+  // returns from /api/live/frame (so frame + overlay are temporally
+  // locked).
+  let sourceVideo: HTMLVideoElement | null = $state(null);
+  // Visible canvas — paints the baked frame returned by the backend.
   let displayCanvas: HTMLCanvasElement | null = $state(null);
+  // Hidden canvas — drawImage(sourceVideo) → toBlob('image/jpeg') feeds
+  // the upload. Created lazily on first capture.
   let captureCanvas: HTMLCanvasElement | null = null;
 
-  let faces: Face[] = $state([]);
-  let lastFacesAt = 0;        // wall-clock of last non-empty detection
-  let mpLandmarks = $state(true);
   let isStreaming = $state(false);
   let isPaused = $state(false);
   let isRecording = $state(false);
-  let lastFrameIndex = $state(-1);
-  let ws: WebSocket | null = null;
-  let captureStopped = false;
+  let loopAbort: AbortController | null = null;
 
-  // Exponential smoothing on landmark coords across detection frames.
-  // Raw py-feat output jitters frame-to-frame even on a still face; the
-  // detection rate (~5-15 fps) makes the jitter very visible. Blend new
-  // landmarks with the previous frame's smoothed positions to reduce
-  // it. Alpha is "how much of the new value to take" — 0.6 keeps the
-  // overlay responsive while smoothing out the noise.
-  const SMOOTH_ALPHA = 0.6;
-
-  function scaleFaceCoords(f: Face, sx: number, sy: number): Face {
-    return {
-      ...f,
-      rect: f.rect ? [
-        f.rect[0] == null ? null : f.rect[0] * sx,
-        f.rect[1] == null ? null : f.rect[1] * sy,
-        f.rect[2] == null ? null : f.rect[2] * sx,
-        f.rect[3] == null ? null : f.rect[3] * sy,
-      ] : f.rect,
-      lm: f.lm?.map((v, i) => v == null ? null : v * (i % 2 === 0 ? sx : sy)),
-      // pose / gaze / aus / emotions are angles or scalars, not coords —
-      // do NOT scale.
-    };
-  }
-
-  function lerpMaybe(prev: number | null, next: number | null): number | null {
-    if (next == null) return prev;
-    if (prev == null) return next;
-    return prev * (1 - SMOOTH_ALPHA) + next * SMOOTH_ALPHA;
-  }
-
-  function smoothFaces(prev: Face[], next: Face[]): Face[] {
-    return next.map((n) => {
-      const p = prev.find((f) => f.face_idx === n.face_idx);
-      if (!p) return n;
-      const sm: Face = { ...n };
-      if (n.rect && p.rect) {
-        sm.rect = [
-          lerpMaybe(p.rect[0], n.rect[0]),
-          lerpMaybe(p.rect[1], n.rect[1]),
-          lerpMaybe(p.rect[2], n.rect[2]),
-          lerpMaybe(p.rect[3], n.rect[3]),
-        ];
-      }
-      if (n.lm && p.lm && p.lm.length === n.lm.length) {
-        sm.lm = n.lm.map((v, i) => lerpMaybe(p.lm![i] ?? null, v));
-      }
-      if (n.pose && p.pose) {
-        sm.pose = [
-          lerpMaybe(p.pose[0], n.pose[0]),
-          lerpMaybe(p.pose[1], n.pose[1]),
-          lerpMaybe(p.pose[2], n.pose[2]),
-        ];
-      }
-      if (n.gaze && p.gaze) {
-        sm.gaze = [
-          lerpMaybe(p.gaze[0], n.gaze[0]),
-          lerpMaybe(p.gaze[1], n.gaze[1]),
-        ];
-      }
-      return sm;
-    });
-  }
-
-  // FPS smoothing: track wall-clock arrival of WS detection messages
-  // over a 1-second sliding window. Display rate is decoupled from
-  // detection rate (the <video> renders the camera natively at ~30fps),
-  // so this measures how fast detection actually runs end-to-end.
+  // Round-trip fps: how fast we can upload → bake → paint a frame.
+  // Tracked over a 1-second sliding window of completed paints.
   let fps = $state(0);
   const fpsWindow: number[] = [];
+  let frameIndex = $state(0);
 
   // 1) On mount: fetch compute info + enumerate cameras + configure detector
   onMount(async () => {
     try {
-      [compute, edgeSets, auTable] = await Promise.all([
-        systemApi.compute(),
-        systemApi.overlayEdges(),
-        systemApi.auTable(),
-      ]);
+      compute = await systemApi.compute();
       if (compute.mps.available) config.device = 'mps';
       else if (compute.cuda.available) config.device = 'cuda';
       else config.device = 'cpu';
@@ -167,180 +86,184 @@
   });
 
   onDestroy(() => {
-    stopCapture();
-    ws?.close();
+    stopLoop();
     stopCamera();
   });
 
+  // Send detector + overlay/render hints to the backend. The bake handler
+  // reads toggles/landmark_style/detection_res off LiveSession on every
+  // /api/live/frame call, so changing any of these here takes effect on
+  // the next round trip.
   async function applyConfig(c: LiveConfigure) {
     config = c;
-    mpLandmarks = c.detector_type === 'MPDetector';
     try {
-      await liveApi.configure(c);
+      await liveApi.configure({
+        ...c,
+        toggles: toggles as unknown as Record<string, boolean>,
+        landmark_style: landmarkStyle,
+        detection_res: { w: detectionRes.w, h: detectionRes.h },
+      });
       apiError = null;
     } catch (e: any) {
       apiError = `Detector config failed: ${e?.message ?? e}`;
     }
   }
 
+  // Push overlay hints to the backend without rebuilding the detector.
+  // Called when the user toggles overlay chips or switches landmark style
+  // mid-stream.
+  async function pushOverlayHints() {
+    try {
+      await liveApi.configure({
+        ...config,
+        toggles: toggles as unknown as Record<string, boolean>,
+        landmark_style: landmarkStyle,
+        detection_res: { w: detectionRes.w, h: detectionRes.h },
+      });
+    } catch (e: any) {
+      apiError = `Overlay config failed: ${e?.message ?? e}`;
+    }
+  }
+
   async function startStream() {
     if (!cameraStore.selectedDeviceId) return;
     const stream = await startCamera(cameraStore.selectedDeviceId, WIDTH, HEIGHT);
-    if (video) {
-      video.srcObject = stream;
-      await video.play();
+    if (sourceVideo) {
+      sourceVideo.srcObject = stream;
+      await sourceVideo.play();
     }
+    await applyConfig(config);
     isPaused = false;
-    ws = liveApi.openWebSocket((msg: LiveStateMsg) => {
-      // Backend returns coords in the detection-image space. Scale to
-      // our display space (WIDTH/HEIGHT) so the overlay lines up over
-      // displayCanvas regardless of what detection resolution the user
-      // picked. msg.video_width/height tells us the actual detection
-      // dimensions for this exact frame, so an in-flight resolution
-      // change can't misalign anything.
-      const scaleX = msg.video_width > 0 ? WIDTH / msg.video_width : 1;
-      const scaleY = msg.video_height > 0 ? HEIGHT / msg.video_height : 1;
-      const rawFaces = msg.faces as unknown as Face[];
-      const newFaces = (scaleX === 1 && scaleY === 1)
-        ? rawFaces
-        : rawFaces.map((f) => scaleFaceCoords(f, scaleX, scaleY));
-
-      // Persist last-known faces across empty detection frames so motion
-      // blur / brief misses don't cause the overlay to flicker off.
-      // Clear after 1s of no detections so a stale overlay doesn't
-      // linger once the subject is actually gone.
-      if (newFaces.length > 0) {
-        faces = smoothFaces(faces, newFaces);
-        lastFacesAt = performance.now();
-      } else if (performance.now() - lastFacesAt > 1000) {
-        faces = [];
-      }
-      mpLandmarks = msg.mp_landmarks;
-      lastFrameIndex = msg.frame_index;
-      const now = performance.now();
-      fpsWindow.push(now);
-      while (fpsWindow.length > 0 && fpsWindow[0]! < now - 1000) fpsWindow.shift();
-      fps = fpsWindow.length;
-    });
-    startCapture();
     isStreaming = true;
+    loopAbort = new AbortController();
+    runCaptureLoop(loopAbort.signal);
   }
 
-  // Sequential capture loop. Two reasons it's not setInterval-driven:
-  //  1. Pipelined uploads triggered a Metal/MPS thread-safety crash on
-  //     the backend when two frames hit PyTorch.forward simultaneously.
-  //  2. We need the displayed image to be the SAME frame detection ran
-  //     on, otherwise the live <video> runs ~200ms ahead of the overlay
-  //     and motion looks jarringly out of sync. v1 baked overlays into
-  //     the video stream and got this for free; v2 reaches the same
-  //     effect by blitting the captured frame to displayCanvas only
-  //     after detection completes — display rate ≈ detection rate,
-  //     but video + overlay are temporally locked.
-  function startCapture() {
-    captureCanvas ??= document.createElement('canvas');
-    // captureCanvas dimensions are resized inside the loop to match
-    // the current detectionRes — so changing the sidebar control
-    // takes effect on the next frame.
-    captureStopped = false;
-    // Toggle perf logging from the browser console: window.__pyfeatProfile = true
-    (async function loop() {
-      while (!captureStopped) {
-        if (!video) { await new Promise(r => setTimeout(r, 33)); continue; }
-        const profile = (window as any).__pyfeatProfile === true;
-        const t0 = profile ? performance.now() : 0;
+  // Sequential capture loop: grab → JPEG-encode → POST → decode response
+  // → paint. The next capture starts only after the previous response
+  // has painted, so the display rate naturally tracks round-trip speed.
+  // The displayed image IS the frame detection ran on — the backend
+  // bakes overlays onto our exact uploaded pixels.
+  async function runCaptureLoop(signal: AbortSignal) {
+    if (!captureCanvas) captureCanvas = document.createElement('canvas');
 
-        // Resize captureCanvas to the current detection resolution.
-        // drawImage with explicit dest size downscales the video stream.
-        const dW = detectionRes.w, dH = detectionRes.h;
-        if (captureCanvas!.width !== dW) captureCanvas!.width = dW;
-        if (captureCanvas!.height !== dH) captureCanvas!.height = dH;
-        const ctx = captureCanvas!.getContext('2d')!;
-        ctx.drawImage(video, 0, 0, dW, dH);
-        const tDraw = profile ? performance.now() : 0;
+    while (!signal.aborted && isStreaming && !isPaused) {
+      if (!sourceVideo || sourceVideo.readyState < 2) {
+        await new Promise((r) => setTimeout(r, 33));
+        continue;
+      }
+      const profile = (window as any).__pyfeatProfile === true;
+      const t0 = profile ? performance.now() : 0;
 
-        const blob = await new Promise<Blob | null>((resolve) =>
-          captureCanvas!.toBlob((b) => resolve(b), 'image/jpeg', 0.7),
-        );
-        const tEnc = profile ? performance.now() : 0;
+      // 1. Grab current frame from <video> onto hidden canvas at the
+      // current detection resolution. drawImage downscales for us.
+      const dW = detectionRes.w, dH = detectionRes.h;
+      if (captureCanvas.width !== dW) captureCanvas.width = dW;
+      if (captureCanvas.height !== dH) captureCanvas.height = dH;
+      const ctx = captureCanvas.getContext('2d')!;
+      ctx.drawImage(sourceVideo, 0, 0, dW, dH);
+      const tDraw = profile ? performance.now() : 0;
 
-        if (!blob) { await new Promise(r => setTimeout(r, 16)); continue; }
+      // 2. JPEG-encode
+      const blob = await new Promise<Blob | null>((res) =>
+        captureCanvas!.toBlob((b) => res(b), 'image/jpeg', 0.85),
+      );
+      if (signal.aborted) return;
+      if (!blob) { await new Promise((r) => setTimeout(r, 16)); continue; }
+      const tEnc = profile ? performance.now() : 0;
+
+      // 3. Round-trip to backend; receive baked JPEG
+      let baked: Blob;
+      try {
+        baked = await liveApi.uploadFrame(blob);
+        apiError = null;
+      } catch (e: any) {
+        if (signal.aborted) return;
+        apiError = `Frame upload failed: ${e?.message ?? e}`;
+        // Soft backoff so a backend hiccup doesn't spin a tight retry.
+        await new Promise((r) => setTimeout(r, 250));
+        continue;
+      }
+      const tNet = profile ? performance.now() : 0;
+
+      // 4. Decode + paint to displayCanvas (DPR-scaled for sharpness).
+      if (displayCanvas) {
         try {
-          await liveApi.uploadFrame(blob);
-          apiError = null;
-        } catch (e: any) {
-          apiError = `Frame upload failed: ${e?.message ?? e}`;
-          await new Promise(r => setTimeout(r, 500));
-          continue;
-        }
-        const tNet = profile ? performance.now() : 0;
-
-        // Detection done — blit the captured frame (which may be a
-        // downscaled detection frame) to displayCanvas at the full
-        // display size. drawImage handles the upscale.
-        if (displayCanvas) {
+          const bitmap = await createImageBitmap(baked);
+          if (signal.aborted) { bitmap.close(); return; }
           const dpr = window.devicePixelRatio || 1;
           if (displayCanvas.width !== WIDTH * dpr) displayCanvas.width = WIDTH * dpr;
           if (displayCanvas.height !== HEIGHT * dpr) displayCanvas.height = HEIGHT * dpr;
           const dctx = displayCanvas.getContext('2d')!;
           dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          dctx.drawImage(captureCanvas!, 0, 0, WIDTH, HEIGHT);
-        }
-        const tBlit = profile ? performance.now() : 0;
-
-        if (profile) {
-          console.log(
-            `frame total=${(tBlit - t0).toFixed(1)}ms ` +
-            `draw=${(tDraw - t0).toFixed(1)} ` +
-            `jpegEncode=${(tEnc - tDraw).toFixed(1)} ` +
-            `netDetect=${(tNet - tEnc).toFixed(1)} ` +
-            `blit=${(tBlit - tNet).toFixed(1)} ` +
-            `blobBytes=${blob.size}`,
-          );
+          dctx.drawImage(bitmap, 0, 0, WIDTH, HEIGHT);
+          bitmap.close();
+        } catch (e) {
+          // Decode failures shouldn't kill the loop — just skip this frame.
+          console.warn('failed to decode baked frame', e);
         }
       }
-    })();
+      const tBlit = profile ? performance.now() : 0;
+
+      // FPS tracking — completed paints in the last 1s.
+      const now = performance.now();
+      fpsWindow.push(now);
+      while (fpsWindow.length > 0 && fpsWindow[0]! < now - 1000) fpsWindow.shift();
+      fps = fpsWindow.length;
+      frameIndex += 1;
+
+      if (profile) {
+        console.log(
+          `frame total=${(tBlit - t0).toFixed(1)}ms ` +
+          `draw=${(tDraw - t0).toFixed(1)} ` +
+          `jpegEncode=${(tEnc - tDraw).toFixed(1)} ` +
+          `netBake=${(tNet - tEnc).toFixed(1)} ` +
+          `decodeBlit=${(tBlit - tNet).toFixed(1)} ` +
+          `blobBytes=${blob.size}`,
+        );
+      }
+    }
   }
 
-  function stopCapture() {
-    captureStopped = true;
+  function stopLoop() {
+    loopAbort?.abort();
+    loopAbort = null;
   }
 
   async function stopStream() {
-    // If recording, finalize it first so the user doesn't lose data.
+    // If recording, finalize first so the user doesn't lose data.
     if (isRecording) {
       try { await liveApi.recordingStop(); } catch {}
       isRecording = false;
     }
-    stopCapture();
-    ws?.close();
-    ws = null;
+    isStreaming = false;
+    isPaused = false;
+    stopLoop();
     stopCamera();
-    if (video) video.srcObject = null;
-    // Clear the display canvas + overlay state so the stage looks idle.
+    if (sourceVideo) sourceVideo.srcObject = null;
+    // Clear the display canvas so the stage looks idle.
     if (displayCanvas) {
       const dctx = displayCanvas.getContext('2d')!;
       dctx.setTransform(1, 0, 0, 1, 0, 0);
       dctx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
     }
-    faces = [];
-    lastFrameIndex = -1;
     fps = 0;
     fpsWindow.length = 0;
-    isStreaming = false;
-    isPaused = false;
+    frameIndex = 0;
   }
 
+  // Pause is a client-side concept — backend has no pause endpoint.
+  // We stop the capture loop but keep the camera open so resume is
+  // instant. The displayCanvas keeps showing whatever was last painted.
   function pauseStream() {
-    // Pause holds the camera open but stops uploading frames for
-    // detection. Cheap way to "freeze" the overlay without dropping
-    // the camera permission. The displayCanvas keeps showing whatever
-    // was last drawn; faces stay where they were.
     if (!isStreaming) return;
-    isPaused = !isPaused;
-    if (isPaused) {
-      stopCapture();
+    if (!isPaused) {
+      isPaused = true;
+      stopLoop();
     } else {
-      startCapture();
+      isPaused = false;
+      loopAbort = new AbortController();
+      runCaptureLoop(loopAbort.signal);
     }
   }
 
@@ -366,6 +289,22 @@
       apiError = `Recording stop failed: ${e?.message ?? e}`;
     }
   }
+
+  // When overlay toggles or landmark style change mid-stream, push the
+  // new hints to the backend (no detector rebuild). Skips while idle to
+  // avoid spurious config calls; the next startStream() will sync them.
+  function onToggleChange(key: keyof OverlayToggles, value: boolean) {
+    toggles = { ...toggles, [key]: value };
+    if (isStreaming) pushOverlayHints();
+  }
+  function onLandmarkStyleChange(s: LandmarkStyle) {
+    landmarkStyle = s;
+    if (isStreaming) pushOverlayHints();
+  }
+  function onDetectionResChange(r: DetectionRes) {
+    detectionRes = r;
+    if (isStreaming) pushOverlayHints();
+  }
 </script>
 
 <div class="flex flex-1 overflow-hidden">
@@ -378,13 +317,8 @@
         {detectionRes}
         detectionPresets={DETECTION_PRESETS}
         onConfigChange={applyConfig}
-        onLandmarkStyleChange={(s) => (landmarkStyle = s)}
-        onDetectionResChange={(r) => {
-          detectionRes = r;
-          // Clear stale faces so smoothing doesn't blend across the
-          // resolution change (one-frame blip otherwise).
-          faces = [];
-        }}
+        onLandmarkStyleChange={onLandmarkStyleChange}
+        onDetectionResChange={onDetectionResChange}
       />
       <button
         class="absolute top-1/2 -right-3 -translate-y-1/2 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-50 inline-flex items-center justify-center z-10"
@@ -411,24 +345,16 @@
       </div>
     {/if}
 
-    <!-- Video stage. The video + overlay both fill a fixed-aspect-ratio
-         wrapper so detection coords (sent at WIDTH×HEIGHT) line up
-         pixel-for-pixel with the displayed video frame. Without this,
-         max-w-full on the <video> could leave the overlay canvas
-         covering a wider area than the actual video. -->
+    <!-- Video stage. The hidden <video> only holds the MediaStream for
+         capture; the visible image is displayCanvas, painted from
+         backend-baked JPEGs so frame + overlay update together. -->
     <div class="relative flex-1 bg-black flex items-center justify-center min-h-[260px] overflow-hidden">
       <div
         class="relative bg-black"
         style="aspect-ratio: {WIDTH} / {HEIGHT}; max-width: 100%; max-height: 100%; width: 100%;"
       >
-        <!-- The live <video> is needed for getUserMedia + the capture
-             loop's drawImage source, but we don't display it directly —
-             showing it would run ahead of detection and cause motion to
-             desync from the overlay. Instead the capture loop blits each
-             SENT frame to displayCanvas only after detection completes,
-             so frame + overlay update together. -->
         <video
-          bind:this={video}
+          bind:this={sourceVideo}
           class="hidden"
           playsinline
           muted
@@ -437,17 +363,6 @@
           bind:this={displayCanvas}
           class="absolute inset-0 w-full h-full object-cover"
         ></canvas>
-        <OverlayCanvas
-          {faces}
-          {mpLandmarks}
-          width={WIDTH}
-          height={HEIGHT}
-          {toggles}
-          {landmarkStyle}
-          edges={currentEdges}
-          {auTable}
-          mpToDlib68={auTable?.mpToDlib68 ?? null}
-        />
 
         {#if isStreaming}
           <span class="absolute top-3.5 left-3.5 px-3 py-1 rounded text-[9.5px] font-bold tracking-wider {isPaused ? 'bg-yellow-500/15 text-yellow-500 border-yellow-500/30' : 'bg-green-500/15 text-green-500 border-green-500/30'} border inline-flex items-center gap-2">
@@ -468,7 +383,7 @@
         {/if}
         {#if isStreaming}
           <span class="absolute bottom-3.5 left-3.5 px-2.5 py-1 rounded text-[10.5px] font-mono bg-white/10 border border-white/10 backdrop-blur">
-            {fps.toFixed(0)} fps · frame {lastFrameIndex} · {faces.length} face{faces.length === 1 ? '' : 's'}
+            {fps.toFixed(0)} fps · frame {frameIndex}
           </span>
         {/if}
       </div>
@@ -477,7 +392,7 @@
     <LiveControlBar
       {toggles}
       isMpDetector={config.detector_type === 'MPDetector'}
-      onToggleChange={(k, v) => (toggles = { ...toggles, [k]: v })}
+      onToggleChange={onToggleChange}
       {isStreaming}
       {isPaused}
       {isRecording}

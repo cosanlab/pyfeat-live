@@ -66,15 +66,6 @@ export const systemApi = {
 };
 
 // ---------------- live ----------------
-export interface LiveStateMsg {
-  frame_index: number;
-  ts: number;
-  faces: Array<Record<string, unknown>>;
-  mp_landmarks: boolean;
-  video_width: number;
-  video_height: number;
-}
-
 export interface LiveConfigure {
   detector_type: 'Detector' | 'MPDetector';
   face_model: string;
@@ -83,6 +74,12 @@ export interface LiveConfigure {
   emotion_model: string | null;
   identity_model: string | null;
   device: 'cpu' | 'mps' | 'cuda';
+  // Optional overlay/render hints. The backend bakes overlays onto the
+  // returned frame using these — they're stored on the LiveSession and
+  // read by /api/live/frame on each call.
+  toggles?: Record<string, boolean>;
+  landmark_style?: 'points' | 'lines' | 'mesh';
+  detection_res?: { w: number; h: number };
 }
 
 export const liveApi = {
@@ -91,22 +88,17 @@ export const liveApi = {
       method: 'POST',
       body: JSON.stringify(cfg),
     }),
-  uploadFrame: async (blob: Blob): Promise<LiveStateMsg> => {
+  // POST a JPEG of the current camera frame; backend bakes overlays and
+  // returns the baked JPEG. The display canvas renders the returned blob
+  // so what the user sees is exactly the frame detection ran on.
+  uploadFrame: async (jpeg: Blob): Promise<Blob> => {
     const r = await fetch('/api/live/frame', {
       method: 'POST',
       headers: { 'Content-Type': 'image/jpeg' },
-      body: blob,
+      body: jpeg,
     });
-    if (!r.ok) throw new ApiError(r.status, await r.text());
-    return r.json();
-  },
-  openWebSocket: (onMessage: (msg: LiveStateMsg) => void): WebSocket => {
-    // Vite proxies /api → backend; for WS we need to build the absolute
-    // URL using the current location (works in both dev and Tauri prod).
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${location.host}/api/live/ws`);
-    ws.onmessage = (e) => onMessage(JSON.parse(e.data));
-    return ws;
+    if (!r.ok) throw new ApiError(r.status, `uploadFrame: ${r.status} ${r.statusText}`);
+    return await r.blob();
   },
   recordingStart: (body: {
     record_video: boolean;
