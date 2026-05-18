@@ -126,6 +126,13 @@ async def _run_detection(live, img: Image.Image) -> None:
                 None, detect_pil_images, live.detector, [det_img],
             )
             dur = time.perf_counter() - t0
+        # One-line trace so we can see the per-detection cost +
+        # actual input size from the backend log without enabling
+        # full PYFEAT_LIVE_PROFILE instrumentation.
+        print(
+            f"detect: input={det_img.size[0]}x{det_img.size[1]} "
+            f"dur={dur*1000:.0f}ms"
+        )
 
         # Scale detector pixel coords back to the source frame's space
         # before drawing. No-op when det == source.
@@ -238,6 +245,34 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
             int(req.detection_res["w"]), int(req.detection_res["h"]),
         )
     live.reset()
+    return req.model_dump()
+
+
+class HintsRequest(BaseModel):
+    """Cheap mid-stream updates that DON'T rebuild the detector."""
+    toggles: Optional[dict[str, bool]] = None
+    landmark_style: Optional[str] = None
+    detection_res: Optional[dict[str, int]] = None
+
+
+@router.post("/hints")
+async def hints(req: HintsRequest, request: Request) -> dict:
+    """Update overlay/render hints without rebuilding the detector.
+
+    Called when the user toggles an overlay chip, switches landmark
+    style, or picks a different detection resolution mid-stream.
+    None of those require a fresh py-feat detector — they're just
+    fields the bake handler reads on the next frame.
+    """
+    live = request.app.state.live
+    if req.toggles is not None:
+        live.toggles = req.toggles
+    if req.landmark_style is not None:
+        live.landmark_style = req.landmark_style
+    if req.detection_res is not None:
+        live.detection_size = (
+            int(req.detection_res["w"]), int(req.detection_res["h"]),
+        )
     return req.model_dump()
 
 

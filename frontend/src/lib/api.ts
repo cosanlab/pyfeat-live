@@ -82,11 +82,24 @@ export interface LiveConfigure {
   detection_res?: { w: number; h: number };
 }
 
+// Mid-stream hint updates that don't require a detector rebuild.
+export interface LiveHints {
+  toggles?: Record<string, boolean>;
+  landmark_style?: 'points' | 'lines' | 'mesh';
+  detection_res?: { w: number; h: number };
+}
+
 export const liveApi = {
   configure: (cfg: LiveConfigure) =>
     request<LiveConfigure>('/api/live/configure', {
       method: 'POST',
       body: JSON.stringify(cfg),
+    }),
+  // Cheap mid-stream hint push — does NOT rebuild the detector.
+  hints: (h: LiveHints) =>
+    request<LiveHints>('/api/live/hints', {
+      method: 'POST',
+      body: JSON.stringify(h),
     }),
   // POST a JPEG of the current camera frame; backend bakes overlays and
   // returns the baked JPEG. The display canvas renders the returned blob

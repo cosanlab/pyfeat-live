@@ -115,18 +115,19 @@
   }
 
   // Push overlay hints to the backend without rebuilding the detector.
-  // Called when the user toggles overlay chips or switches landmark style
-  // mid-stream.
+  // Called when the user toggles overlay chips, switches landmark style,
+  // or changes detection resolution mid-stream. Uses /api/live/hints
+  // which is a tiny field-update call — /api/live/configure is the
+  // multi-second detector-rebuild path and should NEVER be used here.
   async function pushOverlayHints() {
     try {
-      await liveApi.configure({
-        ...config,
+      await liveApi.hints({
         toggles: toggles as unknown as Record<string, boolean>,
         landmark_style: landmarkStyle,
         detection_res: { w: detectionRes.w, h: detectionRes.h },
       });
     } catch (e: any) {
-      apiError = `Overlay config failed: ${e?.message ?? e}`;
+      apiError = `Overlay hints failed: ${e?.message ?? e}`;
     }
   }
 
