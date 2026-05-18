@@ -73,6 +73,7 @@
   let lastFacesAt = 0;        // wall-clock of last non-empty detection
   let mpLandmarks = $state(true);
   let isStreaming = $state(false);
+  let isPaused = $state(false);
   let isRecording = $state(false);
   let lastFrameIndex = $state(-1);
   let ws: WebSocket | null = null;
@@ -189,6 +190,7 @@
       video.srcObject = stream;
       await video.play();
     }
+    isPaused = false;
     ws = liveApi.openWebSocket((msg: LiveStateMsg) => {
       // Backend returns coords in the detection-image space. Scale to
       // our display space (WIDTH/HEIGHT) so the overlay lines up over
@@ -303,6 +305,45 @@
     captureStopped = true;
   }
 
+  async function stopStream() {
+    // If recording, finalize it first so the user doesn't lose data.
+    if (isRecording) {
+      try { await liveApi.recordingStop(); } catch {}
+      isRecording = false;
+    }
+    stopCapture();
+    ws?.close();
+    ws = null;
+    stopCamera();
+    if (video) video.srcObject = null;
+    // Clear the display canvas + overlay state so the stage looks idle.
+    if (displayCanvas) {
+      const dctx = displayCanvas.getContext('2d')!;
+      dctx.setTransform(1, 0, 0, 1, 0, 0);
+      dctx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+    }
+    faces = [];
+    lastFrameIndex = -1;
+    fps = 0;
+    fpsWindow.length = 0;
+    isStreaming = false;
+    isPaused = false;
+  }
+
+  function pauseStream() {
+    // Pause holds the camera open but stops uploading frames for
+    // detection. Cheap way to "freeze" the overlay without dropping
+    // the camera permission. The displayCanvas keeps showing whatever
+    // was last drawn; faces stay where they were.
+    if (!isStreaming) return;
+    isPaused = !isPaused;
+    if (isPaused) {
+      stopCapture();
+    } else {
+      startCapture();
+    }
+  }
+
   async function record() {
     try {
       await liveApi.recordingStart({
@@ -409,9 +450,9 @@
         />
 
         {#if isStreaming}
-          <span class="absolute top-3.5 left-3.5 px-3 py-1 rounded text-[9.5px] font-bold tracking-wider bg-green-500/15 text-green-500 border border-green-500/30 inline-flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-            LIVE
+          <span class="absolute top-3.5 left-3.5 px-3 py-1 rounded text-[9.5px] font-bold tracking-wider {isPaused ? 'bg-yellow-500/15 text-yellow-500 border-yellow-500/30' : 'bg-green-500/15 text-green-500 border-green-500/30'} border inline-flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full {isPaused ? 'bg-yellow-500' : 'bg-green-500 animate-pulse'}"></span>
+            {isPaused ? 'PAUSED' : 'LIVE'}
           </span>
         {/if}
         {#if isRecording}
@@ -421,10 +462,9 @@
           </span>
         {/if}
         {#if !isStreaming}
-          <button
-            class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-5 py-2 rounded bg-zinc-800 text-zinc-50 hover:bg-zinc-700"
-            onclick={startStream}
-          >Start camera</button>
+          <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <span class="text-zinc-500 text-[12px] font-mono">camera off — press Start ↓</span>
+          </div>
         {/if}
         {#if isStreaming}
           <span class="absolute bottom-3.5 left-3.5 px-2.5 py-1 rounded text-[10.5px] font-mono bg-white/10 border border-white/10 backdrop-blur">
@@ -438,10 +478,14 @@
       {toggles}
       isMpDetector={config.detector_type === 'MPDetector'}
       onToggleChange={(k, v) => (toggles = { ...toggles, [k]: v })}
+      {isStreaming}
+      {isPaused}
       {isRecording}
+      onStartStream={startStream}
+      onPauseStream={pauseStream}
+      onStopStream={stopStream}
       onRecord={record}
-      onPause={() => {}}
-      onStop={stop}
+      onStopRecord={stop}
       onCapture={() => {}}
     />
   </div>
