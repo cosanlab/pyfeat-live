@@ -1,10 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   color-scheme: dark;
 }
 
 body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
-  background: #0a0a0a;
-  color: #d4d4d8;
+  @apply m-0 font-sans bg-zinc-950 text-zinc-300;
 }
