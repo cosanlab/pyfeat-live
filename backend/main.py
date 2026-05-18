@@ -19,6 +19,7 @@ from backend.routers import sessions as sessions_router
 from backend.routers import identities as identities_router
 from backend.routers import annotations as annotations_router
 from backend.routers import presets as presets_router
+from backend.routers import analyze as analyze_router
 
 
 def create_app() -> FastAPI:
@@ -47,12 +48,19 @@ def create_app() -> FastAPI:
     from backend.live_state import LiveSession
     app.state.live = LiveSession()
 
+    from pyfeatlive_core.analyze_queue import AnalyzeQueue
+    app.state.analyze_queue = AnalyzeQueue()
+    app.state.analyze_runner_task = None
+    app.state.analyze_paused = False
+    app.state.analyze_subscribers = []          # list[asyncio.Queue]
+
     app.include_router(system_router.router)
     app.include_router(live_router.router)
     app.include_router(sessions_router.router)
     app.include_router(identities_router.router)
     app.include_router(annotations_router.router)
     app.include_router(presets_router.router)
+    app.include_router(analyze_router.router)
 
     return app
 

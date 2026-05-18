@@ -9,4 +9,5 @@ from backend.main import create_app
 @pytest.fixture
 def client():
     app = create_app()
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client

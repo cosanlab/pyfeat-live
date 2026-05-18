@@ -1,0 +1,259 @@
+"""/api/analyze/* — file queue + runner."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import shutil
+import tempfile
+import time
+from pathlib import Path
+from typing import Literal, Optional
+
+from fastapi import (
+    APIRouter, BackgroundTasks, File, Form, HTTPException, Request,
+    UploadFile, WebSocket, WebSocketDisconnect,
+)
+from pydantic import BaseModel
+
+from pyfeatlive_core.analyze_queue import (
+    AnalyzeQueueItem, PipelineConfig, QueueStatus, VideoParams,
+)
+from pyfeatlive_core.analyze_runner import run_item
+from pyfeatlive_core.detector import DetectorConfig, build_detector
+from pyfeatlive_core.recorder import default_sessions_root
+
+
+router = APIRouter(prefix="/api/analyze", tags=["analyze"])
+
+
+# ----- serialization helpers ------------------------------------------
+
+def _item_to_dict(i: AnalyzeQueueItem) -> dict:
+    return {
+        "id": i.id,
+        "filename": i.filename,
+        "status": i.status.value,
+        "progress_frames": i.progress_frames,
+        "total_frames": i.total_frames,
+        "started_at": i.started_at,
+        "finished_at": i.finished_at,
+        "session_dir": i.session_dir,
+        "error": i.error,
+        "pipeline": {
+            "detector_type": i.pipeline.detector_type,
+            "face_model": i.pipeline.face_model,
+            "landmark_model": i.pipeline.landmark_model,
+            "au_model": i.pipeline.au_model,
+            "emotion_model": i.pipeline.emotion_model,
+            "identity_model": i.pipeline.identity_model,
+            "preset_id": i.pipeline.preset_id,
+            "preset_name": i.pipeline.preset_name,
+        },
+        "video": {
+            "skip_frames": i.video.skip_frames,
+            "clip_start": i.video.clip_start,
+            "clip_end": i.video.clip_end,
+            "track_identities": i.video.track_identities,
+        },
+    }
+
+
+# ----- CRUD ----------------------------------------------------------
+
+@router.get("/queue")
+def get_queue(request: Request) -> list[dict]:
+    return [_item_to_dict(i) for i in request.app.state.analyze_queue.items()]
+
+
+_UPLOAD_DIR = Path(tempfile.gettempdir()) / "pyfeatlive_analyze_uploads"
+
+
+@router.post("/queue", status_code=201)
+async def add_to_queue(
+    request: Request,
+    file: UploadFile = File(...),
+    pipeline: str = Form(...),
+    video: str = Form(...),
+) -> dict:
+    pipeline_dict = json.loads(pipeline)
+    video_dict = json.loads(video)
+    _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    saved = _UPLOAD_DIR / f"{int(time.time() * 1000)}_{file.filename}"
+    with open(saved, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+
+    item = AnalyzeQueueItem(
+        id="auto",
+        filename=file.filename or saved.name,
+        file_path=saved,
+        pipeline=PipelineConfig(**pipeline_dict),
+        video=VideoParams(**video_dict),
+    )
+    request.app.state.analyze_queue.add(item)
+    return _item_to_dict(item)
+
+
+class PatchItemRequest(BaseModel):
+    pipeline: Optional[dict] = None
+    video: Optional[dict] = None
+
+
+@router.patch("/queue/{item_id}")
+def patch_item(item_id: str, req: PatchItemRequest, request: Request) -> dict:
+    item = request.app.state.analyze_queue.find(item_id)
+    if item is None:
+        raise HTTPException(404, "item not found")
+    if item.status is not QueueStatus.QUEUED:
+        raise HTTPException(409, "can only edit queued items")
+    if req.pipeline is not None:
+        item.pipeline = PipelineConfig(**req.pipeline)
+    if req.video is not None:
+        item.video = VideoParams(**req.video)
+    return _item_to_dict(item)
+
+
+@router.delete("/queue/{item_id}", status_code=204)
+def delete_item(item_id: str, request: Request) -> None:
+    q = request.app.state.analyze_queue
+    item = q.find(item_id)
+    if item is None:
+        raise HTTPException(404, "item not found")
+    if item.status is QueueStatus.RUNNING:
+        raise HTTPException(409, "cannot remove an in-flight item; stop the queue first")
+    # Clean up the uploaded file
+    try:
+        if item.file_path.exists():
+            item.file_path.unlink()
+    except OSError:
+        pass
+    q.remove(item_id)
+    return None
+
+
+@router.post("/queue/clear-done", status_code=200)
+def clear_done(request: Request) -> dict:
+    n = request.app.state.analyze_queue.clear_done()
+    return {"removed": n}
+
+
+# ----- Runner --------------------------------------------------------
+
+class RunRequest(BaseModel):
+    compute: Literal["cpu", "mps", "cuda"] = "cpu"
+    batch_size: int = 8
+
+
+@router.post("/run", status_code=202)
+async def start_run(req: RunRequest, request: Request) -> dict:
+    if request.app.state.analyze_runner_task is not None \
+            and not request.app.state.analyze_runner_task.done():
+        return {"status": "already running"}
+    request.app.state.analyze_paused = False
+    request.app.state.analyze_runner_task = asyncio.create_task(
+        _runner_loop(request.app, req),
+    )
+    return {"status": "started"}
+
+
+@router.post("/pause", status_code=200)
+def pause_run(request: Request) -> dict:
+    request.app.state.analyze_paused = True
+    return {"status": "pausing after current item"}
+
+
+@router.post("/stop", status_code=200)
+async def stop_run(request: Request) -> dict:
+    request.app.state.analyze_paused = True
+    task = request.app.state.analyze_runner_task
+    if task and not task.done():
+        # Wait for current item to finish; we don't cancel mid-detect
+        # because py-feat doesn't support clean mid-frame interruption.
+        try:
+            await asyncio.wait_for(task, timeout=60.0)
+        except asyncio.TimeoutError:
+            task.cancel()
+    request.app.state.analyze_runner_task = None
+    return {"status": "stopped"}
+
+
+async def _runner_loop(app, req: RunRequest) -> None:
+    """Drain the queue one item at a time on the asyncio loop.
+
+    Detection happens inside ``run_item``, which is a synchronous
+    generator. We run it inside ``run_in_executor`` to avoid blocking
+    the loop, draining its events through an asyncio.Queue so we can
+    push them to WS subscribers immediately.
+    """
+    queue = app.state.analyze_queue
+    while True:
+        if app.state.analyze_paused:
+            break
+        item = queue.next_queued()
+        if item is None:
+            break
+
+        loop = asyncio.get_running_loop()
+        # Build a fresh detector per item so different items can use
+        # different model configs. (Future: cache by config hash.)
+        cfg = DetectorConfig(
+            detector_type=item.pipeline.detector_type,
+            face_model=item.pipeline.face_model,
+            landmark_model=item.pipeline.landmark_model,
+            au_model=item.pipeline.au_model,
+            emotion_model=item.pipeline.emotion_model,
+            identity_model=item.pipeline.identity_model,
+            device=req.compute,
+        )
+        detector = await loop.run_in_executor(None, build_detector, cfg)
+
+        events: asyncio.Queue = asyncio.Queue()
+
+        def _drain() -> None:
+            for ev in run_item(item, detector, default_sessions_root(), req.batch_size):
+                loop.call_soon_threadsafe(events.put_nowait, ev)
+            loop.call_soon_threadsafe(events.put_nowait, None)  # sentinel
+
+        runner_future = loop.run_in_executor(None, _drain)
+        while True:
+            ev = await events.get()
+            if ev is None:
+                break
+            _broadcast(app, ev)
+        await runner_future
+    _broadcast(app, {"type": "queue_idle"})
+
+
+def _broadcast(app, payload: dict) -> None:
+    for sub in list(app.state.analyze_subscribers):
+        try:
+            sub.put_nowait(payload)
+        except asyncio.QueueFull:
+            pass
+
+
+# ----- WS ------------------------------------------------------------
+
+@router.websocket("/ws")
+async def analyze_ws(ws: WebSocket) -> None:
+    await ws.accept()
+    q: asyncio.Queue = asyncio.Queue(maxsize=64)
+    ws.app.state.analyze_subscribers.append(q)
+    try:
+        # Snapshot the current queue on connect so the client can render
+        # without waiting for the next event.
+        await ws.send_json({
+            "type": "snapshot",
+            "items": [_item_to_dict(i) for i in ws.app.state.analyze_queue.items()],
+        })
+        while True:
+            ev = await q.get()
+            try:
+                await ws.send_json(ev)
+            except WebSocketDisconnect:
+                break
+    finally:
+        try:
+            ws.app.state.analyze_subscribers.remove(q)
+        except ValueError:
+            pass
