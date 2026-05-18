@@ -9,6 +9,7 @@ import torch
 from fastapi import APIRouter
 
 import pyfeatlive_core
+from pyfeatlive_core.au_heatmap import build_au_table
 from pyfeatlive_core.overlay_edges import all_edge_sets
 
 
@@ -62,3 +63,24 @@ def overlay_edges() -> dict[str, list[list[int]]]:
     set based on detector type + landmark style.
     """
     return all_edge_sets()
+
+
+_AU_TABLE_CACHE: dict | None = None
+
+
+@router.get("/au-table")
+def au_table() -> dict:
+    """Return the AU muscle-polygon heatmap table.
+
+    Response keys:
+      polygons   – {muscle_name: [[xi, yi] | [xi, yi, "bottom"], ...], ...}
+      muscleAu   – {muscle_name: "AUxx", ...}
+      lut        – [[r, g, b], ...] × 256  (Blues palette, 0–255 ints)
+      mpToDlib68 – [int × 68]  (MP-478 source index for each dlib-68 slot)
+
+    Data is static; cached after the first call.
+    """
+    global _AU_TABLE_CACHE
+    if _AU_TABLE_CACHE is None:
+        _AU_TABLE_CACHE = build_au_table()
+    return _AU_TABLE_CACHE
