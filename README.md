@@ -99,6 +99,22 @@ selection order. Click anywhere on the plot's x-axis to seek the video.
 Annotations persist to `<session>/annotations.csv`; identities to
 `<session>/identities.csv` + `<session>/identity_assignments.csv`.
 
+### Analyze
+
+Switch to the "Analyze" tab. Drop video or image files into the dropzone;
+each file gets queued with the active preset's pipeline (configurable via the
+header dropdown — built-in presets `MP · standard`, `Classic · img2pose`, etc.).
+
+Per-file gear icon opens a configure modal: pick a preset, override individual
+models, or change video parameters (skip-frames, clip range, identity tracking)
+— all without affecting queued sibling items.
+
+Run queue with chosen compute device + batch size. Items process in order;
+WebSocket pushes per-item progress. Completed items write a session folder
+that opens directly in the Viewer tab.
+
+Presets persist at `~/.config/pyfeat-live/presets.json` (or `$XDG_CONFIG_HOME`).
+
 ## Profiling
 
 We also include a profiling script you can run with `python perf_testing.py`. This will generate a profiling file and save it as `basic.prof`
