@@ -1,6 +1,15 @@
 // Thin fetch wrapper. All routes are loopback (vite proxy in dev,
 // same-origin in Tauri production), so URLs are relative.
 
+import type {
+  SessionSummary,
+  SessionDetail,
+  Identity,
+  IdentityAssignment,
+  Annotation,
+  AnnotationKind,
+} from './types';
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -94,5 +103,72 @@ export const liveApi = {
   recordingStop: () =>
     request<{ session_dir: string }>('/api/live/recording/stop', {
       method: 'POST',
+    }),
+};
+
+// ---------------- sessions ----------------
+export const sessionsApi = {
+  list: () => request<SessionSummary[]>('/api/sessions'),
+  get: (id: string) => request<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`),
+  fexUrl: (id: string) => `/api/sessions/${encodeURIComponent(id)}/fex`,
+  videoUrl: (id: string) => `/api/sessions/${encodeURIComponent(id)}/video`,
+};
+
+// ---------------- identities ----------------
+export const identitiesApi = {
+  list: (sessionId: string) =>
+    request<Identity[]>(`/api/sessions/${encodeURIComponent(sessionId)}/identities`),
+  assignments: (sessionId: string) =>
+    request<IdentityAssignment[]>(`/api/sessions/${encodeURIComponent(sessionId)}/identities/assignments`),
+  create: (sessionId: string, body: { name: string; color: string }) =>
+    request<Identity>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/identities`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  patch: (sessionId: string, iid: string, body: { name?: string; color?: string }) =>
+    request<Identity>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/identities/${encodeURIComponent(iid)}`,
+      { method: 'PATCH', body: JSON.stringify(body) },
+    ),
+  delete: (sessionId: string, iid: string) =>
+    fetch(
+      `/api/sessions/${encodeURIComponent(sessionId)}/identities/${encodeURIComponent(iid)}`,
+      { method: 'DELETE' },
+    ).then(r => {
+      if (!r.ok) throw new ApiError(r.status, r.statusText);
+    }),
+  assign: (sessionId: string, iid: string, body: { frame: number; face_idx: number }) =>
+    request<IdentityAssignment>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/identities/${encodeURIComponent(iid)}/assign`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+};
+
+// ---------------- annotations ----------------
+export const annotationsApi = {
+  list: (sessionId: string) =>
+    request<Annotation[]>(`/api/sessions/${encodeURIComponent(sessionId)}/annotations`),
+  create: (sessionId: string, body: {
+    kind: AnnotationKind;
+    start_frame: number;
+    end_frame: number;
+    label?: string;
+    tag?: string;
+  }) => request<Annotation>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/annotations`,
+    { method: 'POST', body: JSON.stringify(body) },
+  ),
+  patch: (sessionId: string, aid: string, body: Partial<{
+    label: string; tag: string; start_frame: number; end_frame: number;
+  }>) => request<Annotation>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/annotations/${encodeURIComponent(aid)}`,
+    { method: 'PATCH', body: JSON.stringify(body) },
+  ),
+  delete: (sessionId: string, aid: string) =>
+    fetch(
+      `/api/sessions/${encodeURIComponent(sessionId)}/annotations/${encodeURIComponent(aid)}`,
+      { method: 'DELETE' },
+    ).then(r => {
+      if (!r.ok) throw new ApiError(r.status, r.statusText);
     }),
 };
