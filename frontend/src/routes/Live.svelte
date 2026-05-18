@@ -49,6 +49,7 @@
   });
 
   let video: HTMLVideoElement | null = $state(null);
+  let displayCanvas: HTMLCanvasElement | null = $state(null);
   let captureCanvas: HTMLCanvasElement | null = null;
 
   let faces: Face[] = $state([]);
@@ -179,10 +180,16 @@
     isStreaming = true;
   }
 
-  // Sequential upload loop. setInterval(33) pipelined uploads and caused
-  // a Metal/MPS thread-safety crash on the backend when two frames hit
-  // PyTorch.forward simultaneously. Now we wait for the previous response
-  // before queuing the next frame.
+  // Sequential capture loop. Two reasons it's not setInterval-driven:
+  //  1. Pipelined uploads triggered a Metal/MPS thread-safety crash on
+  //     the backend when two frames hit PyTorch.forward simultaneously.
+  //  2. We need the displayed image to be the SAME frame detection ran
+  //     on, otherwise the live <video> runs ~200ms ahead of the overlay
+  //     and motion looks jarringly out of sync. v1 baked overlays into
+  //     the video stream and got this for free; v2 reaches the same
+  //     effect by blitting the captured frame to displayCanvas only
+  //     after detection completes — display rate ≈ detection rate,
+  //     but video + overlay are temporally locked.
   function startCapture() {
     captureCanvas ??= document.createElement('canvas');
     captureCanvas.width = WIDTH;
@@ -192,6 +199,7 @@
     (async function loop() {
       while (!captureStopped) {
         if (!video) { await new Promise(r => setTimeout(r, 33)); continue; }
+        // Snapshot the current video frame.
         ctx.drawImage(video, 0, 0, WIDTH, HEIGHT);
         const blob = await new Promise<Blob | null>((resolve) =>
           captureCanvas!.toBlob((b) => resolve(b), 'image/jpeg', 0.7),
@@ -202,8 +210,19 @@
           apiError = null;
         } catch (e: any) {
           apiError = `Frame upload failed: ${e?.message ?? e}`;
-          // Backoff before retry so we don't flood logs.
           await new Promise(r => setTimeout(r, 500));
+          continue;
+        }
+        // Detection done — blit the same frame to the display canvas.
+        // The overlay (driven by WS) will draw on top of THIS frame,
+        // so motion + overlay stay locked.
+        if (displayCanvas) {
+          const dpr = window.devicePixelRatio || 1;
+          if (displayCanvas.width !== WIDTH * dpr) displayCanvas.width = WIDTH * dpr;
+          if (displayCanvas.height !== HEIGHT * dpr) displayCanvas.height = HEIGHT * dpr;
+          const dctx = displayCanvas.getContext('2d')!;
+          dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          dctx.drawImage(captureCanvas!, 0, 0, WIDTH, HEIGHT);
         }
       }
     })();
@@ -282,12 +301,22 @@
         class="relative bg-black"
         style="aspect-ratio: {WIDTH} / {HEIGHT}; max-width: 100%; max-height: 100%; width: 100%;"
       >
+        <!-- The live <video> is needed for getUserMedia + the capture
+             loop's drawImage source, but we don't display it directly —
+             showing it would run ahead of detection and cause motion to
+             desync from the overlay. Instead the capture loop blits each
+             SENT frame to displayCanvas only after detection completes,
+             so frame + overlay update together. -->
         <video
           bind:this={video}
-          class="absolute inset-0 w-full h-full object-cover"
+          class="hidden"
           playsinline
           muted
         ></video>
+        <canvas
+          bind:this={displayCanvas}
+          class="absolute inset-0 w-full h-full object-cover"
+        ></canvas>
         <OverlayCanvas
           {faces}
           {mpLandmarks}
