@@ -83,6 +83,12 @@ export interface LiveConfigure {
   emotion_model: string | null;
   identity_model: string | null;
   device: 'cpu' | 'mps' | 'cuda';
+  // Overlay/render hints — forwarded to DetectionTrack so the in-pipeline
+  // bake matches what the UI would have drawn. All optional; the backend
+  // only mutates state for fields that arrive non-null.
+  toggles?: Record<string, boolean>;
+  landmark_style?: 'points' | 'lines' | 'mesh';
+  detection_res?: { w: number; h: number };
 }
 
 export const liveApi = {
@@ -124,6 +130,21 @@ export const liveApi = {
     request<{ session_dir: string }>('/api/live/recording/stop', {
       method: 'POST',
     }),
+  rtcOffer: (offer: RTCSessionDescriptionInit): Promise<{ pc_id: string; sdp: string; type: RTCSdpType }> =>
+    request('/api/live/rtc/offer', {
+      method: 'POST',
+      body: JSON.stringify({ sdp: offer.sdp, type: offer.type }),
+    }),
+  // /api/live/rtc/close returns 204, so we hit fetch directly rather than
+  // request<T> (which would choke trying to .json() an empty body).
+  rtcClose: async (pc_id: string): Promise<void> => {
+    const r = await fetch('/api/live/rtc/close', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pc_id }),
+    });
+    if (!r.ok) throw new ApiError(r.status, await r.text());
+  },
 };
 
 // ---------------- sessions ----------------
