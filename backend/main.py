@@ -10,6 +10,7 @@ This module owns app construction; per-feature routes live in
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 import pyfeatlive_core
 
@@ -21,6 +22,19 @@ def create_app() -> FastAPI:
         version=pyfeatlive_core.__version__,
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
+    )
+
+    # Vite dev server origins; in production (Tauri webview) the
+    # frontend is served from the same origin so CORS is moot.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     @app.get("/api/system/health")
