@@ -75,12 +75,29 @@ browser permission to access your camera when prompted.
 Tests:
 
 ```bash
-.venv/bin/python -m pytest tests/backend/ tests/core/   # 34 passing
+.venv/bin/python -m pytest tests/backend/ tests/core/   # 67 passing as of Plan 2
 cd frontend && pnpm check && pnpm build                 # type-check + build
 ```
 
 The v1 Streamlit app remains available via `pyfeat-live` until the cutover
 commit in a later plan.
+
+### Viewer
+
+Switch to the "Viewer" tab in the app. The left sidebar lists all sessions in
+`~/Documents/pyfeat-live/sessions/`. Select one to load its video + fex.
+
+Click any face in the video to assign or create an identity. Press `E` to drop
+an event annotation at the current frame; shift+drag on the scrub track to
+mark an exclude range. The Annotations tab in the left sidebar mirrors what's
+on the scrub lane and the plot.
+
+The unified time-series plot supports multi-select on both identities (Faces
+row) and series (Series row). Lines are colored by series, dashed by identity
+selection order. Click anywhere on the plot's x-axis to seek the video.
+
+Annotations persist to `<session>/annotations.csv`; identities to
+`<session>/identities.csv` + `<session>/identity_assignments.csv`.
 
 ## Profiling
 
