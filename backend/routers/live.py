@@ -101,6 +101,11 @@ class ConfigureRequest(BaseModel):
     emotion_model: Optional[str] = "resmasknet"
     identity_model: Optional[str] = "arcface"
     device: Literal["cpu", "mps", "cuda"] = "cpu"
+    # Overlay/render hints — read by DetectionTrack on every frame so
+    # the in-pipeline bake matches what the UI would have drawn.
+    toggles: Optional[dict[str, bool]] = None
+    landmark_style: Optional[str] = None
+    detection_res: Optional[dict[str, int]] = None  # {w, h}
 
 
 @router.post("/configure")
@@ -108,13 +113,27 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
     """Build a fresh detector matching the request and attach it.
 
     Builds in a thread executor because model load is multi-second.
+    Also mirrors the overlay/render hints onto ``live`` so the
+    aiortc DetectionTrack can read them on every recv().
     """
-    cfg = DetectorConfig(**req.model_dump())
+    # Only forward the fields DetectorConfig knows about; the overlay
+    # hints below are stored on ``live`` directly.
+    detector_fields = {
+        "detector_type", "face_model", "landmark_model", "au_model",
+        "emotion_model", "identity_model", "device",
+    }
+    cfg = DetectorConfig(**{k: v for k, v in req.model_dump().items()
+                            if k in detector_fields})
     loop = asyncio.get_running_loop()
     detector = await loop.run_in_executor(None, build_detector, cfg)
 
     live = request.app.state.live
     live.detector = detector
+    live.mp_landmarks = (req.detector_type == "MPDetector")
+    if req.toggles is not None:
+        live.toggles = req.toggles
+    if req.landmark_style is not None:
+        live.landmark_style = req.landmark_style
     live.reset()
     return req.model_dump()
 
