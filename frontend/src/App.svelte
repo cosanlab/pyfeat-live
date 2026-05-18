@@ -1,5 +1,6 @@
 <script lang="ts">
   import TopNav from './lib/components/TopNav.svelte';
+  import Live from './routes/Live.svelte';
   import type { View } from './lib/types';
 
   let view: View = $state('live');
@@ -7,9 +8,9 @@
 
 <div class="min-h-screen flex flex-col">
   <TopNav {view} onViewChange={(v) => (view = v)} />
-  <main class="flex-1">
+  <main class="flex-1 flex flex-col">
     {#if view === 'live'}
-      <div class="p-6 text-sm text-zinc-400">Live page — coming in next section.</div>
+      <Live />
     {:else if view === 'analyze'}
       <div class="p-6 text-sm text-zinc-400">Analyze page — separate plan.</div>
     {:else if view === 'viewer'}
