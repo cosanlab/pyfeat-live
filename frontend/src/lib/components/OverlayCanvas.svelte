@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Face, OverlayToggles } from '../overlay/types';
+  import type { AuTable } from '../api';
   import * as O from '../overlay/primitives';
 
   type LandmarkStyle = 'points' | 'lines' | 'mesh';
@@ -12,10 +13,13 @@
     toggles: OverlayToggles;
     landmarkStyle?: LandmarkStyle;
     edges?: number[][];     // landmark edges (mesh/lines), ignored for points
+    auTable?: AuTable | null;
+    mpToDlib68?: number[] | null;
   };
   let {
     faces, mpLandmarks, width, height, toggles,
     landmarkStyle = 'mesh', edges,
+    auTable = null, mpToDlib68 = null,
   }: Props = $props();
 
   let canvas: HTMLCanvasElement | null = $state(null);
@@ -35,7 +39,7 @@
       }
       if (toggles.poses) O.drawPose(ctx, face.rect, face.pose);
       if (toggles.gaze) O.drawGaze(ctx, face, mpLandmarks, width, height);
-      if (toggles.aus) O.drawAus(ctx, face.rect, face.aus);
+      if (toggles.aus) O.drawAuHeatmap(ctx, face, auTable ?? null, mpLandmarks, mpToDlib68 ?? null);
       if (toggles.emotions) O.drawEmotions(ctx, face.rect, face.emotions);
     }
   });

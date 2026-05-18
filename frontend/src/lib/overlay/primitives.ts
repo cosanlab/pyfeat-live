@@ -3,6 +3,7 @@
 // math is unchanged; types and ES module exports are new.
 
 import type { Face } from './types';
+import type { AuTable } from '../api';
 
 const LIVE_GREEN = '#22c55e';
 
@@ -173,7 +174,7 @@ export function drawEmotions(
   });
 }
 
-export function drawAus(
+export function drawAusText(
   ctx: CanvasRenderingContext2D,
   rect: Face['rect'] | undefined,
   aus: Face['aus'] | undefined,
@@ -181,8 +182,7 @@ export function drawAus(
 ): void {
   // Numeric overlay of the top-N AUs by intensity. Renders ABOVE the
   // face rect so it doesn't collide with the emotion overlay (which
-  // renders below). A full heatmap painted on the face is the future
-  // upgrade but the numeric panel is the useful 80%.
+  // renders below).
   if (!rect || !aus) return;
   const [x, y, w, h] = rect;
   if (x == null || y == null || w == null || h == null) return;
@@ -214,5 +214,115 @@ export function drawAus(
   });
 }
 
-/** @deprecated kept for API compat — use drawAus. */
-export function drawAuHeatmap(): void {}
+// ---------------------------------------------------------------------------
+// AU muscle-polygon heatmap.
+// Ported from overlay_renderer.js dlib68View / evalMusclePolygon /
+// colorForAu / drawAuHeatmap (lines 30–293). Math is identical; the
+// per-face scratch buffer is module-level (safe because all canvas
+// operations are synchronous).
+// ---------------------------------------------------------------------------
+
+const _dlib68Scratch: number[] = new Array(136);
+
+/**
+ * Return a flat [x0,y0,x1,y1,...] view of the dlib-68 landmark positions.
+ * For dlib Detector output, lm is already 68-point — return it directly.
+ * For MPDetector output (478-point lm), project through mpToDlib68.
+ */
+function dlib68View(
+  face: Face,
+  mpLandmarks: boolean,
+  mpToDlib68: number[] | null,
+): (number | null)[] | null {
+  const lm = face.lm;
+  if (!lm) return null;
+  if (!mpLandmarks || !mpToDlib68) return lm;
+  for (let i = 0; i < 68; i++) {
+    const mpIdx = mpToDlib68[i]!;
+    _dlib68Scratch[2 * i] = lm[2 * mpIdx] as number;
+    _dlib68Scratch[2 * i + 1] = lm[2 * mpIdx + 1] as number;
+  }
+  return _dlib68Scratch;
+}
+
+/**
+ * Evaluate one muscle polygon spec against a dlib-68 flat landmark array.
+ * Returns null if any required landmark is missing or non-finite.
+ */
+function evalMusclePolygon(
+  spec: (number | string)[][],
+  lm68: (number | null)[],
+): [number, number][] | null {
+  const y8 = lm68[2 * 8 + 1];
+  const y57 = lm68[2 * 57 + 1];
+  const bottom =
+    y8 != null && y57 != null && Number.isFinite(y8) && Number.isFinite(y57)
+      ? ((y8 as number) - (y57 as number)) / 2
+      : 0;
+
+  const out: [number, number][] = new Array(spec.length);
+  for (let i = 0; i < spec.length; i++) {
+    const v = spec[i]!;
+    const x = lm68[2 * (v[0] as number)];
+    let y = lm68[2 * (v[1] as number) + 1];
+    if (x == null || y == null) return null;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    if (v[2] === 'bottom') y = (y as number) + bottom;
+    out[i] = [x as number, y as number];
+  }
+  return out;
+}
+
+/**
+ * Map an AU intensity value in [0, 1] to an [r, g, b] triple via the LUT.
+ */
+function colorForAu(
+  value: number | null | undefined,
+  lut: [number, number, number][],
+): [number, number, number] {
+  if (value == null || !Number.isFinite(value)) return lut[0]!;
+  const idx = Math.max(0, Math.min(255, Math.floor(value * 255)));
+  return lut[idx]!;
+}
+
+/**
+ * Draw the AU muscle-polygon heatmap onto ctx for a single face.
+ * Each facial muscle region is filled with a Blues colormap colour
+ * proportional to the AU intensity that muscle expresses.
+ *
+ * @param mpLandmarks - true when using MPDetector (478-point mesh)
+ * @param mpToDlib68  - 68-element array mapping dlib slot → MP-478 index;
+ *                      pass null (or omit) for dlib Detector output
+ */
+export function drawAuHeatmap(
+  ctx: CanvasRenderingContext2D,
+  face: Face,
+  auTable: AuTable | null,
+  mpLandmarks: boolean,
+  mpToDlib68: number[] | null,
+): void {
+  if (!auTable || !face.aus) return;
+  const lm68 = dlib68View(face, mpLandmarks, mpToDlib68);
+  if (!lm68) return;
+
+  const { polygons, muscleAu, lut } = auTable;
+  for (const muscleName of Object.keys(polygons)) {
+    const auCol = muscleAu[muscleName];
+    if (!auCol) continue;
+    const value = face.aus[auCol];
+    if (value == null) continue;
+    const pts = evalMusclePolygon(polygons[muscleName]!, lm68);
+    if (!pts) continue;
+    const rgb = colorForAu(value as number, lut);
+    // ~55 % alpha fill + ~86 % alpha outline matches the Python overlay.
+    ctx.fillStyle = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.55)`;
+    ctx.strokeStyle = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.86)`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pts[0]![0], pts[0]![1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]![0], pts[i]![1]);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+}

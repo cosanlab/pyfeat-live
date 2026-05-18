@@ -47,10 +47,22 @@ export interface OverlayEdgeSets {
   mp_tess: number[][];
 }
 
+export interface AuTable {
+  /** muscle_name → list of [xi, yi] or [xi, yi, "bottom"] vertex specs (dlib-68 indices) */
+  polygons: Record<string, (number | string)[][]>;
+  /** muscle_name → AU column name (e.g. "AU12") */
+  muscleAu: Record<string, string>;
+  /** 256-entry Blues colormap as [r, g, b] triples in 0–255 */
+  lut: [number, number, number][];
+  /** 68-element mapping: mpToDlib68[dlib_idx] = mp478_idx */
+  mpToDlib68: number[];
+}
+
 export const systemApi = {
   health: () => request<{ status: string; version: string }>('/api/system/health'),
   compute: () => request<ComputeInfo>('/api/system/compute'),
   overlayEdges: () => request<OverlayEdgeSets>('/api/system/overlay-edges'),
+  auTable: () => request<AuTable>('/api/system/au-table'),
 };
 
 // ---------------- live ----------------

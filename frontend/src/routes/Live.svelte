@@ -3,7 +3,7 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import { liveApi, systemApi } from '../lib/api';
-  import type { LiveConfigure, LiveStateMsg, ComputeInfo, OverlayEdgeSets } from '../lib/api';
+  import type { LiveConfigure, LiveStateMsg, ComputeInfo, OverlayEdgeSets, AuTable } from '../lib/api';
   import type { Face, OverlayToggles } from '../lib/overlay/types';
   import { cameraStore, refreshDevices, startCamera, stopCamera } from '../lib/webrtc/useCamera.svelte';
   import LiveSidebar from '../lib/components/LiveSidebar.svelte';
@@ -23,6 +23,7 @@
   });
 
   let compute: ComputeInfo | null = $state(null);
+  let auTable: AuTable | null = $state(null);
   let sidebarCollapsed = $state(false);
   let apiError: string | null = $state(null);
 
@@ -58,12 +59,20 @@
   let ws: WebSocket | null = null;
   let captureStopped = false;
 
+  // FPS smoothing: track wall-clock arrival of WS detection messages
+  // over a 1-second sliding window. Display rate is decoupled from
+  // detection rate (the <video> renders the camera natively at ~30fps),
+  // so this measures how fast detection actually runs end-to-end.
+  let fps = $state(0);
+  const fpsWindow: number[] = [];
+
   // 1) On mount: fetch compute info + enumerate cameras + configure detector
   onMount(async () => {
     try {
-      [compute, edgeSets] = await Promise.all([
+      [compute, edgeSets, auTable] = await Promise.all([
         systemApi.compute(),
         systemApi.overlayEdges(),
+        systemApi.auTable(),
       ]);
       if (compute.mps.available) config.device = 'mps';
       else if (compute.cuda.available) config.device = 'cuda';
@@ -103,6 +112,10 @@
       faces = msg.faces as unknown as Face[];
       mpLandmarks = msg.mp_landmarks;
       lastFrameIndex = msg.frame_index;
+      const now = performance.now();
+      fpsWindow.push(now);
+      while (fpsWindow.length > 0 && fpsWindow[0]! < now - 1000) fpsWindow.shift();
+      fps = fpsWindow.length;
     });
     startCapture();
     isStreaming = true;
@@ -225,6 +238,8 @@
           {toggles}
           {landmarkStyle}
           edges={currentEdges}
+          {auTable}
+          mpToDlib68={auTable?.mpToDlib68 ?? null}
         />
 
         {#if isStreaming}
@@ -247,7 +262,7 @@
         {/if}
         {#if isStreaming}
           <span class="absolute bottom-3.5 left-3.5 px-2.5 py-1 rounded text-[10.5px] font-mono bg-white/10 border border-white/10 backdrop-blur">
-            frame {lastFrameIndex} · {faces.length} face{faces.length === 1 ? '' : 's'}
+            {fps.toFixed(0)} fps · frame {lastFrameIndex} · {faces.length} face{faces.length === 1 ? '' : 's'}
           </span>
         {/if}
       </div>
