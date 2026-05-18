@@ -84,6 +84,36 @@ async def upload_frame(request: Request) -> dict:
 
 
 from fastapi import WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
+from typing import Literal, Optional
+
+from pyfeatlive_core.detector import DetectorConfig, build_detector
+
+
+class ConfigureRequest(BaseModel):
+    detector_type: Literal["Detector", "MPDetector"] = "MPDetector"
+    face_model: str = "retinaface"
+    landmark_model: str = "mp_facemesh_v2"
+    au_model: str = "mp_blendshapes"
+    emotion_model: Optional[str] = "resmasknet"
+    identity_model: Optional[str] = "arcface"
+    device: Literal["cpu", "mps", "cuda"] = "cpu"
+
+
+@router.post("/configure")
+async def configure(req: ConfigureRequest, request: Request) -> dict:
+    """Build a fresh detector matching the request and attach it.
+
+    Builds in a thread executor because model load is multi-second.
+    """
+    cfg = DetectorConfig(**req.model_dump())
+    loop = asyncio.get_running_loop()
+    detector = await loop.run_in_executor(None, build_detector, cfg)
+
+    live = request.app.state.live
+    live.detector = detector
+    live.reset()
+    return req.model_dump()
 
 
 @router.websocket("/ws")
