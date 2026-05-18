@@ -9,7 +9,7 @@ from typing import Literal, Optional
 
 import av
 import numpy as np
-from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, Response
 from PIL import Image
 from pydantic import BaseModel
 
@@ -206,35 +206,3 @@ async def recording_stop(request: Request) -> dict:
     recorder.close()
     live.recorder = None
     return {"session_dir": str(session_dir)}
-
-
-@router.websocket("/ws")
-async def live_ws(ws: WebSocket) -> None:
-    """Push detection results to the connected client."""
-    await ws.accept()
-    live = ws.app.state.live
-
-    # Subscribe first so we don't miss any publish() between here and
-    # the initial snapshot send. The subscribe() call enqueues the
-    # current snapshot only if a detection has already happened
-    # (frame_index > -1), so a freshly-started session doesn't spam an
-    # empty placeholder. The client will receive the first real result
-    # as soon as the first frame is uploaded.
-    queue = live.subscribe()
-    snap = live.snapshot()
-    if snap["frame_index"] > -1:
-        try:
-            await ws.send_json(snap)
-        except WebSocketDisconnect:
-            live.unsubscribe(queue)
-            return
-
-    try:
-        while True:
-            state = await queue.get()
-            try:
-                await ws.send_json(state)
-            except WebSocketDisconnect:
-                break
-    finally:
-        live.unsubscribe(queue)

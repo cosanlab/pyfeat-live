@@ -1,35 +1,34 @@
-"""LiveSession holds the detector + latest fex; reset clears the fex."""
+"""LiveSession holds the detector + cached fex; reset clears detection state."""
 
-from pyfeatlive_core.detector import DetectorConfig
 from backend.live_state import LiveSession
 
 
-def test_initial_state_has_no_detector_and_empty_fex():
+def test_initial_state_has_no_detector_and_empty_cached_fex():
     s = LiveSession()
     assert s.detector is None
-    snap = s.snapshot()
-    assert snap["frame_index"] == -1
-    assert snap["faces"] == []
+    assert s._cached_fex is None
+    assert s._detection_in_flight is False
+    assert s._next_detection_at == 0.0
 
 
-def test_publish_updates_snapshot(monkeypatch):
+def test_reset_clears_detection_state_but_not_detector():
     s = LiveSession()
-    s.publish(faces=[{"face_idx": 0, "rect": [10, 10, 20, 20]}],
-              frame_index=5, ts=123.4,
-              mp_landmarks=True, video_width=640, video_height=360)
-    snap = s.snapshot()
-    assert snap["frame_index"] == 5
-    assert snap["video_width"] == 640
-    assert len(snap["faces"]) == 1
-
-
-def test_reset_clears_fex_but_not_detector():
-    s = LiveSession()
-    # We don't actually build a detector here (slow); just stash a sentinel.
+    # Simulate a completed detection.
     s.detector = "sentinel"
-    s.publish(faces=[{"face_idx": 0}], frame_index=1, ts=1.0,
-              mp_landmarks=False, video_width=0, video_height=0)
+    s._cached_fex = [{"face_idx": 0}]
+    s._detection_in_flight = True
+    s._next_detection_at = 999.0
     s.reset()
-    assert s.detector == "sentinel"
-    assert s.snapshot()["faces"] == []
-    assert s.snapshot()["frame_index"] == -1
+    assert s.detector == "sentinel"   # reset() must not touch the detector
+    assert s._cached_fex is None
+    assert s._detection_in_flight is False
+    assert s._next_detection_at == 0.0
+
+
+def test_reset_resets_internal_frame_state():
+    s = LiveSession()
+    # Mutate _state directly (as reset() itself does) and then verify reset.
+    s._state["frame_index"] = 42
+    s.reset()
+    assert s._state["frame_index"] == -1
+    assert s._state["faces"] == []
