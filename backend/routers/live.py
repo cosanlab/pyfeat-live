@@ -5,12 +5,22 @@ from __future__ import annotations
 import asyncio
 import io
 import time
+from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Request, Response
+import av
+import numpy as np
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from PIL import Image
+from pydantic import BaseModel
 
 from backend.serialization import serialize_faces
 from pyfeatlive_core.detect import detect_pil_images
+from pyfeatlive_core.detector import DetectorConfig, build_detector
+from pyfeatlive_core.recorder import (
+    RecorderConfig,
+    SessionRecorder,
+    default_sessions_root,
+)
 
 
 router = APIRouter(prefix="/api/live", tags=["live"])
@@ -43,8 +53,6 @@ async def upload_frame(request: Request) -> dict:
 
     # Feed frame to recorder if a recording is in progress.
     if live.recorder is not None:
-        import av
-        import numpy as np
         av_frame = av.VideoFrame.from_ndarray(np.asarray(img), format="rgb24")
         live.recorder.offer_frame(av_frame, fex if not fex.empty else None)
 
@@ -58,13 +66,6 @@ async def upload_frame(request: Request) -> dict:
         video_width=img.width, video_height=img.height,
     )
     return live.snapshot()
-
-
-from fastapi import WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
-from typing import Literal, Optional
-
-from pyfeatlive_core.detector import DetectorConfig, build_detector
 
 
 class ConfigureRequest(BaseModel):
@@ -91,13 +92,6 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
     live.detector = detector
     live.reset()
     return req.model_dump()
-
-
-from pathlib import Path
-
-from pyfeatlive_core.recorder import (
-    RecorderConfig, SessionRecorder, default_sessions_root,
-)
 
 
 class StartRecordingRequest(BaseModel):
