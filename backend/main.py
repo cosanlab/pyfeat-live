@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import pyfeatlive_core
 from backend.routers import system as system_router
+from backend.routers import live as live_router
 
 
 def create_app() -> FastAPI:
@@ -38,7 +39,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Live session state lives for the app's lifetime.
+    from backend.live_state import LiveSession
+    app.state.live = LiveSession()
+
     app.include_router(system_router.router)
+    app.include_router(live_router.router)
 
     return app
 
