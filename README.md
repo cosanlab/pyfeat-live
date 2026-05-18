@@ -61,6 +61,20 @@ Real-time webcam → py-feat detection → overlay-on-face rendering.
 - **Stream controls** — Start / Pause / Stop the camera; recording is a separate Record button.
 - Records to `~/Documents/pyfeat-live/sessions/<timestamp>/` as `video.mp4 + fex.csv + metadata.json`.
 
+Live uses an **image-stream bake-and-return** pipeline. The frontend
+posts each camera frame to the backend as JPEG. The backend bakes
+detection overlays onto the frame using the most recently cached
+detection result, then returns the baked frame as JPEG bytes. The
+frontend paints the response to a canvas. Detection runs decoupled
+in a background executor (~10 Hz) so the display tracks the round-
+trip rate (15-25fps depending on machine), not the detection rate.
+
+Overlays are pixels in the returned image — never re-encoded
+through a video codec — so they stay sharp. Recording mode is
+independent: `clean` records the source frames (Viewer can re-apply
+overlays from `fex.csv` later), `overlay` records the baked frames
+(overlays burned in for a share-out clip).
+
 ### Viewer
 
 Loads a recorded session, plays the video, draws overlays from the saved Fex CSV, lets you scrub, annotate, and assign identities to faces.
