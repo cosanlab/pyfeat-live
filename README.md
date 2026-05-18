@@ -52,6 +52,36 @@ To run the barebones streamlit app for development, clone this repository then:
 
 If you run into installation issues with py-feat see [this issue](https://github.com/cosanlab/py-feat/issues/186)
 
+## v2 (Svelte + FastAPI) — development setup
+
+The v2 rewrite lives alongside the v1 Streamlit code during development.
+See [`docs/superpowers/specs/2026-05-17-pyfeatlive-v2-svelte-rewrite-design.md`](docs/superpowers/specs/2026-05-17-pyfeatlive-v2-svelte-rewrite-design.md)
+for the design rationale.
+
+Two terminals:
+
+```bash
+# Terminal 1 — backend (FastAPI)
+.venv/bin/python -m uvicorn backend.main:app --reload --port 8765
+
+# Terminal 2 — frontend (Svelte 5 + Vite)
+cd frontend && pnpm install && pnpm dev
+```
+
+Open <http://localhost:5173>. The Vite dev server proxies `/api/*` to the
+backend on `:8765`; WebSocket connections work transparently. Grant the
+browser permission to access your camera when prompted.
+
+Tests:
+
+```bash
+.venv/bin/python -m pytest tests/backend/ tests/core/   # 34 passing
+cd frontend && pnpm check && pnpm build                 # type-check + build
+```
+
+The v1 Streamlit app remains available via `pyfeat-live` until the cutover
+commit in a later plan.
+
 ## Profiling
 
 We also include a profiling script you can run with `python perf_testing.py`. This will generate a profiling file and save it as `basic.prof`
