@@ -112,3 +112,25 @@ def delete_identity(session_id: str, identity_id: str) -> None:
     assignments = [a for a in read_assignments(d) if a.identity_id != identity_id]
     write_assignments(d, assignments)
     return None
+
+
+class AssignRequest(BaseModel):
+    frame: int
+    face_idx: int
+
+
+@router.post("/api/sessions/{session_id}/identities/{identity_id}/assign")
+def assign_identity(
+    session_id: str, identity_id: str, req: AssignRequest,
+) -> dict:
+    d = _session_dir(session_id)
+    # Validate identity exists
+    if not any(i.identity_id == identity_id for i in read_identities(d)):
+        raise HTTPException(404, "identity not found")
+    upsert_assignment(
+        d, frame=req.frame, face_idx=req.face_idx, identity_id=identity_id,
+    )
+    return {
+        "frame": req.frame, "face_idx": req.face_idx,
+        "identity_id": identity_id,
+    }
