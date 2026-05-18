@@ -29,7 +29,7 @@
 
   const MODEL_OPTIONS = {
     Detector: {
-      face_model: ['img2pose', 'retinaface'],
+      face_model: ['retinaface', 'img2pose'],
       landmark_model: ['mobilefacenet', 'mobilenet', 'pfld'],
       au_model: ['xgb', 'svm', null],
       emotion_model: ['resmasknet', 'svm', null],
