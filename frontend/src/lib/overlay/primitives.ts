@@ -158,22 +158,29 @@ export function drawPose(
   ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x3, y3); ctx.stroke();
   ctx.lineCap = 'butt';
 
-  // Numeric readout panel to the right of the face.
+  // Numeric readout panel to the right of the face. Font + panel
+  // scale to the face height so the text doesn't dwarf small faces or
+  // get lost on large ones.
   const sign = (v: number) => (v >= 0 ? `+${v.toFixed(1)}` : v.toFixed(1));
   const lines = [`Pitch ${sign(pitch)}°`, `Yaw ${sign(yaw)}°`, `Roll ${sign(roll)}°`];
-  ctx.font = '12px ui-monospace, monospace';
+  const fontPx = Math.max(9, Math.min(14, Math.round(h * 0.045)));
+  const lineH = Math.round(fontPx * 1.3);
+  ctx.font = `${fontPx}px ui-monospace, monospace`;
   let maxW = 0;
   for (const ln of lines) maxW = Math.max(maxW, ctx.measureText(ln).width);
   const panelW = maxW + 12;
-  const panelH = lines.length * 16 + 6;
-  const px = Math.min(x + w + 6, x + w + 6);
-  const py = Math.max(8, y + h - panelH);
+  const panelH = lines.length * lineH + 6;
+  const canvasW = ctx.canvas.width / (window.devicePixelRatio || 1);
+  // Prefer right of the face; if it would overflow, fall back to inside top-right.
+  let px = x + w + 6;
+  if (px + panelW > canvasW) px = Math.max(0, x + w - panelW - 4);
+  const py = Math.max(0, y + h - panelH);
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(px, py, panelW, panelH);
   ctx.fillStyle = '#ffffff';
   ctx.textBaseline = 'top';
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i]!, px + 6, py + 4 + i * 16);
+    ctx.fillText(lines[i]!, px + 6, py + 4 + i * lineH);
   }
 }
 
@@ -191,13 +198,28 @@ export function drawEmotions(
     .filter(([, v]) => v != null)
     .sort((a, b) => (b[1] as number) - (a[1] as number))
     .slice(0, 3);
+  if (sorted.length === 0) return;
 
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillRect(x, y + h + 4, 140, sorted.length * 16 + 4);
+  // Scale the panel + font to the face dimensions instead of fixed
+  // pixel sizes so the text stays proportional whether the face fills
+  // the frame or is a tiny crop in the corner. ~5% of face height per
+  // text line, panel width matches the face rect.
+  const fontPx = Math.max(8, Math.min(18, Math.round(h * 0.05)));
+  const lineH = Math.round(fontPx * 1.35);
+  const panelW = w;
+  const panelH = sorted.length * lineH + 6;
+  // Prefer just below the face rect; if that would overflow the canvas
+  // bottom, render inside the rect (along the bottom edge).
+  const canvasH = ctx.canvas.height / (window.devicePixelRatio || 1);
+  let py = y + h + 2;
+  if (py + panelH > canvasH) py = y + h - panelH;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(x, py, panelW, panelH);
+  ctx.font = `${fontPx}px ui-monospace, monospace`;
+  ctx.textBaseline = 'top';
   ctx.fillStyle = '#ffffff';
-  ctx.font = '11px ui-monospace, monospace';
   sorted.forEach(([k, v], i) => {
-    ctx.fillText(`${k}: ${(v as number).toFixed(2)}`, x + 4, y + h + 18 + i * 16);
+    ctx.fillText(`${k}: ${(v as number).toFixed(2)}`, x + 6, py + 3 + i * lineH);
   });
 }
 

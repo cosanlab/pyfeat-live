@@ -52,12 +52,60 @@
   let captureCanvas: HTMLCanvasElement | null = null;
 
   let faces: Face[] = $state([]);
+  let lastFacesAt = 0;        // wall-clock of last non-empty detection
   let mpLandmarks = $state(true);
   let isStreaming = $state(false);
   let isRecording = $state(false);
   let lastFrameIndex = $state(-1);
   let ws: WebSocket | null = null;
   let captureStopped = false;
+
+  // Exponential smoothing on landmark coords across detection frames.
+  // Raw py-feat output jitters frame-to-frame even on a still face; the
+  // detection rate (~5-15 fps) makes the jitter very visible. Blend new
+  // landmarks with the previous frame's smoothed positions to reduce
+  // it. Alpha is "how much of the new value to take" — 0.6 keeps the
+  // overlay responsive while smoothing out the noise.
+  const SMOOTH_ALPHA = 0.6;
+
+  function lerpMaybe(prev: number | null, next: number | null): number | null {
+    if (next == null) return prev;
+    if (prev == null) return next;
+    return prev * (1 - SMOOTH_ALPHA) + next * SMOOTH_ALPHA;
+  }
+
+  function smoothFaces(prev: Face[], next: Face[]): Face[] {
+    return next.map((n) => {
+      const p = prev.find((f) => f.face_idx === n.face_idx);
+      if (!p) return n;
+      const sm: Face = { ...n };
+      if (n.rect && p.rect) {
+        sm.rect = [
+          lerpMaybe(p.rect[0], n.rect[0]),
+          lerpMaybe(p.rect[1], n.rect[1]),
+          lerpMaybe(p.rect[2], n.rect[2]),
+          lerpMaybe(p.rect[3], n.rect[3]),
+        ];
+      }
+      if (n.lm && p.lm && p.lm.length === n.lm.length) {
+        sm.lm = n.lm.map((v, i) => lerpMaybe(p.lm![i] ?? null, v));
+      }
+      if (n.pose && p.pose) {
+        sm.pose = [
+          lerpMaybe(p.pose[0], n.pose[0]),
+          lerpMaybe(p.pose[1], n.pose[1]),
+          lerpMaybe(p.pose[2], n.pose[2]),
+        ];
+      }
+      if (n.gaze && p.gaze) {
+        sm.gaze = [
+          lerpMaybe(p.gaze[0], n.gaze[0]),
+          lerpMaybe(p.gaze[1], n.gaze[1]),
+        ];
+      }
+      return sm;
+    });
+  }
 
   // FPS smoothing: track wall-clock arrival of WS detection messages
   // over a 1-second sliding window. Display rate is decoupled from
@@ -109,7 +157,17 @@
       await video.play();
     }
     ws = liveApi.openWebSocket((msg: LiveStateMsg) => {
-      faces = msg.faces as unknown as Face[];
+      // Persist last-known faces across empty detection frames so motion
+      // blur / brief misses don't cause the overlay to flicker off.
+      // Clear after 1s of no detections so a stale overlay doesn't
+      // linger once the subject is actually gone.
+      const newFaces = msg.faces as unknown as Face[];
+      if (newFaces.length > 0) {
+        faces = smoothFaces(faces, newFaces);
+        lastFacesAt = performance.now();
+      } else if (performance.now() - lastFacesAt > 1000) {
+        faces = [];
+      }
       mpLandmarks = msg.mp_landmarks;
       lastFrameIndex = msg.frame_index;
       const now = performance.now();
