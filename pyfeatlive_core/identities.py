@@ -86,3 +86,71 @@ def write_identities(session_dir: Path, identities: Iterable[Identity]) -> None:
 
 def new_identity_id() -> str:
     return str(uuid.uuid4())
+
+
+# --- Per-(frame, face_idx) assignments -----------------------------------
+
+ASSIGNMENTS_FILENAME_V2 = "identity_assignments.csv"
+_ASSIGNMENT_HEADER_V2 = ["frame", "face_idx", "identity_id"]
+
+
+@dataclass
+class IdentityAssignment:
+    frame: int
+    face_idx: int
+    identity_id: str
+
+
+def assignments_path_v2(session_dir: Path) -> Path:
+    """Path to per-(frame, face_idx) → identity_id CSV.
+
+    Suffixed _v2 because Plan 1 introduced a stub ``assignments_path`` for
+    the (still unused) ``identity_assignments.csv`` filename; this Plan 2
+    function is what actually reads/writes it.
+    """
+    return session_dir / ASSIGNMENTS_FILENAME_V2
+
+
+def read_assignments(session_dir: Path) -> list[IdentityAssignment]:
+    p = assignments_path_v2(session_dir)
+    if not p.exists():
+        return []
+    out: list[IdentityAssignment] = []
+    with open(p, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            out.append(IdentityAssignment(
+                frame=int(row["frame"]),
+                face_idx=int(row["face_idx"]),
+                identity_id=row["identity_id"],
+            ))
+    return out
+
+
+def write_assignments(
+    session_dir: Path, assignments: Iterable[IdentityAssignment],
+) -> None:
+    """Replace the assignments file atomically."""
+    p = assignments_path_v2(session_dir)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".csv.tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=_ASSIGNMENT_HEADER_V2)
+        writer.writeheader()
+        for a in assignments:
+            writer.writerow(asdict(a))
+    tmp.replace(p)
+
+
+def upsert_assignment(
+    session_dir: Path, *, frame: int, face_idx: int, identity_id: str,
+) -> None:
+    """Set the identity for a single (frame, face_idx). Replaces any
+    existing assignment for that pair."""
+    existing = read_assignments(session_dir)
+    by_pair: dict[tuple[int, int], IdentityAssignment] = {
+        (a.frame, a.face_idx): a for a in existing
+    }
+    by_pair[(frame, face_idx)] = IdentityAssignment(
+        frame=int(frame), face_idx=int(face_idx), identity_id=identity_id,
+    )
+    write_assignments(session_dir, by_pair.values())
