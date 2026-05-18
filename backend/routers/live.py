@@ -101,8 +101,8 @@ class ConfigureRequest(BaseModel):
     emotion_model: Optional[str] = "resmasknet"
     identity_model: Optional[str] = "arcface"
     device: Literal["cpu", "mps", "cuda"] = "cpu"
-    # Overlay/render hints — read by DetectionTrack on every frame so
-    # the in-pipeline bake matches what the UI would have drawn.
+    # Overlay/render hints — read by /api/live/frame on every uploaded
+    # frame so the in-pipeline bake matches what the UI would have drawn.
     toggles: Optional[dict[str, bool]] = None
     landmark_style: Optional[str] = None
     detection_res: Optional[dict[str, int]] = None  # {w, h}
@@ -114,7 +114,7 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
 
     Builds in a thread executor because model load is multi-second.
     Also mirrors the overlay/render hints onto ``live`` so the
-    aiortc DetectionTrack can read them on every recv().
+    /api/live/frame bake handler can read them on every call.
     """
     # Only forward the fields DetectorConfig knows about; the overlay
     # hints below are stored on ``live`` directly.

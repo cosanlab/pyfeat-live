@@ -1,4 +1,4 @@
-"""In-pipeline overlay renderer for the aiortc Live track.
+"""In-pipeline overlay renderer for the Live bake-and-return path.
 
 Reuses the v1 dlib face-part edges, mesh triangulation, AU muscle
 polygons, and Blues LUT. The TS port at frontend/src/lib/overlay/
