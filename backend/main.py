@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import pyfeatlive_core
+from backend.routers import system as system_router
 
 
 def create_app() -> FastAPI:
@@ -37,11 +38,6 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    @app.get("/api/system/health")
-    def health() -> dict:
-        return {"status": "ok", "version": pyfeatlive_core.__version__}
-
-    from backend.routers import system as system_router
     app.include_router(system_router.router)
 
     return app

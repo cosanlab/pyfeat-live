@@ -1,4 +1,4 @@
-"""/api/system/* — runtime introspection (compute, etc.)."""
+"""/api/system/* — runtime introspection (health, compute, etc.)."""
 
 from __future__ import annotations
 
@@ -8,8 +8,16 @@ from typing import Any
 import torch
 from fastapi import APIRouter
 
+import pyfeatlive_core
+
 
 router = APIRouter(prefix="/api/system", tags=["system"])
+
+
+@router.get("/health")
+def health() -> dict:
+    """Tauri polls this to know when the sidecar is ready."""
+    return {"status": "ok", "version": pyfeatlive_core.__version__}
 
 
 @router.get("/compute")
