@@ -9,13 +9,14 @@ from typing import Literal, Optional
 
 import av
 import numpy as np
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from PIL import Image
 from pydantic import BaseModel
 
-from backend.serialization import serialize_faces
 from pyfeatlive_core.detect import detect_pil_images
 from pyfeatlive_core.detector import DetectorConfig, build_detector
+from pyfeatlive_core.jpeg import encode_jpeg
+from pyfeatlive_core.overlay_render import draw_overlays
 from pyfeatlive_core.recorder import (
     RecorderConfig,
     SessionRecorder,
@@ -27,70 +28,97 @@ router = APIRouter(prefix="/api/live", tags=["live"])
 
 
 @router.post("/frame")
-async def upload_frame(request: Request) -> dict:
-    """Run detection on a JPEG-encoded camera frame.
+async def upload_frame(request: Request) -> Response:
+    """Bake overlays onto an uploaded camera frame; return the result.
 
-    Returns the serialized faces immediately so the client can render
-    even if it hasn't opened the WebSocket. Also pushes the same
-    payload to any WS subscribers.
+    The detection step runs decoupled in a background executor task,
+    rate-limited so concurrent uploads don't queue up redundant
+    detections. Every uploaded frame is baked with whatever cached
+    fex is currently available, so the display tracks the upload rate
+    (capped by camera fps + bake + jpeg encode), while detection runs
+    on its own ~10 Hz cadence.
     """
-    import os
-    profile = os.environ.get("PYFEAT_LIVE_PROFILE") == "1"
-    t0 = time.perf_counter()
-
     live = request.app.state.live
     if live.detector is None:
         raise HTTPException(503, "detector not initialised")
 
     body = await request.body()
-    t_recv = time.perf_counter()
     if not body:
         raise HTTPException(400, "empty body")
     try:
         img = Image.open(io.BytesIO(body)).convert("RGB")
     except Exception as exc:
         raise HTTPException(400, f"could not decode image: {exc}") from exc
-    t_decode = time.perf_counter()
 
-    # py-feat detection is CPU-bound; run in the default thread pool so
-    # we don't block the asyncio loop. The detector_lock serialises
-    # concurrent calls — PyTorch's MPS backend is not thread-safe on a
-    # shared module and will crash the process if two forward() calls
-    # overlap. See backend/live_state.py for the full reasoning.
-    loop = asyncio.get_running_loop()
-    async with live.detector_lock:
-        t_lock = time.perf_counter()
-        fex = await loop.run_in_executor(None, detect_pil_images, live.detector, [img])
-    t_detect = time.perf_counter()
+    # Writable copy; the bake mutates pixels in place.
+    rgb = np.asarray(img).copy()
 
-    # Feed frame to recorder if a recording is in progress.
-    if live.recorder is not None:
-        av_frame = av.VideoFrame.from_ndarray(np.asarray(img), format="rgb24")
-        live.recorder.offer_frame(av_frame, fex if not fex.empty else None)
+    # --- maybe-launch decoupled detection (no await) ---------------
+    # Gate on both the in-flight flag and the throttle deadline so
+    # concurrent uploads don't pile up redundant detector calls.
+    now = time.perf_counter()
+    if not live._detection_in_flight and now >= live._next_detection_at:
+        live._detection_in_flight = True
+        loop = asyncio.get_running_loop()
+        loop.create_task(_run_detection(live, img))
 
-    mp_landmarks = type(live.detector).__name__ == "MPDetector"
-    faces = serialize_faces(fex, mp_landmarks=mp_landmarks)
-
-    frame_index = live._state["frame_index"] + 1
-    live.publish(
-        faces=faces, frame_index=frame_index, ts=time.time(),
-        mp_landmarks=mp_landmarks,
-        video_width=img.width, video_height=img.height,
-    )
-    t_done = time.perf_counter()
-
-    if profile:
-        print(
-            f"upload_frame: total={1000*(t_done-t0):.1f}ms "
-            f"recv={1000*(t_recv-t0):.1f} "
-            f"decode={1000*(t_decode-t_recv):.1f} "
-            f"lock_wait={1000*(t_lock-t_decode):.1f} "
-            f"detect={1000*(t_detect-t_lock):.1f} "
-            f"serialize+publish={1000*(t_done-t_detect):.1f} "
-            f"img_size={img.width}x{img.height} body_bytes={len(body)}"
+    # --- bake overlays --------------------------------------------
+    cached_fex = live._cached_fex
+    if cached_fex is not None and len(cached_fex) > 0:
+        draw_overlays(
+            rgb,
+            cached_fex,
+            live.toggles or {},
+            mp_landmarks=live.mp_landmarks,
+            landmark_style=live.landmark_style or "mesh",
         )
 
-    return live.snapshot()
+    # --- feed recorder if recording -------------------------------
+    # video_mode is fixed at recording start; "overlay" burns the
+    # baked pixels into the file, "clean" stores the source frame.
+    # "off" is handled internally by the recorder's offer_frame
+    # no-op when record_video=False, so we don't gate here.
+    if live.recorder is not None:
+        if live.recorder.config.video_mode == "overlay":
+            feed_arr = rgb
+        else:
+            feed_arr = np.asarray(img)
+        av_frame = av.VideoFrame.from_ndarray(feed_arr, format="rgb24")
+        live.recorder.offer_frame(
+            av_frame,
+            cached_fex if cached_fex is not None and len(cached_fex) else None,
+        )
+
+    # --- jpeg-encode the baked frame and return -------------------
+    payload = encode_jpeg(rgb, quality=95)
+    return Response(content=payload, media_type="image/jpeg")
+
+
+async def _run_detection(live, img: Image.Image) -> None:
+    """Run detection in the thread pool; mutate cached_fex on completion.
+
+    Wrapped in a try/finally so a single bad detection never leaves
+    ``_detection_in_flight`` stuck True (which would freeze the
+    detector cadence for the rest of the session).
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        async with live.detector_lock:
+            t0 = time.perf_counter()
+            fex = await loop.run_in_executor(
+                None, detect_pil_images, live.detector, [img],
+            )
+            dur = time.perf_counter() - t0
+        live._cached_fex = fex
+        # Throttle the NEXT detection to start no sooner than `dur`
+        # from now; under steady-state this caps detection at the
+        # measured per-call cost (no queueing).
+        live._next_detection_at = time.perf_counter() + dur
+    except Exception:
+        # Swallow detection errors — the upload path keeps running.
+        pass
+    finally:
+        live._detection_in_flight = False
 
 
 class ConfigureRequest(BaseModel):
