@@ -61,6 +61,15 @@ Real-time webcam → py-feat detection → overlay-on-face rendering.
 - **Stream controls** — Start / Pause / Stop the camera; recording is a separate Record button.
 - Records to `~/Documents/pyfeat-live/sessions/<timestamp>/` as `video.mp4 + fex.csv + metadata.json`.
 
+Live uses an **aiortc WebRTC bridge** — your browser opens a peer connection
+to the backend, the camera stream goes there, the backend runs detection +
+bakes overlays directly into the video frames, and sends the modified stream
+back. Display is smooth ~30fps regardless of detection rate; overlays are
+*pixels in the same frame* so they're temporally locked to the displayed
+face. Recording mode is independent: choose `clean` (no overlays in the MP4
+— Viewer can re-apply them from `fex.csv`) or `overlay` (overlays burned in
+for a share-out clip).
+
 ### Viewer
 
 Loads a recorded session, plays the video, draws overlays from the saved Fex CSV, lets you scrub, annotate, and assign identities to faces.
