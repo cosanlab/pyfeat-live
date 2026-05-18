@@ -6,16 +6,21 @@
 
   type LandmarkStyle = 'points' | 'lines' | 'mesh';
 
+  type DetectionRes = { label: string; w: number; h: number };
+
   type Props = {
     config: LiveConfigure;
     compute: ComputeInfo | null;
     landmarkStyle: LandmarkStyle;
+    detectionRes: DetectionRes;
+    detectionPresets: readonly DetectionRes[];
     onConfigChange: (c: LiveConfigure) => void;
     onLandmarkStyleChange: (s: LandmarkStyle) => void;
+    onDetectionResChange: (r: DetectionRes) => void;
   };
   let {
-    config, compute, landmarkStyle,
-    onConfigChange, onLandmarkStyleChange,
+    config, compute, landmarkStyle, detectionRes, detectionPresets,
+    onConfigChange, onLandmarkStyleChange, onDetectionResChange,
   }: Props = $props();
 
   function update<K extends keyof LiveConfigure>(key: K, value: LiveConfigure[K]) {
@@ -123,6 +128,22 @@
           disabled={!available}
           onclick={() => update('device', dev as LiveConfigure['device'])}
         >{dev}</button>
+      {/each}
+    </div>
+  </div>
+
+  <!-- Detection resolution -->
+  <div>
+    <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">
+      Detection size
+    </div>
+    <div class="grid grid-cols-2 gap-0.5 bg-zinc-900 rounded-md p-0.5">
+      {#each detectionPresets as preset}
+        <button
+          class="text-[10.5px] py-1 rounded text-center font-mono {detectionRes.w === preset.w ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500'}"
+          onclick={() => onDetectionResChange(preset)}
+          title="Detect at {preset.label}. Lower = faster detection (display stays at 640 × 360)."
+        >{preset.label}</button>
       {/each}
     </div>
   </div>

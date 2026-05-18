@@ -10,7 +10,24 @@
   import LiveControlBar from '../lib/components/LiveControlBar.svelte';
   import OverlayCanvas from '../lib/components/OverlayCanvas.svelte';
 
+  // Display dimensions — always render the captured frame at this size
+  // regardless of what resolution we detect at. This decouples visual
+  // quality from detection cost.
   const WIDTH = 640, HEIGHT = 360;
+
+  // Detection resolution presets. Lower = faster detection but coarser
+  // landmark precision (still visually fine because we scale up to
+  // display coords for rendering). The backend's per-frame cost scales
+  // roughly linearly with pixel count for retinaface and the landmark
+  // forward pass, so 320x180 cuts most of the detection cost vs 640x360.
+  type DetectionRes = { label: string; w: number; h: number };
+  const DETECTION_PRESETS: readonly DetectionRes[] = [
+    { label: '640 × 360', w: 640, h: 360 },
+    { label: '480 × 270', w: 480, h: 270 },
+    { label: '320 × 180', w: 320, h: 180 },
+    { label: '240 × 135', w: 240, h: 135 },
+  ];
+  let detectionRes: DetectionRes = $state(DETECTION_PRESETS[0]!);
 
   let config: LiveConfigure = $state({
     detector_type: 'MPDetector',
@@ -68,6 +85,21 @@
   // it. Alpha is "how much of the new value to take" — 0.6 keeps the
   // overlay responsive while smoothing out the noise.
   const SMOOTH_ALPHA = 0.6;
+
+  function scaleFaceCoords(f: Face, sx: number, sy: number): Face {
+    return {
+      ...f,
+      rect: f.rect ? [
+        f.rect[0] == null ? null : f.rect[0] * sx,
+        f.rect[1] == null ? null : f.rect[1] * sy,
+        f.rect[2] == null ? null : f.rect[2] * sx,
+        f.rect[3] == null ? null : f.rect[3] * sy,
+      ] : f.rect,
+      lm: f.lm?.map((v, i) => v == null ? null : v * (i % 2 === 0 ? sx : sy)),
+      // pose / gaze / aus / emotions are angles or scalars, not coords —
+      // do NOT scale.
+    };
+  }
 
   function lerpMaybe(prev: number | null, next: number | null): number | null {
     if (next == null) return prev;
@@ -158,11 +190,23 @@
       await video.play();
     }
     ws = liveApi.openWebSocket((msg: LiveStateMsg) => {
+      // Backend returns coords in the detection-image space. Scale to
+      // our display space (WIDTH/HEIGHT) so the overlay lines up over
+      // displayCanvas regardless of what detection resolution the user
+      // picked. msg.video_width/height tells us the actual detection
+      // dimensions for this exact frame, so an in-flight resolution
+      // change can't misalign anything.
+      const scaleX = msg.video_width > 0 ? WIDTH / msg.video_width : 1;
+      const scaleY = msg.video_height > 0 ? HEIGHT / msg.video_height : 1;
+      const rawFaces = msg.faces as unknown as Face[];
+      const newFaces = (scaleX === 1 && scaleY === 1)
+        ? rawFaces
+        : rawFaces.map((f) => scaleFaceCoords(f, scaleX, scaleY));
+
       // Persist last-known faces across empty detection frames so motion
       // blur / brief misses don't cause the overlay to flicker off.
       // Clear after 1s of no detections so a stale overlay doesn't
       // linger once the subject is actually gone.
-      const newFaces = msg.faces as unknown as Face[];
       if (newFaces.length > 0) {
         faces = smoothFaces(faces, newFaces);
         lastFacesAt = performance.now();
@@ -192,9 +236,9 @@
   //     but video + overlay are temporally locked.
   function startCapture() {
     captureCanvas ??= document.createElement('canvas');
-    captureCanvas.width = WIDTH;
-    captureCanvas.height = HEIGHT;
-    const ctx = captureCanvas.getContext('2d')!;
+    // captureCanvas dimensions are resized inside the loop to match
+    // the current detectionRes — so changing the sidebar control
+    // takes effect on the next frame.
     captureStopped = false;
     // Toggle perf logging from the browser console: window.__pyfeatProfile = true
     (async function loop() {
@@ -203,8 +247,13 @@
         const profile = (window as any).__pyfeatProfile === true;
         const t0 = profile ? performance.now() : 0;
 
-        // Snapshot the current video frame.
-        ctx.drawImage(video, 0, 0, WIDTH, HEIGHT);
+        // Resize captureCanvas to the current detection resolution.
+        // drawImage with explicit dest size downscales the video stream.
+        const dW = detectionRes.w, dH = detectionRes.h;
+        if (captureCanvas!.width !== dW) captureCanvas!.width = dW;
+        if (captureCanvas!.height !== dH) captureCanvas!.height = dH;
+        const ctx = captureCanvas!.getContext('2d')!;
+        ctx.drawImage(video, 0, 0, dW, dH);
         const tDraw = profile ? performance.now() : 0;
 
         const blob = await new Promise<Blob | null>((resolve) =>
@@ -223,7 +272,9 @@
         }
         const tNet = profile ? performance.now() : 0;
 
-        // Detection done — blit the same frame to the display canvas.
+        // Detection done — blit the captured frame (which may be a
+        // downscaled detection frame) to displayCanvas at the full
+        // display size. drawImage handles the upscale.
         if (displayCanvas) {
           const dpr = window.devicePixelRatio || 1;
           if (displayCanvas.width !== WIDTH * dpr) displayCanvas.width = WIDTH * dpr;
@@ -283,8 +334,16 @@
         {config}
         {compute}
         {landmarkStyle}
+        {detectionRes}
+        detectionPresets={DETECTION_PRESETS}
         onConfigChange={applyConfig}
         onLandmarkStyleChange={(s) => (landmarkStyle = s)}
+        onDetectionResChange={(r) => {
+          detectionRes = r;
+          // Clear stale faces so smoothing doesn't blend across the
+          // resolution change (one-frame blip otherwise).
+          faces = [];
+        }}
       />
       <button
         class="absolute top-1/2 -right-3 -translate-y-1/2 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-50 inline-flex items-center justify-center z-10"
