@@ -1,0 +1,481 @@
+"""In-pipeline overlay renderer for the aiortc Live track.
+
+Reuses the v1 dlib face-part edges, mesh triangulation, AU muscle
+polygons, and Blues LUT. The TS port at frontend/src/lib/overlay/
+primitives.ts is the visual reference — keep colors and layout in
+sync so users can't tell which path drew their overlay.
+
+Operates on a numpy RGB ndarray in place (avoids the PIL.Image round-
+trip we used to pay in v1's recv()).
+
+Visual primitives lifted verbatim from the v1 pyfeatlive/utils.py
+draw_overlays_pil that was deleted in 9bffe87, adapted to take an
+ImageDraw directly and read coords from the Fex row.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+import pandas as pd
+from PIL import Image, ImageDraw, ImageFont
+
+# ---------------------------------------------------------------------------
+# Reuse pre-computed edge sets and AU data from pyfeatlive_core
+# ---------------------------------------------------------------------------
+from pyfeatlive_core.overlay_edges import (
+    DLIB_PARTS_EDGES,
+    DLIB_MESH_EDGES,
+    MP_CONTOUR_EDGES,
+    MP_TESS_EDGES,
+)
+from pyfeatlive_core.au_heatmap import (
+    MUSCLE_AU_NAME,
+    _AU_MUSCLE_POLYGONS,
+    au_cmap_lut,
+)
+from pyfeatlive_core.blendshape_to_au import mp478_row_to_dlib68_view
+
+# ---------------------------------------------------------------------------
+# Brand colours (match the TS port in frontend/src/lib/overlay/primitives.ts)
+# ---------------------------------------------------------------------------
+LIVE_GREEN = (34, 197, 94)
+LIVE_YELLOW = (255, 220, 0)
+
+# ---------------------------------------------------------------------------
+# Font cache — matplotlib's DejaVu Sans is available on every platform
+# that has py-feat installed; no system font lookup needed.
+# ---------------------------------------------------------------------------
+_OVERLAY_FONT_CACHE: dict[int, ImageFont.FreeTypeFont] = {}
+
+
+def _overlay_font(size: int) -> ImageFont.FreeTypeFont:
+    """Return a cached PIL ImageFont at the requested point size."""
+    key = int(size)
+    if key not in _OVERLAY_FONT_CACHE:
+        from matplotlib import font_manager
+        try:
+            path = font_manager.findfont("DejaVu Sans", fallback_to_default=True)
+            _OVERLAY_FONT_CACHE[key] = ImageFont.truetype(path, size)
+        except Exception:
+            _OVERLAY_FONT_CACHE[key] = ImageFont.load_default()
+    return _OVERLAY_FONT_CACHE[key]
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+def draw_overlays(
+    frame: np.ndarray,          # H x W x 3, uint8 RGB, modified IN PLACE
+    fex: pd.DataFrame | None,
+    toggles: dict[str, bool],
+    *,
+    mp_landmarks: bool,
+    landmark_style: str = "mesh",
+) -> None:
+    """Draw overlays per the toggles. No-op if fex is None/empty.
+
+    Args:
+        frame: numpy RGB uint8 array, modified in-place.
+        fex: pandas DataFrame; one row per detected face. Empty is fine.
+        toggles: dict with 'rects' / 'landmarks' / 'poses' / 'gaze' /
+            'aus' / 'emotions' booleans.
+        mp_landmarks: True for MPDetector's 478-point Face Mesh;
+            affects landmark rendering and gaze-origin fallback.
+        landmark_style: 'mesh' | 'lines' | 'points'
+    """
+    if fex is None or len(fex) == 0:
+        return
+    # PIL is the path of least resistance for the existing primitives;
+    # wrap the array, draw, then push pixels back. Faster than per-call
+    # numpy reimplementation and visually matches v1 exactly.
+    img = Image.fromarray(frame, "RGB")
+    # Draw onto a transparent overlay then alpha-composite so fills with
+    # alpha actually blend. PIL's ImageDraw on an RGB mode ignores the alpha
+    # channel; we need a separate RGBA canvas.
+    transparent = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    drw = ImageDraw.Draw(transparent, "RGBA")
+
+    font_label = _overlay_font(14)
+    font_small = _overlay_font(12)
+    n_landmarks = 478 if mp_landmarks else 68
+
+    for _, row in fex.iterrows():
+        # Order matters — later draws cover earlier ones. Match the JS
+        # port's draw order: rect → au heatmap → landmarks → pose →
+        # gaze → emotions.
+        if toggles.get("rects"):
+            _draw_rect(drw, row)
+        if toggles.get("aus"):
+            _draw_au_heatmap(drw, row, mp_landmarks=mp_landmarks)
+        if toggles.get("landmarks"):
+            _draw_landmarks(drw, row, mp_landmarks=mp_landmarks,
+                            style=landmark_style, n_landmarks=n_landmarks)
+        if toggles.get("poses"):
+            _draw_pose(drw, row, font_small)
+        if toggles.get("gaze"):
+            _draw_gaze(drw, row, mp_landmarks=mp_landmarks)
+        if toggles.get("emotions"):
+            _draw_emotions(drw, row, font_label)
+
+    # Alpha-composite the overlay onto the original and copy pixels back.
+    out = Image.alpha_composite(img.convert("RGBA"), transparent)
+    frame[:] = np.asarray(out.convert("RGB"))
+
+
+# ---------------------------------------------------------------------------
+# Private primitives — lifted from v1 draw_overlays_pil in utils.py
+# ---------------------------------------------------------------------------
+
+def _draw_rect(drw: ImageDraw.ImageDraw, row: pd.Series) -> None:
+    """Face bounding box in cyan."""
+    x = float(row["FaceRectX"])
+    y = float(row["FaceRectY"])
+    w = float(row["FaceRectWidth"])
+    h = float(row["FaceRectHeight"])
+    if np.isnan(x) or np.isnan(y) or np.isnan(w) or np.isnan(h):
+        return
+    drw.rectangle([x, y, x + w, y + h], outline=(0, 220, 255, 255), width=2)
+
+
+def _draw_au_heatmap(
+    drw: ImageDraw.ImageDraw, row: pd.Series, *, mp_landmarks: bool
+) -> None:
+    """Blues-palette muscle-polygon heatmap over dlib-68 (or MP→dlib-68 view)."""
+    try:
+        if mp_landmarks:
+            polygon_row = mp478_row_to_dlib68_view(row)
+        else:
+            polygon_row = row
+
+        # Build per-row muscle polygons from landmark coordinates.
+        bottom = (polygon_row["y_8"] - polygon_row["y_57"]) / 2
+        polys = _compute_muscle_polygons(polygon_row, bottom)
+        lut = au_cmap_lut("Blues")
+
+        for muscle_name, vertices in polys.items():
+            au_col = MUSCLE_AU_NAME.get(muscle_name)
+            if au_col is None:
+                continue
+            # Look up AU value from the original row (not the dlib-68 view
+            # which only has landmark coords).
+            if hasattr(row, "index"):
+                if au_col not in row.index:
+                    continue
+            else:
+                if au_col not in row:
+                    continue
+            val = row[au_col]
+            rgb = _au_cmap_lookup(val, lut)
+            color = (rgb[0], rgb[1], rgb[2], 140)   # ~55% alpha fill
+            outline = (rgb[0], rgb[1], rgb[2], 220)
+            if any(np.isnan(v) for vert in vertices for v in vert):
+                continue
+            pts = [(float(vx), float(vy)) for vx, vy in vertices]
+            drw.polygon(pts, fill=color, outline=outline)
+    except (KeyError, IndexError, TypeError):
+        # Missing landmark column — silently skip rather than crashing
+        # the live stream.
+        pass
+
+
+def _draw_landmarks(
+    drw: ImageDraw.ImageDraw,
+    row: pd.Series,
+    *,
+    mp_landmarks: bool,
+    style: str,
+    n_landmarks: int,
+) -> None:
+    """Landmark wireframe or dot cloud.
+
+    Three styles:
+      'mesh'   - dlib-68: Delaunay triangulation; MP-478: full tessellation
+      'lines'  - dlib-68: anatomical face-part curves; MP-478: contour edges
+      'points' - per-landmark dots (both schemas)
+    """
+    edges = None
+    if style == "mesh":
+        edges = MP_TESS_EDGES if mp_landmarks else DLIB_MESH_EDGES
+    elif style == "lines":
+        edges = MP_CONTOUR_EDGES if mp_landmarks else DLIB_PARTS_EDGES
+
+    if edges is not None:
+        # Wireframe: draw each edge as a thin white line.
+        for a, b in edges:
+            xa = row.get(f"x_{a}") if hasattr(row, "get") else row[f"x_{a}"]
+            ya = row.get(f"y_{a}") if hasattr(row, "get") else row[f"y_{a}"]
+            xb = row.get(f"x_{b}") if hasattr(row, "get") else row[f"x_{b}"]
+            yb = row.get(f"y_{b}") if hasattr(row, "get") else row[f"y_{b}"]
+            if xa is None or xb is None:
+                continue
+            if np.isnan(xa) or np.isnan(xb) or np.isnan(ya) or np.isnan(yb):
+                continue
+            drw.line([(xa, ya), (xb, yb)], fill=(255, 255, 255, 200), width=1)
+    else:
+        # 'points': per-landmark dots — cheapest; works for both schemas.
+        has_index = hasattr(row, "index")
+        for i in range(n_landmarks):
+            xk, yk = f"x_{i}", f"y_{i}"
+            if has_index:
+                if xk not in row.index or yk not in row.index:
+                    break
+            else:
+                if xk not in row or yk not in row:
+                    break
+            px = row[xk]
+            py = row[yk]
+            if np.isnan(px) or np.isnan(py):
+                continue
+            drw.ellipse([px - 1, py - 1, px + 1, py + 1],
+                        fill=(255, 255, 255, 230))
+
+
+def _draw_pose(
+    drw: ImageDraw.ImageDraw, row: pd.Series, font_small: ImageFont.FreeTypeFont
+) -> None:
+    """Three-axis pose indicator (RGB for pitch/roll/yaw) + numeric readout."""
+    x = float(row["FaceRectX"])
+    y = float(row["FaceRectY"])
+    w = float(row["FaceRectWidth"])
+    h = float(row["FaceRectHeight"])
+    pitch = row.get("Pitch", np.nan) if hasattr(row, "get") else row["Pitch"]
+    roll = row.get("Roll", np.nan) if hasattr(row, "get") else row["Roll"]
+    yaw = row.get("Yaw", np.nan) if hasattr(row, "get") else row["Yaw"]
+
+    if any(np.isnan(v) for v in (pitch, roll, yaw, x, y, w, h)):
+        return
+
+    cx = x + w / 2
+    cy = y + h / 2
+    size = min(w, h) / 2
+    p = float(pitch) * np.pi / 180.0
+    r = float(roll) * np.pi / 180.0
+    yw = -float(yaw) * np.pi / 180.0
+    # Standard 3D-axis-from-Euler. The y-component is NEGATED because v1
+    # computed in math-coords (origin bottom-left) then flipped via
+    # img_height - y. In PIL we're in image coords (origin top-left)
+    # directly, so a positive math-y becomes a negative pixel-y offset.
+    x1 = cx + size * (np.cos(yw) * np.cos(r))
+    y1 = cy - size * (np.cos(p) * np.sin(r) + np.cos(r) * np.sin(p) * np.sin(yw))
+    x2 = cx + size * (-np.cos(yw) * np.sin(r))
+    y2 = cy - size * (np.cos(p) * np.cos(r) - np.sin(p) * np.sin(yw) * np.sin(r))
+    x3 = cx + size * (np.sin(yw))
+    y3 = cy - size * (-np.cos(yw) * np.sin(p))
+
+    drw.line([cx, cy, x1, y1], fill=(255, 60, 60, 255), width=3)
+    drw.line([cx, cy, x2, y2], fill=(60, 255, 60, 255), width=3)
+    drw.line([cx, cy, x3, y3], fill=(80, 140, 255, 255), width=3)
+    _draw_text_panel(
+        drw,
+        x + w + 6,
+        y + h - 60,
+        [
+            f"Pitch  {float(pitch):+6.1f}°",
+            f"Yaw    {float(yaw):+6.1f}°",
+            f"Roll   {float(roll):+6.1f}°",
+        ],
+        font_small,
+    )
+
+
+def _draw_gaze(
+    drw: ImageDraw.ImageDraw,
+    row: pd.Series,
+    *,
+    mp_landmarks: bool,
+) -> None:
+    """Single yellow arrow from between-the-eyes toward gaze direction."""
+    has_index = hasattr(row, "index")
+    if has_index:
+        if "gaze_pitch" not in row.index or "gaze_yaw" not in row.index:
+            return
+    else:
+        if "gaze_pitch" not in row or "gaze_yaw" not in row:
+            return
+
+    gp = row["gaze_pitch"]
+    gy = row["gaze_yaw"]
+    if np.isnan(gp) or np.isnan(gy):
+        return
+
+    origin_x, origin_y = _gaze_origin(row, mp_landmarks)
+    w = float(row["FaceRectWidth"])
+    h = float(row["FaceRectHeight"])
+    gp_rad = float(gp) * np.pi / 180.0
+    gy_rad = float(gy) * np.pi / 180.0
+    # Image-coord gaze direction. Positive pitch (looking up) → negative py.
+    dir_x = float(np.sin(gy_rad))
+    dir_y = -float(np.sin(gp_rad))
+    length = min(w, h) * 0.9
+    end_x = origin_x + length * dir_x
+    end_y = origin_y + length * dir_y
+
+    color = (255, 220, 0, 255)  # LIVE_YELLOW + full alpha
+    # Subtle dark drop-shadow so the arrow stays visible against skin.
+    drw.line(
+        [(origin_x + 1, origin_y + 1), (end_x + 1, end_y + 1)],
+        fill=(0, 0, 0, 140),
+        width=5,
+    )
+    drw.line([(origin_x, origin_y), (end_x, end_y)], fill=color, width=4)
+
+    norm = float(np.hypot(dir_x, dir_y))
+    if norm > 1e-3:
+        # Filled triangular arrowhead at the line tip.
+        nx = dir_x / norm
+        ny = dir_y / norm
+        px = -ny
+        py = nx
+        head_length = 16
+        head_width = 11
+        bx = end_x - nx * head_length
+        by = end_y - ny * head_length
+        corner1 = (bx + px * head_width, by + py * head_width)
+        corner2 = (bx - px * head_width, by - py * head_width)
+        drw.polygon(
+            [(end_x, end_y), corner1, corner2],
+            fill=color,
+            outline=(120, 80, 0, 255),
+        )
+    else:
+        # Looking straight at camera — draw a small disc instead.
+        drw.ellipse(
+            [origin_x - 6, origin_y - 6, origin_x + 6, origin_y + 6],
+            fill=color,
+            outline=(120, 80, 0, 255),
+            width=2,
+        )
+
+    # Origin disc — marks where the gaze vector starts.
+    drw.ellipse(
+        [origin_x - 3, origin_y - 3, origin_x + 3, origin_y + 3],
+        fill=(255, 240, 100, 255),
+        outline=(120, 80, 0, 255),
+        width=1,
+    )
+
+
+def _draw_emotions(
+    drw: ImageDraw.ImageDraw, row: pd.Series, font_label: ImageFont.FreeTypeFont
+) -> None:
+    """Top-3 emotions as a text panel above the face rect."""
+    emotion_cols = (
+        "anger", "disgust", "fear", "happiness",
+        "sadness", "surprise", "neutral",
+    )
+    has_index = hasattr(row, "index")
+    present = [
+        c for c in emotion_cols
+        if (c in row.index if has_index else c in row)
+    ]
+    if not present:
+        return
+    scored = sorted(
+        ((c, float(row[c])) for c in present if not np.isnan(row[c])),
+        key=lambda t: -t[1],
+    )[:3]
+    if not scored:
+        return
+    lines = [f"{c.capitalize()}  {v:.2f}" for c, v in scored]
+    tx = float(row["FaceRectX"])
+    ty = max(8.0, float(row["FaceRectY"]) - 78.0)
+    _draw_text_panel(drw, tx, ty, lines, font_label)
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+def _gaze_origin(row: Any, mp_landmarks: bool) -> tuple[float, float]:
+    """Pick the best available anchor point between the eyes for the gaze
+    arrow. Falls through a chain: MP iris → MP eye corners → dlib eyes →
+    facebox centre.
+    """
+    def _avg_pair(lx_key, ly_key, rx_key, ry_key):
+        lx = row.get(lx_key, np.nan) if hasattr(row, "get") else row[lx_key]
+        ly = row.get(ly_key, np.nan) if hasattr(row, "get") else row[ly_key]
+        rx = row.get(rx_key, np.nan) if hasattr(row, "get") else row[rx_key]
+        ry = row.get(ry_key, np.nan) if hasattr(row, "get") else row[ry_key]
+        if any(np.isnan(v) for v in (lx, ly, rx, ry)):
+            return None
+        return ((lx + rx) / 2.0, (ly + ry) / 2.0)
+
+    if mp_landmarks:
+        # 1. iris centers (indices 468 / 473)
+        pt = _avg_pair("x_468", "y_468", "x_473", "y_473")
+        if pt is not None:
+            return pt
+        # 2. outer eye corners (always populated by MP Face Mesh)
+        pt = _avg_pair("x_33", "y_33", "x_263", "y_263")
+        if pt is not None:
+            return pt
+    else:
+        # 3. dlib-68 eye region: average all landmarks per side
+        try:
+            l_x = float(np.nanmean([row[f"x_{i}"] for i in range(36, 42)]))
+            l_y = float(np.nanmean([row[f"y_{i}"] for i in range(36, 42)]))
+            r_x = float(np.nanmean([row[f"x_{i}"] for i in range(42, 48)]))
+            r_y = float(np.nanmean([row[f"y_{i}"] for i in range(42, 48)]))
+            if not any(np.isnan(v) for v in (l_x, l_y, r_x, r_y)):
+                return ((l_x + r_x) / 2.0, (l_y + r_y) / 2.0)
+        except (KeyError, ValueError):
+            pass
+
+    # 4. Facebox centre — always works.
+    cx = float(row["FaceRectX"]) + float(row["FaceRectWidth"]) / 2.0
+    cy = float(row["FaceRectY"]) + float(row["FaceRectHeight"]) / 2.0
+    return (cx, cy)
+
+
+def _draw_text_panel(
+    drw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    lines: list[str],
+    font: ImageFont.FreeTypeFont,
+    fg: tuple = (255, 255, 255, 255),
+) -> None:
+    """Black rounded-rect panel + white text with drop shadow."""
+    text = "\n".join(lines)
+    bbox = drw.multiline_textbbox((x, y), text, font=font, spacing=2)
+    pad = 6
+    panel = (bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad)
+    shadow = (panel[0] + 2, panel[1] + 2, panel[2] + 2, panel[3] + 2)
+    drw.rounded_rectangle(shadow, radius=6, fill=(0, 0, 0, 100))
+    drw.rounded_rectangle(panel, radius=6, fill=(0, 0, 0, 200))
+    drw.multiline_text((x, y), text, font=font, fill=fg, spacing=2)
+
+
+def _au_cmap_lookup(value: float, lut: list) -> tuple[int, int, int]:
+    """Look up an RGB triple in a 256-entry LUT by AU intensity (0–1)."""
+    if value is None or np.isnan(value):
+        idx = 0
+    else:
+        idx = int(np.clip(value, 0.0, 1.0) * 255)
+    return lut[idx]
+
+
+def _compute_muscle_polygons(row: Any, bottom: float) -> dict:
+    """Build (x, y) vertex lists for each face muscle polygon from a
+    dlib-68 row (or dlib-68-view dict). Mirrors the v1 _compute_muscle_polygons
+    in utils.py, driven by _AU_MUSCLE_POLYGONS DSL from au_heatmap.py.
+
+    Each DSL entry is [xi, yi] or [xi, yi, "bottom"] where "bottom" adds the
+    passed bottom-offset to that vertex's y coordinate.
+    """
+    polys: dict[str, list] = {}
+    for muscle_name, verts_dsl in _AU_MUSCLE_POLYGONS.items():
+        vertices = []
+        for entry in verts_dsl:
+            xi, yi = entry[0], entry[1]
+            add_bottom = len(entry) > 2 and entry[2] == "bottom"
+            vx = row[f"x_{xi}"]
+            vy = row[f"y_{yi}"]
+            if add_bottom:
+                vy = vy + bottom
+            vertices.append((vx, vy))
+        polys[muscle_name] = vertices
+    return polys
