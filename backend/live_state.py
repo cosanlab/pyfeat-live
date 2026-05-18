@@ -23,6 +23,7 @@ class LiveSession:
     """Latest detection result + active detector, per app instance."""
 
     detector: Any = None  # py-feat Detector | MPDetector | None
+    recorder: Any = None  # SessionRecorder | None
     _state: dict = field(default_factory=lambda: {
         "frame_index": -1,
         "ts": 0.0,

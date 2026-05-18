@@ -4,46 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import io
-import tempfile
 import time
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from PIL import Image
 
 from backend.serialization import serialize_faces
+from pyfeatlive_core.detect import detect_pil_images
 
 
 router = APIRouter(prefix="/api/live", tags=["live"])
-
-
-def _detect_pil(detector, img: Image.Image):
-    """Run py-feat detection on a single PIL image.
-
-    py-feat's detect() expects file paths, not PIL objects, so we write
-    the image to a temp JPEG and pass that path. We then filter out rows
-    where FaceScore == 0 (no real detection — the detector always emits
-    one row per frame even when nothing is found).
-    """
-    import numpy as np
-
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-        img.save(f.name, format="JPEG", quality=90)
-        path = f.name
-
-    import os
-    try:
-        fex = detector.detect([path], progress_bar=False)
-    finally:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
-
-    # Filter out zero-score placeholder rows (no face found).
-    if fex is not None and len(fex) > 0 and "FaceScore" in fex.columns:
-        fex = fex[fex["FaceScore"] > 0].reset_index(drop=True)
-
-    return fex
 
 
 @router.post("/frame")
@@ -69,7 +39,14 @@ async def upload_frame(request: Request) -> dict:
     # py-feat detection is CPU-bound; run in the default thread pool so
     # we don't block the asyncio loop.
     loop = asyncio.get_running_loop()
-    fex = await loop.run_in_executor(None, _detect_pil, live.detector, img)
+    fex = await loop.run_in_executor(None, detect_pil_images, live.detector, [img])
+
+    # Feed frame to recorder if a recording is in progress.
+    if live.recorder is not None:
+        import av
+        import numpy as np
+        av_frame = av.VideoFrame.from_ndarray(np.asarray(img), format="rgb24")
+        live.recorder.offer_frame(av_frame, fex if not fex.empty else None)
 
     mp_landmarks = type(live.detector).__name__ == "MPDetector"
     faces = serialize_faces(fex, mp_landmarks=mp_landmarks)
@@ -160,12 +137,8 @@ async def recording_stop(request: Request) -> dict:
     if recorder is None:
         raise HTTPException(409, "no recording in progress")
     session_dir = recorder.dir
-    # Ensure the session directory persists even if no frames were recorded.
-    session_dir.mkdir(parents=True, exist_ok=True)
     recorder.close()
     live.recorder = None
-    # Re-create dir if close() removed it (empty session cleanup).
-    session_dir.mkdir(parents=True, exist_ok=True)
     return {"session_dir": str(session_dir)}
 
 
