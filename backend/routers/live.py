@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from pyfeatlive_core.detect import detect_pil_images
 from pyfeatlive_core.detector import DetectorConfig, build_detector
-from pyfeatlive_core.jpeg import encode_jpeg
+from pyfeatlive_core.jpeg import encode_png
 from pyfeatlive_core.overlay_render import draw_overlays
 from pyfeatlive_core.recorder import (
     RecorderConfig,
@@ -95,9 +95,10 @@ async def upload_frame(request: Request) -> Response:
     if live._cached_baked_jpeg is not None:
         return Response(
             content=live._cached_baked_jpeg,
-            media_type="image/jpeg",
+            media_type="image/png",
             headers=headers,
         )
+    # First-frame echo: body is whatever the frontend sent (JPEG).
     return Response(
         content=body, media_type="image/jpeg", headers=headers,
     )
@@ -150,7 +151,9 @@ async def _run_detection(live, img: Image.Image) -> None:
                 landmark_style=live.landmark_style or "mesh",
             )
 
-        live._cached_baked_jpeg = encode_jpeg(frame_arr, quality=95)
+        # PNG (lossless) — overlay edges and 1-pixel landmark dots
+        # survive intact, no DCT quantization "+" artifacts.
+        live._cached_baked_jpeg = encode_png(frame_arr)
         live._cached_fex = fex
         live._detection_generation += 1
         live._next_detection_at = time.perf_counter() + dur

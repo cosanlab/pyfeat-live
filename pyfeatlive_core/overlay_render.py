@@ -88,48 +88,75 @@ def draw_overlays(
     """
     if fex is None or len(fex) == 0:
         return
-    # PIL is the path of least resistance for the existing primitives;
-    # wrap the array, draw, then push pixels back. Faster than per-call
-    # numpy reimplementation and visually matches v1 exactly.
+    # 2x super-sample for antialiasing. PIL's ImageDraw.line() / .ellipse()
+    # don't antialias natively, so diagonal mesh edges and tiny landmark
+    # dots look stair-stepped at source resolution. Drawing at 2x then
+    # downsampling with LANCZOS gives clean antialiased edges for free.
+    # Costs ~5-15 ms per detection at 1280x720 — fine, we have headroom.
+    SCALE = 2
     img = Image.fromarray(frame, "RGB")
-    # Draw onto a transparent overlay then alpha-composite so fills with
-    # alpha actually blend. PIL's ImageDraw on an RGB mode ignores the alpha
-    # channel; we need a separate RGBA canvas.
-    transparent = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    W, H = img.size
+    transparent = Image.new("RGBA", (W * SCALE, H * SCALE), (0, 0, 0, 0))
     drw = ImageDraw.Draw(transparent, "RGBA")
 
-    font_label = _overlay_font(14)
-    font_small = _overlay_font(12)
+    # Scale fex pixel coords + font sizes + every primitive's line widths
+    # by SCALE so the overlay paints at 2x resolution. Coords get scaled
+    # once here; primitives multiply their own widths/radii internally.
+    fex_scaled = _scale_fex_coords_inplace(fex, SCALE) if SCALE != 1 else fex
+    font_label = _overlay_font(14 * SCALE)
+    font_small = _overlay_font(12 * SCALE)
     n_landmarks = 478 if mp_landmarks else 68
 
-    for _, row in fex.iterrows():
+    for _, row in fex_scaled.iterrows():
         # Order matters — later draws cover earlier ones. Match the JS
         # port's draw order: rect → au heatmap → landmarks → pose →
         # gaze → emotions.
         if toggles.get("rects"):
-            _draw_rect(drw, row)
+            _draw_rect(drw, row, scale=SCALE)
         if toggles.get("aus"):
-            _draw_au_heatmap(drw, row, mp_landmarks=mp_landmarks)
+            _draw_au_heatmap(drw, row, mp_landmarks=mp_landmarks, scale=SCALE)
         if toggles.get("landmarks"):
             _draw_landmarks(drw, row, mp_landmarks=mp_landmarks,
-                            style=landmark_style, n_landmarks=n_landmarks)
+                            style=landmark_style, n_landmarks=n_landmarks,
+                            scale=SCALE)
         if toggles.get("poses"):
-            _draw_pose(drw, row, font_small)
+            _draw_pose(drw, row, font_small, scale=SCALE)
         if toggles.get("gaze"):
-            _draw_gaze(drw, row, mp_landmarks=mp_landmarks)
+            _draw_gaze(drw, row, mp_landmarks=mp_landmarks, scale=SCALE)
         if toggles.get("emotions"):
-            _draw_emotions(drw, row, font_label)
+            _draw_emotions(drw, row, font_label, scale=SCALE)
 
-    # Alpha-composite the overlay onto the original and copy pixels back.
-    out = Image.alpha_composite(img.convert("RGBA"), transparent)
+    # Downsample the overlay canvas back to source resolution. LANCZOS
+    # acts as the antialiasing filter — 2x-drawn-then-half-sampled edges
+    # have ~4x more effective alpha gradient than aliased ones.
+    overlay = transparent.resize((W, H), Image.LANCZOS)
+
+    # Alpha-composite onto original and copy pixels back.
+    out = Image.alpha_composite(img.convert("RGBA"), overlay)
     frame[:] = np.asarray(out.convert("RGB"))
+
+
+def _scale_fex_coords_inplace(fex: pd.DataFrame, scale: float) -> pd.DataFrame:
+    """Multiply every pixel-coord column in a fex DataFrame by ``scale``.
+
+    Returns a new DataFrame; the original is not mutated. Touches:
+    FaceRect{X,Y,Width,Height} and every x_N / y_N landmark pair.
+    """
+    out = fex.copy()
+    for col in ("FaceRectX", "FaceRectY", "FaceRectWidth", "FaceRectHeight"):
+        if col in out.columns:
+            out[col] = out[col] * scale
+    for col in out.columns:
+        if col.startswith("x_") or col.startswith("y_"):
+            out[col] = out[col] * scale
+    return out
 
 
 # ---------------------------------------------------------------------------
 # Private primitives — lifted from v1 draw_overlays_pil in utils.py
 # ---------------------------------------------------------------------------
 
-def _draw_rect(drw: ImageDraw.ImageDraw, row: pd.Series) -> None:
+def _draw_rect(drw: ImageDraw.ImageDraw, row: pd.Series, *, scale: int = 1) -> None:
     """Face bounding box in cyan."""
     x = float(row["FaceRectX"])
     y = float(row["FaceRectY"])
@@ -137,11 +164,12 @@ def _draw_rect(drw: ImageDraw.ImageDraw, row: pd.Series) -> None:
     h = float(row["FaceRectHeight"])
     if np.isnan(x) or np.isnan(y) or np.isnan(w) or np.isnan(h):
         return
-    drw.rectangle([x, y, x + w, y + h], outline=(0, 220, 255, 255), width=2)
+    drw.rectangle([x, y, x + w, y + h], outline=(0, 220, 255, 255), width=2 * scale)
 
 
 def _draw_au_heatmap(
-    drw: ImageDraw.ImageDraw, row: pd.Series, *, mp_landmarks: bool
+    drw: ImageDraw.ImageDraw, row: pd.Series, *, mp_landmarks: bool,
+    scale: int = 1,
 ) -> None:
     """Blues-palette muscle-polygon heatmap over dlib-68 (or MP→dlib-68 view)."""
     try:
@@ -188,6 +216,7 @@ def _draw_landmarks(
     mp_landmarks: bool,
     style: str,
     n_landmarks: int,
+    scale: int = 1,
 ) -> None:
     """Landmark wireframe or dot cloud.
 
@@ -213,7 +242,7 @@ def _draw_landmarks(
                 continue
             if np.isnan(xa) or np.isnan(xb) or np.isnan(ya) or np.isnan(yb):
                 continue
-            drw.line([(xa, ya), (xb, yb)], fill=(255, 255, 255, 200), width=1)
+            drw.line([(xa, ya), (xb, yb)], fill=(255, 255, 255, 200), width=1 * scale)
     else:
         # 'points': per-landmark dots — cheapest; works for both schemas.
         has_index = hasattr(row, "index")
@@ -229,12 +258,14 @@ def _draw_landmarks(
             py = row[yk]
             if np.isnan(px) or np.isnan(py):
                 continue
-            drw.ellipse([px - 1, py - 1, px + 1, py + 1],
+            r = 1 * scale
+            drw.ellipse([px - r, py - r, px + r, py + r],
                         fill=(255, 255, 255, 230))
 
 
 def _draw_pose(
-    drw: ImageDraw.ImageDraw, row: pd.Series, font_small: ImageFont.FreeTypeFont
+    drw: ImageDraw.ImageDraw, row: pd.Series, font_small: ImageFont.FreeTypeFont,
+    *, scale: int = 1,
 ) -> None:
     """Three-axis pose indicator (RGB for pitch/roll/yaw) + numeric readout."""
     x = float(row["FaceRectX"])
@@ -265,19 +296,20 @@ def _draw_pose(
     x3 = cx + size * (np.sin(yw))
     y3 = cy - size * (-np.cos(yw) * np.sin(p))
 
-    drw.line([cx, cy, x1, y1], fill=(255, 60, 60, 255), width=3)
-    drw.line([cx, cy, x2, y2], fill=(60, 255, 60, 255), width=3)
-    drw.line([cx, cy, x3, y3], fill=(80, 140, 255, 255), width=3)
+    drw.line([cx, cy, x1, y1], fill=(255, 60, 60, 255), width=3 * scale)
+    drw.line([cx, cy, x2, y2], fill=(60, 255, 60, 255), width=3 * scale)
+    drw.line([cx, cy, x3, y3], fill=(80, 140, 255, 255), width=3 * scale)
     _draw_text_panel(
         drw,
-        x + w + 6,
-        y + h - 60,
+        x + w + 6 * scale,
+        y + h - 60 * scale,
         [
             f"Pitch  {float(pitch):+6.1f}°",
             f"Yaw    {float(yaw):+6.1f}°",
             f"Roll   {float(roll):+6.1f}°",
         ],
         font_small,
+        scale=scale,
     )
 
 
@@ -286,6 +318,7 @@ def _draw_gaze(
     row: pd.Series,
     *,
     mp_landmarks: bool,
+    scale: int = 1,
 ) -> None:
     """Single yellow arrow from between-the-eyes toward gaze direction."""
     has_index = hasattr(row, "index")
@@ -316,11 +349,12 @@ def _draw_gaze(
     color = (255, 220, 0, 255)  # LIVE_YELLOW + full alpha
     # Subtle dark drop-shadow so the arrow stays visible against skin.
     drw.line(
-        [(origin_x + 1, origin_y + 1), (end_x + 1, end_y + 1)],
+        [(origin_x + 1 * scale, origin_y + 1 * scale),
+         (end_x + 1 * scale, end_y + 1 * scale)],
         fill=(0, 0, 0, 140),
-        width=5,
+        width=5 * scale,
     )
-    drw.line([(origin_x, origin_y), (end_x, end_y)], fill=color, width=4)
+    drw.line([(origin_x, origin_y), (end_x, end_y)], fill=color, width=4 * scale)
 
     norm = float(np.hypot(dir_x, dir_y))
     if norm > 1e-3:
@@ -329,8 +363,8 @@ def _draw_gaze(
         ny = dir_y / norm
         px = -ny
         py = nx
-        head_length = 16
-        head_width = 11
+        head_length = 16 * scale
+        head_width = 11 * scale
         bx = end_x - nx * head_length
         by = end_y - ny * head_length
         corner1 = (bx + px * head_width, by + py * head_width)
@@ -342,24 +376,27 @@ def _draw_gaze(
         )
     else:
         # Looking straight at camera — draw a small disc instead.
+        r = 6 * scale
         drw.ellipse(
-            [origin_x - 6, origin_y - 6, origin_x + 6, origin_y + 6],
+            [origin_x - r, origin_y - r, origin_x + r, origin_y + r],
             fill=color,
             outline=(120, 80, 0, 255),
-            width=2,
+            width=2 * scale,
         )
 
     # Origin disc — marks where the gaze vector starts.
+    r = 3 * scale
     drw.ellipse(
-        [origin_x - 3, origin_y - 3, origin_x + 3, origin_y + 3],
+        [origin_x - r, origin_y - r, origin_x + r, origin_y + r],
         fill=(255, 240, 100, 255),
         outline=(120, 80, 0, 255),
-        width=1,
+        width=1 * scale,
     )
 
 
 def _draw_emotions(
-    drw: ImageDraw.ImageDraw, row: pd.Series, font_label: ImageFont.FreeTypeFont
+    drw: ImageDraw.ImageDraw, row: pd.Series, font_label: ImageFont.FreeTypeFont,
+    *, scale: int = 1,
 ) -> None:
     """Top-3 emotions as a text panel above the face rect."""
     emotion_cols = (
@@ -381,8 +418,8 @@ def _draw_emotions(
         return
     lines = [f"{c.capitalize()}  {v:.2f}" for c, v in scored]
     tx = float(row["FaceRectX"])
-    ty = max(8.0, float(row["FaceRectY"]) - 78.0)
-    _draw_text_panel(drw, tx, ty, lines, font_label)
+    ty = max(8.0 * scale, float(row["FaceRectY"]) - 78.0 * scale)
+    _draw_text_panel(drw, tx, ty, lines, font_label, scale=scale)
 
 
 # ---------------------------------------------------------------------------
@@ -437,16 +474,20 @@ def _draw_text_panel(
     lines: list[str],
     font: ImageFont.FreeTypeFont,
     fg: tuple = (255, 255, 255, 255),
+    *,
+    scale: int = 1,
 ) -> None:
     """Black rounded-rect panel + white text with drop shadow."""
     text = "\n".join(lines)
-    bbox = drw.multiline_textbbox((x, y), text, font=font, spacing=2)
-    pad = 6
+    bbox = drw.multiline_textbbox((x, y), text, font=font, spacing=2 * scale)
+    pad = 6 * scale
     panel = (bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad)
-    shadow = (panel[0] + 2, panel[1] + 2, panel[2] + 2, panel[3] + 2)
-    drw.rounded_rectangle(shadow, radius=6, fill=(0, 0, 0, 100))
-    drw.rounded_rectangle(panel, radius=6, fill=(0, 0, 0, 200))
-    drw.multiline_text((x, y), text, font=font, fill=fg, spacing=2)
+    shadow_off = 2 * scale
+    shadow = (panel[0] + shadow_off, panel[1] + shadow_off,
+              panel[2] + shadow_off, panel[3] + shadow_off)
+    drw.rounded_rectangle(shadow, radius=6 * scale, fill=(0, 0, 0, 100))
+    drw.rounded_rectangle(panel, radius=6 * scale, fill=(0, 0, 0, 200))
+    drw.multiline_text((x, y), text, font=font, fill=fg, spacing=2 * scale)
 
 
 def _au_cmap_lookup(value: float, lut: list) -> tuple[int, int, int]:
