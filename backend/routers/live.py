@@ -47,9 +47,13 @@ async def upload_frame(request: Request) -> dict:
         raise HTTPException(400, f"could not decode image: {exc}") from exc
 
     # py-feat detection is CPU-bound; run in the default thread pool so
-    # we don't block the asyncio loop.
+    # we don't block the asyncio loop. The detector_lock serialises
+    # concurrent calls — PyTorch's MPS backend is not thread-safe on a
+    # shared module and will crash the process if two forward() calls
+    # overlap. See backend/live_state.py for the full reasoning.
     loop = asyncio.get_running_loop()
-    fex = await loop.run_in_executor(None, detect_pil_images, live.detector, [img])
+    async with live.detector_lock:
+        fex = await loop.run_in_executor(None, detect_pil_images, live.detector, [img])
 
     # Feed frame to recorder if a recording is in progress.
     if live.recorder is not None:

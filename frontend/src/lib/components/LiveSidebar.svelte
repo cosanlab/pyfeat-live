@@ -32,6 +32,22 @@
   } as const;
 
   const opts = $derived(MODEL_OPTIONS[config.detector_type]);
+
+  // Switching detector type must also reset the model fields, because
+  // e.g. landmark_model='mp_facemesh_v2' is invalid for the classic
+  // Detector. Mirrors v1's on_detector_type_change behavior.
+  function switchDetectorType(type: LiveConfigure['detector_type']) {
+    const d = MODEL_OPTIONS[type];
+    onConfigChange({
+      ...config,
+      detector_type: type,
+      face_model: d.face_model[0]!,
+      landmark_model: d.landmark_model[0]!,
+      au_model: d.au_model[0]!,
+      emotion_model: d.emotion_model[0],
+      identity_model: d.identity_model[0],
+    });
+  }
 </script>
 
 <aside class="w-[200px] p-4 bg-zinc-900 border-r border-zinc-900 space-y-4">
@@ -42,7 +58,7 @@
       {#each ['MPDetector', 'Detector'] as type}
         <button
           class="flex-1 text-[10.5px] py-1 rounded text-center {config.detector_type === type ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500'}"
-          onclick={() => update('detector_type', type as LiveConfigure['detector_type'])}
+          onclick={() => switchDetectorType(type as LiveConfigure['detector_type'])}
         >{type}</button>
       {/each}
     </div>

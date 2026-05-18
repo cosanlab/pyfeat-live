@@ -32,7 +32,13 @@ class LiveSession:
         "video_width": 0,
         "video_height": 0,
     })
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Serialises detector inference across concurrent /api/live/frame
+    # requests. PyTorch + Metal Performance Shaders is NOT thread-safe
+    # for a shared module — two simultaneous forward() calls trigger
+    # `failed assertion: A command encoder is already encoding to this
+    # command buffer` and crash the process. The route holds this lock
+    # for the duration of run_in_executor(detect_pil_images, ...).
+    detector_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _subscribers: list[asyncio.Queue] = field(default_factory=list)
 
     def snapshot(self) -> dict:
