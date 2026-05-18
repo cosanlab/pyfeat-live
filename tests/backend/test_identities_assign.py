@@ -55,3 +55,16 @@ def test_assign_404_for_missing_identity(client, session_with_one_identity):
         json={"frame": 0, "face_idx": 0},
     )
     assert r.status_code == 404
+
+
+def test_get_assignments_returns_list(client, session_with_one_identity):
+    _, s = session_with_one_identity
+    client.post("/api/sessions/s1/identities/alice/assign",
+                json={"frame": 5, "face_idx": 0})
+    client.post("/api/sessions/s1/identities/alice/assign",
+                json={"frame": 6, "face_idx": 1})
+    r = client.get("/api/sessions/s1/identities/assignments")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 2
+    assert all("identity_id" in a for a in data)

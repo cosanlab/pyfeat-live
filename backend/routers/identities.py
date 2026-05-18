@@ -46,6 +46,18 @@ def _identity_to_dict(ident: Identity) -> dict:
     }
 
 
+# NOTE: /identities/assignments must be registered BEFORE /identities/{identity_id}
+# so FastAPI's router matches the literal path first.
+
+@router.get("/api/sessions/{session_id}/identities/assignments")
+def list_assignments(session_id: str) -> list[dict]:
+    d = _session_dir(session_id)
+    return [
+        {"frame": a.frame, "face_idx": a.face_idx, "identity_id": a.identity_id}
+        for a in read_assignments(d)
+    ]
+
+
 @router.get("/api/sessions/{session_id}/identities")
 def list_identities(session_id: str) -> list[dict]:
     d = _session_dir(session_id)
