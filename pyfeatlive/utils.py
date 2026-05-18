@@ -216,7 +216,7 @@ def reload_detector():
     """
     load_detector.clear()
     st.session_state.detector = load_detector()
-    st.toast("**Detector swap complete!**", icon="✅")
+    st.toast("**Detector swap complete!**")
 
 
 # Per-detector Fex column metadata. py-feat's Detector.detect() and
