@@ -9,8 +9,13 @@ This module owns app construction; per-feature routes live in
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 import pyfeatlive_core
 from backend.routers import system as system_router
@@ -61,6 +66,30 @@ def create_app() -> FastAPI:
     app.include_router(annotations_router.router)
     app.include_router(presets_router.router)
     app.include_router(analyze_router.router)
+
+    # ----- Frontend serving --------------------------------------------
+    # The built Svelte SPA lives at this path. Set PYFEAT_FRONTEND_DIST
+    # to override (used in tests and in the Tauri bundle where the
+    # frontend is bundled as a sibling resource of the sidecar).
+    default_dist = Path(__file__).resolve().parent.parent / "tauri" / "dist"
+    dist_path = Path(os.environ.get("PYFEAT_FRONTEND_DIST") or default_dist)
+
+    if dist_path.exists() and (dist_path / "index.html").is_file():
+        # SPA fallback: anything not matched by /api/* and not an actual
+        # file under dist returns index.html so the client-side router
+        # can handle the URL. Implemented as an explicit catch-all
+        # AFTER mounting StaticFiles so real assets win.
+        app.mount(
+            "/assets",
+            StaticFiles(directory=dist_path / "assets"),
+            name="frontend-assets",
+        )
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        def spa_fallback(full_path: str) -> FileResponse:
+            # /api/* are matched earlier by the routers; this only fires
+            # for unmatched non-/api paths. Always return index.html.
+            return FileResponse(dist_path / "index.html")
 
     return app
 
