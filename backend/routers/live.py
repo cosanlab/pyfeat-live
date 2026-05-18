@@ -141,10 +141,52 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
 class StartRecordingRequest(BaseModel):
     record_video: bool = True
     record_fex: bool = True
-    video_mode: Literal["clean", "overlay"] = "clean"
+    # ``off`` skips video entirely (fex-only); ``clean`` writes the raw
+    # source frame; ``overlay`` bakes detections into the recorded
+    # video. The first two are used by the aiortc recorder branch
+    # below; ``overlay`` reuses live._cached_fex set by DetectionTrack.
+    video_mode: Literal["clean", "overlay", "off"] = "clean"
     fps: int = 30
     width: int = 640
     height: int = 360
+
+
+async def _recorder_branch(track, recorder, live, mode: str) -> None:
+    """Drain ``track`` frame-by-frame, push pixels into ``recorder``.
+
+    Runs as an asyncio.Task spawned from /recording/start. Mode:
+      - ``"off"``: discard frames (fex-only recording).
+      - ``"clean"``: pass source frames unchanged into the recorder.
+      - ``"overlay"``: bake the live._cached_fex overlay onto each
+        frame before pushing.
+    """
+    from aiortc.mediastreams import MediaStreamError
+
+    try:
+        while True:
+            try:
+                frame = await track.recv()
+            except MediaStreamError:
+                break
+            if mode == "off":
+                continue
+            rgb = frame.to_ndarray(format="rgb24")
+            cached_fex = getattr(live, "_cached_fex", None)
+            if mode == "overlay" and cached_fex is not None:
+                from pyfeatlive_core.overlay_render import draw_overlays
+                draw_overlays(
+                    rgb,
+                    cached_fex,
+                    getattr(live, "toggles", {}) or {},
+                    mp_landmarks=getattr(live, "mp_landmarks", False),
+                    landmark_style=getattr(live, "landmark_style", "mesh"),
+                )
+            av_frame = av.VideoFrame.from_ndarray(rgb, format="rgb24")
+            av_frame.pts = frame.pts
+            av_frame.time_base = frame.time_base
+            recorder.offer_frame(av_frame, cached_fex)
+    finally:
+        recorder.close()
 
 
 @router.post("/recording/start")
@@ -156,11 +198,26 @@ async def recording_start(req: StartRecordingRequest, request: Request) -> dict:
     cfg = RecorderConfig(
         record_video=req.record_video,
         record_fex=req.record_fex,
-        video_mode=req.video_mode,
+        video_mode=req.video_mode if req.video_mode != "off" else "clean",
         fps=req.fps, width=req.width, height=req.height,
     )
     recorder = SessionRecorder(default_sessions_root(), cfg)
     live.recorder = recorder
+
+    # Spawn the aiortc recorder branch IF a WebRTC source track is
+    # live. Otherwise fall back to the JPEG-upload path: /api/live/frame
+    # already feeds the recorder directly when ``live.recorder`` is
+    # set, so no extra wiring is needed for that fallback.
+    src = getattr(live, "rtc_source_track", None)
+    if src is not None:
+        # Import here to avoid pulling aiortc into module import time
+        # for environments that never touch WebRTC.
+        from backend.routers.live_rtc import _relay
+        subscribed = _relay.subscribe(src)
+        live.recorder_task = asyncio.create_task(
+            _recorder_branch(subscribed, recorder, live, req.video_mode)
+        )
+
     return {
         "session_id": recorder.dir.name,
         "session_dir": str(recorder.dir),
@@ -175,7 +232,19 @@ async def recording_stop(request: Request) -> dict:
     if recorder is None:
         raise HTTPException(409, "no recording in progress")
     session_dir = recorder.dir
-    recorder.close()
+
+    # Cancel the aiortc recorder branch (if any). Its ``finally``
+    # closes the recorder so we don't double-close here in that path.
+    task = getattr(live, "recorder_task", None)
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        live.recorder_task = None
+    else:
+        recorder.close()
     live.recorder = None
     return {"session_dir": str(session_dir)}
 

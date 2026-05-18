@@ -85,3 +85,85 @@ def test_stop_without_start_returns_409(live_client_recording):
     client, _ = live_client_recording
     r = client.post("/api/live/recording/stop")
     assert r.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Unit test for the aiortc recorder branch.
+#
+# A full end-to-end through /api/live/recording/start requires a real
+# RTC peer (i.e. a browser); _recorder_branch is small enough that
+# calling it directly with a FakeTrack covers the interesting path:
+# it drains frames, calls recorder.offer_frame for each, and closes
+# the recorder when the source EOSes.
+# ---------------------------------------------------------------------------
+
+class _FakeFrame:
+    def __init__(self, pts: int = 0):
+        self.pts = pts
+        self.time_base = 1
+        self.width, self.height = 16, 16
+
+    def to_ndarray(self, format: str):
+        import numpy as np
+        return np.zeros((16, 16, 3), dtype="uint8")
+
+
+class _FakeTrack:
+    kind = "video"
+
+    def __init__(self, n: int):
+        self._frames = [_FakeFrame(i) for i in range(n)]
+
+    async def recv(self):
+        if not self._frames:
+            from aiortc.mediastreams import MediaStreamError
+            raise MediaStreamError
+        return self._frames.pop(0)
+
+
+class _FakeRecorder:
+    def __init__(self):
+        self.offered = []
+        self.closed = False
+
+    def offer_frame(self, av_frame, fex):
+        self.offered.append((av_frame, fex))
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeLive:
+    _cached_fex = None
+    toggles: dict = {}
+    mp_landmarks = False
+    landmark_style = "mesh"
+
+
+@pytest.mark.asyncio
+async def test_recorder_branch_drains_track_and_closes_recorder():
+    from backend.routers.live import _recorder_branch
+
+    track = _FakeTrack(3)
+    recorder = _FakeRecorder()
+    live = _FakeLive()
+
+    await _recorder_branch(track, recorder, live, mode="clean")
+
+    # All three source frames pushed; recorder closed after EOS.
+    assert len(recorder.offered) == 3
+    assert recorder.closed is True
+
+
+@pytest.mark.asyncio
+async def test_recorder_branch_mode_off_skips_frames_but_closes_recorder():
+    from backend.routers.live import _recorder_branch
+
+    track = _FakeTrack(2)
+    recorder = _FakeRecorder()
+
+    await _recorder_branch(track, recorder, _FakeLive(), mode="off")
+
+    # mode=off discards frames but the finally still closes the recorder.
+    assert recorder.offered == []
+    assert recorder.closed is True
