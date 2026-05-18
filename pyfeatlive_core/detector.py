@@ -11,7 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from feat import Detector, MPDetector
+from feat import Detector
+from feat.MPDetector import MPDetector
 
 
 DetectorType = Literal["Detector", "MPDetector"]
