@@ -27,7 +27,7 @@ class LiveSession:
     # Overlay configuration mirrored from /api/live/configure so the
     # bake path can read them on every frame without bouncing through
     # the frontend.
-    toggles: dict = field(default_factory=dict)
+    toggles: dict[str, bool] = field(default_factory=dict)
     landmark_style: str = "mesh"
     mp_landmarks: bool = False
     _state: dict = field(default_factory=lambda: {
