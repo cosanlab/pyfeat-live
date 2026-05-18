@@ -18,3 +18,4 @@ plotly==6.7.0
 watchdog==6.0.0
 av==16.1.0
 pillow==12.2.0
+aiortc>=1.9
