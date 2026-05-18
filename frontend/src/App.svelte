@@ -1,7 +1,7 @@
 <script lang="ts">
   import TopNav from './lib/components/TopNav.svelte';
+  import type { View } from './lib/types';
 
-  type View = 'live' | 'analyze' | 'viewer';
   let view: View = $state('live');
 </script>
 
