@@ -203,7 +203,7 @@ class ConfigureRequest(BaseModel):
     detector_type: Literal["Detector", "MPDetector"] = "MPDetector"
     face_model: str = "retinaface"
     landmark_model: str = "mp_facemesh_v2"
-    au_model: str = "mp_blendshapes"
+    au_model: Optional[str] = "mp_blendshapes"
     emotion_model: Optional[str] = "resmasknet"
     identity_model: Optional[str] = "arcface"
     device: Literal["cpu", "mps", "cuda"] = "cpu"

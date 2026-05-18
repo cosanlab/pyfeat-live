@@ -31,14 +31,14 @@
     Detector: {
       face_model: ['img2pose', 'retinaface'],
       landmark_model: ['mobilefacenet', 'mobilenet', 'pfld'],
-      au_model: ['xgb', 'svm'],
+      au_model: ['xgb', 'svm', null],
       emotion_model: ['resmasknet', 'svm', null],
       identity_model: ['arcface', 'arcface_r50', 'facenet', null],
     },
     MPDetector: {
       face_model: ['retinaface'],
       landmark_model: ['mp_facemesh_v2'],
-      au_model: ['mp_blendshapes'],
+      au_model: ['mp_blendshapes', null],
       emotion_model: ['resmasknet', 'svm', null],
       identity_model: ['arcface', 'arcface_r50', 'facenet', null],
     },

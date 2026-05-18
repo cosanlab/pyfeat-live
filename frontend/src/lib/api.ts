@@ -70,7 +70,7 @@ export interface LiveConfigure {
   detector_type: 'Detector' | 'MPDetector';
   face_model: string;
   landmark_model: string;
-  au_model: string;
+  au_model: string | null;
   emotion_model: string | null;
   identity_model: string | null;
   device: 'cpu' | 'mps' | 'cuda';
