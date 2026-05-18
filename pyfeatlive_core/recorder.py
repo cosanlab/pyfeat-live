@@ -154,10 +154,17 @@ class SessionRecorder:
 
         produced_artifact = (
             self.frames_written > 0 or self.captures_taken > 0
+            or (self.config.record_fex and self.frame_index > 0)
         )
         if not produced_artifact:
             self._remove_empty_dir()
             return None
+
+        # If we were asked to record fex but no faces were ever detected,
+        # ensure fex.csv exists (empty file) so callers can unconditionally
+        # check for its presence.
+        if self.config.record_fex and not (self.dir / "fex.csv").exists():
+            (self.dir / "fex.csv").write_text("")
 
         meta = {
             # ``type`` lets the Viewer's session picker distinguish live
