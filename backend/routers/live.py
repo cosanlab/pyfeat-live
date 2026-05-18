@@ -209,6 +209,9 @@ class ConfigureRequest(BaseModel):
     au_model: Optional[str] = "mp_blendshapes"
     emotion_model: Optional[str] = "resmasknet"
     identity_model: Optional[str] = "arcface"
+    # Only honored by classic Detector. MPDetector emits gaze
+    # unconditionally from iris landmarks.
+    gaze_model: Optional[str] = "l2cs"
     device: Literal["cpu", "mps", "cuda"] = "cpu"
     # Overlay/render hints — read by /api/live/frame on every uploaded
     # frame so the in-pipeline bake matches what the UI would have drawn.
@@ -229,7 +232,7 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
     # hints below are stored on ``live`` directly.
     detector_fields = {
         "detector_type", "face_model", "landmark_model", "au_model",
-        "emotion_model", "identity_model", "device",
+        "emotion_model", "identity_model", "gaze_model", "device",
     }
     cfg = DetectorConfig(**{k: v for k, v in req.model_dump().items()
                             if k in detector_fields})

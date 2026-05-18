@@ -34,6 +34,7 @@
     au_model: 'mp_blendshapes',
     emotion_model: 'resmasknet',
     identity_model: 'arcface',
+    gaze_model: 'mp_iris (built-in)',
     device: 'mps',
   });
 

@@ -34,6 +34,7 @@
       au_model: ['xgb', 'svm', null],
       emotion_model: ['resmasknet', 'svm', null],
       identity_model: ['arcface', 'arcface_r50', 'facenet', null],
+      gaze_model: ['l2cs', null],
     },
     MPDetector: {
       face_model: ['retinaface'],
@@ -41,6 +42,9 @@
       au_model: ['mp_blendshapes', null],
       emotion_model: ['resmasknet', 'svm', null],
       identity_model: ['arcface', 'arcface_r50', 'facenet', null],
+      // MPDetector ignores gaze_model; gaze comes from iris landmarks.
+      // Show a single "built-in" option so the UI is consistent.
+      gaze_model: ['mp_iris (built-in)'],
     },
   } as const;
 
@@ -59,6 +63,7 @@
       au_model: d.au_model[0]!,
       emotion_model: d.emotion_model[0],
       identity_model: d.identity_model[0],
+      gaze_model: d.gaze_model[0],
     });
   }
 </script>
@@ -95,6 +100,7 @@
       ['Action units', 'au_model'],
       ['Emotion', 'emotion_model'],
       ['Identity', 'identity_model'],
+      ['Gaze', 'gaze_model'],
     ] as [label, key]}
       <div class="mb-2">
         <div class="text-[11px] text-zinc-400 mb-1">{label}</div>

@@ -73,6 +73,9 @@ export interface LiveConfigure {
   au_model: string | null;
   emotion_model: string | null;
   identity_model: string | null;
+  // Only classic Detector honors gaze_model. MPDetector derives gaze
+  // from iris landmarks unconditionally.
+  gaze_model: string | null;
   device: 'cpu' | 'mps' | 'cuda';
   // Optional overlay/render hints. The backend bakes overlays onto the
   // returned frame using these — they're stored on the LiveSession and

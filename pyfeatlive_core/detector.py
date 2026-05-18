@@ -35,6 +35,10 @@ class DetectorConfig:
     au_model: Optional[str] = "mp_blendshapes"
     emotion_model: Optional[str] = "resmasknet"
     identity_model: Optional[str] = "arcface"
+    # Only classic Detector accepts a gaze_model kwarg (L2CS). MPDetector
+    # derives gaze internally from MediaPipe iris landmarks; this field
+    # is ignored when detector_type == "MPDetector".
+    gaze_model: Optional[str] = "l2cs"
     device: Device = "cpu"
 
 
@@ -53,5 +57,6 @@ def build_detector(config: DetectorConfig):
         device=config.device,
     )
     if config.detector_type == "MPDetector":
+        # MPDetector doesn't take gaze_model; gaze comes from iris.
         return MPDetector(**common_kwargs)
-    return Detector(**common_kwargs)
+    return Detector(gaze_model=config.gaze_model, **common_kwargs)
