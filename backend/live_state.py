@@ -53,6 +53,11 @@ class LiveSession:
     # frame whose positions the overlay was computed on. Display
     # rate = detection rate (~10 Hz) but overlay drift is zero.
     _cached_baked_jpeg: bytes | None = None
+    # Monotonic counter incremented each time _cached_baked_jpeg is
+    # replaced (i.e., each completed detection). Sent back to the
+    # frontend via the X-Detection-Generation header so the UI can
+    # distinguish "new locked frame" from "same frame served again."
+    _detection_generation: int = 0
     _state: dict = field(default_factory=lambda: {
         "frame_index": -1,
         "ts": 0.0,

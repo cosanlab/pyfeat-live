@@ -91,11 +91,16 @@ async def upload_frame(request: Request) -> Response:
         )
 
     # --- return cached locked frame (or echo source on first call) -
+    headers = {"X-Detection-Generation": str(live._detection_generation)}
     if live._cached_baked_jpeg is not None:
         return Response(
-            content=live._cached_baked_jpeg, media_type="image/jpeg"
+            content=live._cached_baked_jpeg,
+            media_type="image/jpeg",
+            headers=headers,
         )
-    return Response(content=body, media_type="image/jpeg")
+    return Response(
+        content=body, media_type="image/jpeg", headers=headers,
+    )
 
 
 async def _run_detection(live, img: Image.Image) -> None:
@@ -140,6 +145,7 @@ async def _run_detection(live, img: Image.Image) -> None:
 
         live._cached_baked_jpeg = encode_jpeg(frame_arr, quality=95)
         live._cached_fex = fex
+        live._detection_generation += 1
         live._next_detection_at = time.perf_counter() + dur
     except Exception:
         pass

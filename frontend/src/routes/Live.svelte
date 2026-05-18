@@ -65,10 +65,15 @@
   let isRecording = $state(false);
   let loopAbort: AbortController | null = null;
 
-  // Round-trip fps: how fast we can upload → bake → paint a frame.
-  // Tracked over a 1-second sliding window of completed paints.
+  // Detection fps: how fast the backend is producing NEW locked
+  // frames (i.e., distinct detection results). Since display is
+  // locked to detection, this is also the meaningful "what you
+  // actually see refresh" rate. Counted via the X-Detection-
+  // Generation header — duplicate paints of the same baked frame
+  // don't count.
   let fps = $state(0);
   const fpsWindow: number[] = [];
+  let lastGeneration = -1;
   let frameIndex = $state(0);
 
   // 1) On mount: fetch compute info + enumerate cameras + configure detector
@@ -175,10 +180,13 @@
       if (!blob) { await new Promise((r) => setTimeout(r, 16)); continue; }
       const tEnc = profile ? performance.now() : 0;
 
-      // 3. Round-trip to backend; receive baked JPEG
+      // 3. Round-trip to backend; receive baked JPEG + generation
       let baked: Blob;
+      let generation = -1;
       try {
-        baked = await liveApi.uploadFrame(blob);
+        const r = await liveApi.uploadFrame(blob);
+        baked = r.blob;
+        generation = r.generation;
         apiError = null;
       } catch (e: any) {
         if (signal.aborted) return;
@@ -208,12 +216,19 @@
       }
       const tBlit = profile ? performance.now() : 0;
 
-      // FPS tracking — completed paints in the last 1s.
+      // FPS tracking — count only paints where the backend served a
+      // NEW locked frame (generation advanced). Duplicate paints of
+      // the same cached frame inflate raw paint-rate but aren't
+      // visible to the user. frameIndex tracks the detection cycles
+      // we've seen so it matches what the eye actually perceives.
       const now = performance.now();
-      fpsWindow.push(now);
+      if (generation !== lastGeneration) {
+        lastGeneration = generation;
+        fpsWindow.push(now);
+        frameIndex += 1;
+      }
       while (fpsWindow.length > 0 && fpsWindow[0]! < now - 1000) fpsWindow.shift();
       fps = fpsWindow.length;
-      frameIndex += 1;
 
       if (profile) {
         console.log(
@@ -252,6 +267,7 @@
     }
     fps = 0;
     fpsWindow.length = 0;
+    lastGeneration = -1;
     frameIndex = 0;
   }
 

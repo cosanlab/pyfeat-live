@@ -91,14 +91,18 @@ export const liveApi = {
   // POST a JPEG of the current camera frame; backend bakes overlays and
   // returns the baked JPEG. The display canvas renders the returned blob
   // so what the user sees is exactly the frame detection ran on.
-  uploadFrame: async (jpeg: Blob): Promise<Blob> => {
+  uploadFrame: async (jpeg: Blob): Promise<{ blob: Blob; generation: number }> => {
     const r = await fetch('/api/live/frame', {
       method: 'POST',
       headers: { 'Content-Type': 'image/jpeg' },
       body: jpeg,
     });
     if (!r.ok) throw new ApiError(r.status, `uploadFrame: ${r.status} ${r.statusText}`);
-    return await r.blob();
+    const blob = await r.blob();
+    const generation = parseInt(
+      r.headers.get('X-Detection-Generation') ?? '0', 10,
+    );
+    return { blob, generation };
   },
   recordingStart: (body: {
     record_video: boolean;
