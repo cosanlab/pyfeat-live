@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Moon } from 'lucide-svelte';
+  import Moon from '@lucide/svelte/icons/moon';
 
   type View = 'live' | 'analyze' | 'viewer';
   type Props = { view: View; onViewChange: (v: View) => void };
