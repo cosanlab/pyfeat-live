@@ -20,6 +20,7 @@ pre-extracting an entire video.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import shutil
@@ -30,7 +31,6 @@ from typing import Iterable
 
 import av
 import pandas as pd
-import streamlit as st
 from PIL import Image as PILImage
 
 logger = logging.getLogger(__name__)
@@ -280,7 +280,7 @@ def _decode_frame(video_path: str, target_idx: int, fps: float) -> PILImage.Imag
         container.close()
 
 
-@st.cache_data(max_entries=64, show_spinner=False)
+@functools.lru_cache(maxsize=64)
 def get_video_frame(video_path: str, frame_idx: int, fps: float) -> PILImage.Image | None:
     """Cached wrapper around :func:`_decode_frame`.
 
@@ -288,8 +288,8 @@ def get_video_frame(video_path: str, frame_idx: int, fps: float) -> PILImage.Ima
     keep recently-scrubbed frames warm; older entries get evicted as
     the user explores. Eviction is fine — re-decode is fast.
 
-    Streamlit's cache hashes the args; ``video_path`` is a str so file
-    mutations after first cache won't invalidate. That's acceptable
+    ``functools.lru_cache`` hashes the args; ``video_path`` is a str so
+    file mutations after first cache won't invalidate. That's acceptable
     here because session files are write-once after the recorder closes.
     """
     return _decode_frame(video_path, frame_idx, fps)
@@ -303,7 +303,7 @@ def video_frame_count(video_path: str) -> int | None:
     return _video_frame_count_cached(video_path)
 
 
-@st.cache_data(show_spinner=False)
+@functools.lru_cache(maxsize=128)
 def _video_frame_count_cached(video_path: str) -> int | None:
     try:
         with av.open(video_path) as container:
