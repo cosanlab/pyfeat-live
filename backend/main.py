@@ -41,6 +41,9 @@ def create_app() -> FastAPI:
     def health() -> dict:
         return {"status": "ok", "version": pyfeatlive_core.__version__}
 
+    from backend.routers import system as system_router
+    app.include_router(system_router.router)
+
     return app
 
 
