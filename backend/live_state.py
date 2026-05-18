@@ -24,6 +24,22 @@ class LiveSession:
 
     detector: Any = None  # py-feat Detector | MPDetector | None
     recorder: Any = None  # SessionRecorder | None
+    # aiortc bookkeeping — only populated when WebRTC is active.
+    # ``rtc_peers`` is keyed by a uuid we generate on /offer.
+    # ``rtc_source_track`` holds the most recent inbound video track so
+    # the recorder branch in /api/live/recording/start can subscribe to
+    # it via the shared MediaRelay.
+    rtc_peers: dict[str, Any] = field(default_factory=dict)
+    rtc_source_track: Any = None
+    # asyncio.Task drained by /api/live/recording/stop. Spawned by the
+    # recording start handler when an RTC source track is available.
+    recorder_task: Any = None
+    # Overlay configuration mirrored from /api/live/configure so the
+    # in-pipeline DetectionTrack can bake the correct overlays on each
+    # frame without bouncing through the frontend.
+    toggles: dict = field(default_factory=dict)
+    landmark_style: str = "mesh"
+    mp_landmarks: bool = False
     _state: dict = field(default_factory=lambda: {
         "frame_index": -1,
         "ts": 0.0,

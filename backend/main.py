@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 import pyfeatlive_core
 from backend.routers import system as system_router
 from backend.routers import live as live_router
+from backend.routers import live_rtc as live_rtc_router
 from backend.routers import sessions as sessions_router
 from backend.routers import identities as identities_router
 from backend.routers import annotations as annotations_router
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
 
     app.include_router(system_router.router)
     app.include_router(live_router.router)
+    app.include_router(live_rtc_router.router)
     app.include_router(sessions_router.router)
     app.include_router(identities_router.router)
     app.include_router(annotations_router.router)
