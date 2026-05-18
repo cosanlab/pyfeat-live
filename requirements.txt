@@ -1,13 +1,5 @@
 py-feat @ git+https://github.com/cosanlab/py-feat@437b651
-streamlit
 watchdog
-# pytables
-streamlit-webrtc
-# tornado is imported by streamlit_webrtc.eventloop but not declared as a
-# transitive dep in streamlit-webrtc 0.64.6 (streamlit 1.57+ moved off
-# tornado, so it's no longer pulled in transitively). Pin it explicitly
-# until streamlit-webrtc declares it.
-tornado
 plotly
 fastapi>=0.115
 uvicorn[standard]>=0.34
