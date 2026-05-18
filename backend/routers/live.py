@@ -29,14 +29,20 @@ router = APIRouter(prefix="/api/live", tags=["live"])
 
 @router.post("/frame")
 async def upload_frame(request: Request) -> Response:
-    """Bake overlays onto an uploaded camera frame; return the result.
+    """Return the cached locked-to-detection display frame.
 
-    The detection step runs decoupled in a background executor task,
-    rate-limited so concurrent uploads don't queue up redundant
-    detections. Every uploaded frame is baked with whatever cached
-    fex is currently available, so the display tracks the upload rate
-    (capped by camera fps + bake + jpeg encode), while detection runs
-    on its own ~10 Hz cadence.
+    Each upload may schedule a new detection (gated by the adaptive
+    throttle). The displayed image is whatever frame detection most
+    recently ran on, with overlay pixels baked onto it — so the face
+    image and the overlay positions are temporally identical and
+    there is zero overlay drift. The cost is that display rate
+    equals detection rate (~10 Hz). First-frame fallback: if no
+    detection has completed yet, the source upload is echoed so the
+    user sees their video immediately.
+
+    Recording is independent of display — the recorder gets every
+    uploaded frame (60 fps live source, no waiting on detection) so
+    the recorded MP4 is smooth.
     """
     live = request.app.state.live
     if live.detector is None:
@@ -50,37 +56,32 @@ async def upload_frame(request: Request) -> Response:
     except Exception as exc:
         raise HTTPException(400, f"could not decode image: {exc}") from exc
 
-    # Writable copy; the bake mutates pixels in place.
-    rgb = np.asarray(img).copy()
-
     # --- maybe-launch decoupled detection (no await) ---------------
-    # Gate on both the in-flight flag and the throttle deadline so
-    # concurrent uploads don't pile up redundant detector calls.
+    # Detection takes the just-uploaded frame; when it completes it
+    # bakes overlay onto that same frame and caches the JPEG bytes,
+    # so display always matches the detected positions exactly.
     now = time.perf_counter()
     if not live._detection_in_flight and now >= live._next_detection_at:
         live._detection_in_flight = True
         loop = asyncio.get_running_loop()
         loop.create_task(_run_detection(live, img))
 
-    # --- bake overlays --------------------------------------------
-    cached_fex = live._cached_fex
-    if cached_fex is not None and len(cached_fex) > 0:
-        draw_overlays(
-            rgb,
-            cached_fex,
-            live.toggles or {},
-            mp_landmarks=live.mp_landmarks,
-            landmark_style=live.landmark_style or "mesh",
-        )
-
-    # --- feed recorder if recording -------------------------------
-    # video_mode is fixed at recording start; "overlay" burns the
-    # baked pixels into the file, "clean" stores the source frame.
-    # "off" is handled internally by the recorder's offer_frame
-    # no-op when record_video=False, so we don't gate here.
+    # --- feed recorder (uses LIVE upload-rate frames, not display) -
+    # Recording wants smooth video at upload cadence regardless of
+    # the detection-locked display. For overlay mode we bake on a
+    # copy of the source using cached fex (drift OK for the file).
     if live.recorder is not None:
+        cached_fex = live._cached_fex
         if live.recorder.config.video_mode == "overlay":
-            feed_arr = rgb
+            feed_arr = np.asarray(img).copy()
+            if cached_fex is not None and len(cached_fex) > 0:
+                draw_overlays(
+                    feed_arr,
+                    cached_fex,
+                    live.toggles or {},
+                    mp_landmarks=live.mp_landmarks,
+                    landmark_style=live.landmark_style or "mesh",
+                )
         else:
             feed_arr = np.asarray(img)
         av_frame = av.VideoFrame.from_ndarray(feed_arr, format="rgb24")
@@ -89,17 +90,20 @@ async def upload_frame(request: Request) -> Response:
             cached_fex if cached_fex is not None and len(cached_fex) else None,
         )
 
-    # --- jpeg-encode the baked frame and return -------------------
-    payload = encode_jpeg(rgb, quality=95)
-    return Response(content=payload, media_type="image/jpeg")
+    # --- return cached locked frame (or echo source on first call) -
+    if live._cached_baked_jpeg is not None:
+        return Response(
+            content=live._cached_baked_jpeg, media_type="image/jpeg"
+        )
+    return Response(content=body, media_type="image/jpeg")
 
 
 async def _run_detection(live, img: Image.Image) -> None:
-    """Run detection in the thread pool; mutate cached_fex on completion.
+    """Detect on ``img``, bake overlays onto it, cache encoded bytes.
 
-    Wrapped in a try/finally so a single bad detection never leaves
-    ``_detection_in_flight`` stuck True (which would freeze the
-    detector cadence for the rest of the session).
+    Wrapped in try/finally so a single bad detection doesn't leave
+    ``_detection_in_flight`` stuck True. The cached JPEG bytes are
+    what upload_frame returns to the display path.
     """
     loop = asyncio.get_running_loop()
     try:
@@ -109,13 +113,24 @@ async def _run_detection(live, img: Image.Image) -> None:
                 None, detect_pil_images, live.detector, [img],
             )
             dur = time.perf_counter() - t0
+
+        # Bake overlay onto the detection-input frame (a copy of img).
+        frame_arr = np.asarray(img).copy()
+        if fex is not None and len(fex) > 0:
+            draw_overlays(
+                frame_arr,
+                fex,
+                live.toggles or {},
+                mp_landmarks=live.mp_landmarks,
+                landmark_style=live.landmark_style or "mesh",
+            )
+
+        live._cached_baked_jpeg = encode_jpeg(frame_arr, quality=95)
         live._cached_fex = fex
-        # Throttle the NEXT detection to start no sooner than `dur`
-        # from now; under steady-state this caps detection at the
-        # measured per-call cost (no queueing).
+        # Throttle the next detection — caps at the measured per-call
+        # cost under steady-state (no queueing).
         live._next_detection_at = time.perf_counter() + dur
     except Exception:
-        # Swallow detection errors — the upload path keeps running.
         pass
     finally:
         live._detection_in_flight = False

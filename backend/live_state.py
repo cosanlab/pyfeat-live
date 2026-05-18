@@ -41,6 +41,13 @@ class LiveSession:
     _cached_fex: object = None
     _next_detection_at: float = 0.0
     _detection_in_flight: bool = False
+    # Pre-baked + JPEG-encoded display frame. Detection writes this
+    # when it completes (bake overlay onto the frame detection ran
+    # on, then encode). /api/live/frame returns these bytes verbatim
+    # so display is perfectly locked: the displayed face IS the same
+    # frame whose positions the overlay was computed on. Display
+    # rate = detection rate (~10 Hz) but overlay drift is zero.
+    _cached_baked_jpeg: bytes | None = None
     _state: dict = field(default_factory=lambda: {
         "frame_index": -1,
         "ts": 0.0,
