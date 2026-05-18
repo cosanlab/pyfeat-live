@@ -116,6 +116,59 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
     return req.model_dump()
 
 
+from pathlib import Path
+
+from pyfeatlive_core.recorder import (
+    RecorderConfig, SessionRecorder, default_sessions_root,
+)
+
+
+class StartRecordingRequest(BaseModel):
+    record_video: bool = True
+    record_fex: bool = True
+    video_mode: Literal["clean", "overlay"] = "clean"
+    fps: int = 30
+    width: int = 640
+    height: int = 360
+
+
+@router.post("/recording/start")
+async def recording_start(req: StartRecordingRequest, request: Request) -> dict:
+    live = request.app.state.live
+    if getattr(live, "recorder", None) is not None:
+        raise HTTPException(409, "recording already in progress")
+
+    cfg = RecorderConfig(
+        record_video=req.record_video,
+        record_fex=req.record_fex,
+        video_mode=req.video_mode,
+        fps=req.fps, width=req.width, height=req.height,
+    )
+    recorder = SessionRecorder(default_sessions_root(), cfg)
+    live.recorder = recorder
+    return {
+        "session_id": recorder.dir.name,
+        "session_dir": str(recorder.dir),
+        "started_at": time.time(),
+    }
+
+
+@router.post("/recording/stop")
+async def recording_stop(request: Request) -> dict:
+    live = request.app.state.live
+    recorder = getattr(live, "recorder", None)
+    if recorder is None:
+        raise HTTPException(409, "no recording in progress")
+    session_dir = recorder.dir
+    # Ensure the session directory persists even if no frames were recorded.
+    session_dir.mkdir(parents=True, exist_ok=True)
+    recorder.close()
+    live.recorder = None
+    # Re-create dir if close() removed it (empty session cleanup).
+    session_dir.mkdir(parents=True, exist_ok=True)
+    return {"session_dir": str(session_dir)}
+
+
 @router.websocket("/ws")
 async def live_ws(ws: WebSocket) -> None:
     """Push detection results to the connected client."""
