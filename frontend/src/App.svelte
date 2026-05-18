@@ -1,6 +1,7 @@
 <script lang="ts">
   import TopNav from './lib/components/TopNav.svelte';
   import Live from './routes/Live.svelte';
+  import Analyze from './routes/Analyze.svelte';
   import Viewer from './routes/Viewer.svelte';
   import type { View } from './lib/types';
 
@@ -13,7 +14,7 @@
     {#if view === 'live'}
       <Live />
     {:else if view === 'analyze'}
-      <div class="p-6 text-sm text-zinc-400">Analyze page — separate plan.</div>
+      <Analyze onSwitchView={(v) => view = v} />
     {:else if view === 'viewer'}
       <Viewer />
     {/if}
