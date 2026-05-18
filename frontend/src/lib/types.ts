@@ -45,3 +45,59 @@ export interface Annotation {
   created_at: number;
   source: string;
 }
+
+// ---------- Presets ----------
+export interface Preset {
+  id: string;
+  name: string;
+  detector_type: 'Detector' | 'MPDetector';
+  face_model: string;
+  landmark_model: string;
+  au_model: string;
+  emotion_model: string | null;
+  identity_model: string | null;
+  builtin: boolean;
+}
+
+// ---------- Analyze ----------
+export type QueueStatus = 'queued' | 'running' | 'done' | 'failed';
+
+export interface PipelineConfig {
+  detector_type: 'Detector' | 'MPDetector';
+  face_model: string;
+  landmark_model: string;
+  au_model: string;
+  emotion_model: string | null;
+  identity_model: string | null;
+  preset_id: string | null;
+  preset_name: string | null;
+}
+
+export interface VideoParams {
+  skip_frames: number;
+  clip_start: number | null;
+  clip_end: number | null;
+  track_identities: boolean;
+}
+
+export interface AnalyzeItem {
+  id: string;
+  filename: string;
+  status: QueueStatus;
+  progress_frames: number;
+  total_frames: number;
+  started_at: number;
+  finished_at: number;
+  session_dir: string | null;
+  error: string | null;
+  pipeline: PipelineConfig;
+  video: VideoParams;
+}
+
+export type AnalyzeEvent =
+  | { type: 'snapshot'; items: AnalyzeItem[] }
+  | { type: 'started'; item_id: string; total_frames: number }
+  | { type: 'progress'; item_id: string; frames_done: number; fps: number }
+  | { type: 'done'; item_id: string; session_dir: string }
+  | { type: 'failed'; item_id: string; error: string }
+  | { type: 'queue_idle' };

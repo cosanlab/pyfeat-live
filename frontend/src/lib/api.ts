@@ -164,6 +164,65 @@ export const identitiesApi = {
     ),
 };
 
+import type {
+  Preset,
+  PipelineConfig,
+  VideoParams,
+  AnalyzeItem,
+  AnalyzeEvent,
+} from './types';
+
+// ---------------- presets ----------------
+export const presetsApi = {
+  list: () => request<Preset[]>('/api/presets'),
+  create: (body: Omit<Preset, 'id' | 'builtin'>) =>
+    request<Preset>('/api/presets', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  patch: (id: string, body: Partial<Omit<Preset, 'id' | 'builtin'>>) =>
+    request<Preset>(`/api/presets/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: JSON.stringify(body),
+    }),
+  delete: (id: string) =>
+    fetch(`/api/presets/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      .then(r => { if (!r.ok) throw new ApiError(r.status, r.statusText); }),
+};
+
+// ---------------- analyze ----------------
+export const analyzeApi = {
+  list: () => request<AnalyzeItem[]>('/api/analyze/queue'),
+  add: async (file: File, pipeline: PipelineConfig, video: VideoParams) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('pipeline', JSON.stringify(pipeline));
+    form.append('video', JSON.stringify(video));
+    const r = await fetch('/api/analyze/queue', { method: 'POST', body: form });
+    if (!r.ok) throw new ApiError(r.status, await r.text());
+    return r.json() as Promise<AnalyzeItem>;
+  },
+  patch: (id: string, body: { pipeline?: PipelineConfig; video?: VideoParams }) =>
+    request<AnalyzeItem>(`/api/analyze/queue/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: JSON.stringify(body),
+    }),
+  delete: (id: string) =>
+    fetch(`/api/analyze/queue/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      .then(r => { if (!r.ok) throw new ApiError(r.status, r.statusText); }),
+  clearDone: () =>
+    request<{ removed: number }>('/api/analyze/queue/clear-done', { method: 'POST' }),
+  run: (body: { compute: 'cpu' | 'mps' | 'cuda'; batch_size: number }) =>
+    request<{ status: string }>('/api/analyze/run', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  pause: () => request<{ status: string }>('/api/analyze/pause', { method: 'POST' }),
+  stop: () => request<{ status: string }>('/api/analyze/stop', { method: 'POST' }),
+  openWebSocket: (onMessage: (ev: AnalyzeEvent) => void): WebSocket => {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${proto}//${location.host}/api/analyze/ws`);
+    ws.onmessage = (e) => onMessage(JSON.parse(e.data));
+    return ws;
+  },
+};
+
 // ---------------- annotations ----------------
 export const annotationsApi = {
   list: (sessionId: string) =>
