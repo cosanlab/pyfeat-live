@@ -21,3 +21,23 @@ def test_configure_returns_active_config(client):
 def test_configure_validates_unknown_keys(client):
     r = client.post("/api/live/configure", json={"detector_type": "Nonsense"})
     assert r.status_code == 422  # FastAPI validation error
+
+
+def test_configure_accepts_toggles(client):
+    r = client.post("/api/live/configure", json={
+        "detector_type": "Detector",
+        "face_model": "retinaface",
+        "landmark_model": "mobilefacenet",
+        "au_model": "xgb",
+        "emotion_model": None,
+        "identity_model": None,
+        "device": "cpu",
+        "toggles": {"rects": True, "gaze": False},
+        "landmark_style": "points",
+    })
+    assert r.status_code == 200
+    live = client.app.state.live
+    assert live.toggles == {"rects": True, "gaze": False}
+    assert live.landmark_style == "points"
+    # MPDetector wiring: this run used "Detector", so flag stays False.
+    assert live.mp_landmarks is False
