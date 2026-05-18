@@ -34,17 +34,23 @@ async def upload_frame(request: Request) -> dict:
     even if it hasn't opened the WebSocket. Also pushes the same
     payload to any WS subscribers.
     """
+    import os
+    profile = os.environ.get("PYFEAT_LIVE_PROFILE") == "1"
+    t0 = time.perf_counter()
+
     live = request.app.state.live
     if live.detector is None:
         raise HTTPException(503, "detector not initialised")
 
     body = await request.body()
+    t_recv = time.perf_counter()
     if not body:
         raise HTTPException(400, "empty body")
     try:
         img = Image.open(io.BytesIO(body)).convert("RGB")
     except Exception as exc:
         raise HTTPException(400, f"could not decode image: {exc}") from exc
+    t_decode = time.perf_counter()
 
     # py-feat detection is CPU-bound; run in the default thread pool so
     # we don't block the asyncio loop. The detector_lock serialises
@@ -53,7 +59,9 @@ async def upload_frame(request: Request) -> dict:
     # overlap. See backend/live_state.py for the full reasoning.
     loop = asyncio.get_running_loop()
     async with live.detector_lock:
+        t_lock = time.perf_counter()
         fex = await loop.run_in_executor(None, detect_pil_images, live.detector, [img])
+    t_detect = time.perf_counter()
 
     # Feed frame to recorder if a recording is in progress.
     if live.recorder is not None:
@@ -69,6 +77,19 @@ async def upload_frame(request: Request) -> dict:
         mp_landmarks=mp_landmarks,
         video_width=img.width, video_height=img.height,
     )
+    t_done = time.perf_counter()
+
+    if profile:
+        print(
+            f"upload_frame: total={1000*(t_done-t0):.1f}ms "
+            f"recv={1000*(t_recv-t0):.1f} "
+            f"decode={1000*(t_decode-t_recv):.1f} "
+            f"lock_wait={1000*(t_lock-t_decode):.1f} "
+            f"detect={1000*(t_detect-t_lock):.1f} "
+            f"serialize+publish={1000*(t_done-t_detect):.1f} "
+            f"img_size={img.width}x{img.height} body_bytes={len(body)}"
+        )
+
     return live.snapshot()
 
 

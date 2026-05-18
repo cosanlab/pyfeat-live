@@ -132,11 +132,26 @@ def detect_pil_images(
     if not frames:
         return Fex(pd.DataFrame(), **_fex_wrap_kwargs(detector))
 
+    # Per-step timing. Set PYFEAT_LIVE_PROFILE=1 in the backend's
+    # environment to log breakdown of every detect call (verbose).
+    import os, time
+    profile = os.environ.get("PYFEAT_LIVE_PROFILE") == "1"
+    _t_start = time.perf_counter()
+    _last_t = [_t_start]
+    _ticks: dict[str, float] = {}
+    def _tick(label: str) -> None:
+        if not profile:
+            return
+        now = time.perf_counter()
+        _ticks[label] = (now - _last_t[0]) * 1000.0
+        _last_t[0] = now
+
     n = len(frames)
     image_tensor = torch.stack(
         [convert_image_to_tensor(f, img_type="float32").squeeze(0) for f in frames],
         dim=0,
     )
+    _tick("img_to_tensor")
     batch_data = {
         "Image": image_tensor,
         "Scale": torch.ones(n),
@@ -155,8 +170,10 @@ def detect_pil_images(
         face_size=face_size,
         face_detection_threshold=0.5,
     )
+    _tick("detect_faces")
     try:
         df = detector.forward(faces_data, batch_data)
+        _tick("forward")
     except (ValueError, RuntimeError) as exc:
         # py-feat 0.7 has known shape-mismatch bugs in MPDetector.forward
         # when certain (au/emotion) model combos are paired with the MP
@@ -214,6 +231,7 @@ def detect_pil_images(
                 "MPDetector pose backfill failed (%s); pose columns left NaN",
                 e,
             )
+        _tick("pose_backfill")
 
     # MPDetector AUs: forward() emits ARKit-style blendshape columns
     # but no FACS AU columns. Apply the deterministic Ozel
@@ -247,5 +265,11 @@ def detect_pil_images(
     # recording. Callers can check `len(fex) == 0` for the empty case.
     if "FaceScore" in df.columns and len(df) > 0:
         df = df[df["FaceScore"] > 0].reset_index(drop=True)
+    _tick("au_map_and_filter")
+
+    if profile:
+        total = (time.perf_counter() - _t_start) * 1000.0
+        bits = " ".join(f"{k}={v:.1f}" for k, v in _ticks.items())
+        logger.info("detect_pil_images total=%.1fms %s", total, bits)
 
     return Fex(df.reset_index(drop=True), **_fex_wrap_kwargs(detector))

@@ -196,14 +196,22 @@
     captureCanvas.height = HEIGHT;
     const ctx = captureCanvas.getContext('2d')!;
     captureStopped = false;
+    // Toggle perf logging from the browser console: window.__pyfeatProfile = true
     (async function loop() {
       while (!captureStopped) {
         if (!video) { await new Promise(r => setTimeout(r, 33)); continue; }
+        const profile = (window as any).__pyfeatProfile === true;
+        const t0 = profile ? performance.now() : 0;
+
         // Snapshot the current video frame.
         ctx.drawImage(video, 0, 0, WIDTH, HEIGHT);
+        const tDraw = profile ? performance.now() : 0;
+
         const blob = await new Promise<Blob | null>((resolve) =>
           captureCanvas!.toBlob((b) => resolve(b), 'image/jpeg', 0.7),
         );
+        const tEnc = profile ? performance.now() : 0;
+
         if (!blob) { await new Promise(r => setTimeout(r, 16)); continue; }
         try {
           await liveApi.uploadFrame(blob);
@@ -213,9 +221,9 @@
           await new Promise(r => setTimeout(r, 500));
           continue;
         }
+        const tNet = profile ? performance.now() : 0;
+
         // Detection done — blit the same frame to the display canvas.
-        // The overlay (driven by WS) will draw on top of THIS frame,
-        // so motion + overlay stay locked.
         if (displayCanvas) {
           const dpr = window.devicePixelRatio || 1;
           if (displayCanvas.width !== WIDTH * dpr) displayCanvas.width = WIDTH * dpr;
@@ -223,6 +231,18 @@
           const dctx = displayCanvas.getContext('2d')!;
           dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
           dctx.drawImage(captureCanvas!, 0, 0, WIDTH, HEIGHT);
+        }
+        const tBlit = profile ? performance.now() : 0;
+
+        if (profile) {
+          console.log(
+            `frame total=${(tBlit - t0).toFixed(1)}ms ` +
+            `draw=${(tDraw - t0).toFixed(1)} ` +
+            `jpegEncode=${(tEnc - tDraw).toFixed(1)} ` +
+            `netDetect=${(tNet - tEnc).toFixed(1)} ` +
+            `blit=${(tBlit - tNet).toFixed(1)} ` +
+            `blobBytes=${blob.size}`,
+          );
         }
       }
     })();
