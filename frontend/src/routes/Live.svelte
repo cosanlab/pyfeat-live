@@ -3,7 +3,7 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import { liveApi, systemApi } from '../lib/api';
-  import type { LiveConfigure, LiveStateMsg, ComputeInfo } from '../lib/api';
+  import type { LiveConfigure, LiveStateMsg, ComputeInfo, OverlayEdgeSets } from '../lib/api';
   import type { Face, OverlayToggles } from '../lib/overlay/types';
   import { cameraStore, refreshDevices, startCamera, stopCamera } from '../lib/webrtc/useCamera.svelte';
   import LiveSidebar from '../lib/components/LiveSidebar.svelte';
@@ -26,6 +26,22 @@
   let sidebarCollapsed = $state(false);
   let apiError: string | null = $state(null);
 
+  type LandmarkStyle = 'points' | 'lines' | 'mesh';
+  let landmarkStyle: LandmarkStyle = $state('mesh');
+  let edgeSets: OverlayEdgeSets | null = $state(null);
+
+  // Pick the right edge list for the current detector + style.
+  // points → no edges (drawLandmarks handles it as dots).
+  // lines  → dlib face-parts (Detector) OR MP contours (MPDetector).
+  // mesh   → dlib Delaunay (Detector) OR MP tessellation (MPDetector).
+  const currentEdges = $derived.by((): number[][] | undefined => {
+    if (!edgeSets || landmarkStyle === 'points') return undefined;
+    if (mpLandmarks) {
+      return landmarkStyle === 'lines' ? edgeSets.mp_contours : edgeSets.mp_tess;
+    }
+    return landmarkStyle === 'lines' ? edgeSets.dlib_parts : edgeSets.dlib_mesh;
+  });
+
   let toggles: OverlayToggles = $state({
     rects: true, landmarks: true, poses: false,
     gaze: true, aus: false, emotions: false,
@@ -45,7 +61,10 @@
   // 1) On mount: fetch compute info + enumerate cameras + configure detector
   onMount(async () => {
     try {
-      compute = await systemApi.compute();
+      [compute, edgeSets] = await Promise.all([
+        systemApi.compute(),
+        systemApi.overlayEdges(),
+      ]);
       if (compute.mps.available) config.device = 'mps';
       else if (compute.cuda.available) config.device = 'cuda';
       else config.device = 'cpu';
@@ -150,7 +169,13 @@
 <div class="flex flex-1 overflow-hidden">
   {#if !sidebarCollapsed}
     <div class="relative">
-      <LiveSidebar {config} {compute} onConfigChange={applyConfig} />
+      <LiveSidebar
+        {config}
+        {compute}
+        {landmarkStyle}
+        onConfigChange={applyConfig}
+        onLandmarkStyleChange={(s) => (landmarkStyle = s)}
+      />
       <button
         class="absolute top-1/2 -right-3 -translate-y-1/2 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-50 inline-flex items-center justify-center z-10"
         onclick={() => (sidebarCollapsed = true)}
@@ -192,7 +217,15 @@
           playsinline
           muted
         ></video>
-        <OverlayCanvas {faces} {mpLandmarks} width={WIDTH} height={HEIGHT} {toggles} />
+        <OverlayCanvas
+          {faces}
+          {mpLandmarks}
+          width={WIDTH}
+          height={HEIGHT}
+          {toggles}
+          {landmarkStyle}
+          edges={currentEdges}
+        />
 
         {#if isStreaming}
           <span class="absolute top-3.5 left-3.5 px-3 py-1 rounded text-[9.5px] font-bold tracking-wider bg-green-500/15 text-green-500 border border-green-500/30 inline-flex items-center gap-2">

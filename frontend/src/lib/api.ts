@@ -40,9 +40,17 @@ export interface ComputeInfo {
   cuda: ComputeBackend;
 }
 
+export interface OverlayEdgeSets {
+  dlib_parts: number[][];
+  dlib_mesh: number[][];
+  mp_contours: number[][];
+  mp_tess: number[][];
+}
+
 export const systemApi = {
   health: () => request<{ status: string; version: string }>('/api/system/health'),
   compute: () => request<ComputeInfo>('/api/system/compute'),
+  overlayEdges: () => request<OverlayEdgeSets>('/api/system/overlay-edges'),
 };
 
 // ---------------- live ----------------

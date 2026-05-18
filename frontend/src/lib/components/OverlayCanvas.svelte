@@ -2,15 +2,21 @@
   import type { Face, OverlayToggles } from '../overlay/types';
   import * as O from '../overlay/primitives';
 
+  type LandmarkStyle = 'points' | 'lines' | 'mesh';
+
   type Props = {
     faces: Face[];
     mpLandmarks: boolean;
     width: number;          // intrinsic video pixel width
     height: number;
     toggles: OverlayToggles;
-    edges?: number[][];     // landmark edges (mesh/lines), optional
+    landmarkStyle?: LandmarkStyle;
+    edges?: number[][];     // landmark edges (mesh/lines), ignored for points
   };
-  let { faces, mpLandmarks, width, height, toggles, edges }: Props = $props();
+  let {
+    faces, mpLandmarks, width, height, toggles,
+    landmarkStyle = 'mesh', edges,
+  }: Props = $props();
 
   let canvas: HTMLCanvasElement | null = $state(null);
 
@@ -23,9 +29,13 @@
     ctx.clearRect(0, 0, width, height);
     for (const face of faces) {
       if (toggles.rects) O.drawRect(ctx, face.rect);
-      if (toggles.landmarks) O.drawLandmarks(ctx, face.lm, 'mesh', edges);
+      if (toggles.landmarks) {
+        const useEdges = landmarkStyle === 'points' ? undefined : edges;
+        O.drawLandmarks(ctx, face.lm, landmarkStyle, useEdges);
+      }
       if (toggles.poses) O.drawPose(ctx, face.rect, face.pose);
       if (toggles.gaze) O.drawGaze(ctx, face, mpLandmarks, width, height);
+      if (toggles.aus) O.drawAus(ctx, face.rect, face.aus);
       if (toggles.emotions) O.drawEmotions(ctx, face.rect, face.emotions);
     }
   });

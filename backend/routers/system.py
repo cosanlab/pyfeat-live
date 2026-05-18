@@ -9,6 +9,7 @@ import torch
 from fastapi import APIRouter
 
 import pyfeatlive_core
+from pyfeatlive_core.overlay_edges import all_edge_sets
 
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -49,3 +50,15 @@ def compute() -> dict[str, Any]:
         cuda["devices"] = names
 
     return {"cpu": cpu, "mps": mps, "cuda": cuda}
+
+
+@router.get("/overlay-edges")
+def overlay_edges() -> dict[str, list[list[int]]]:
+    """Return the four landmark edge sets used by the overlay renderer:
+    dlib_parts (dlib face-part curves), dlib_mesh (Delaunay), mp_contours
+    (MediaPipe contour edges), mp_tess (full MediaPipe tessellation).
+
+    The frontend fetches this once on mount and chooses the appropriate
+    set based on detector type + landmark style.
+    """
+    return all_edge_sets()

@@ -173,8 +173,46 @@ export function drawEmotions(
   });
 }
 
-export function drawAuHeatmap(): void {
-  // AU heatmap is the most complex primitive — defer to the Viewer
-  // plan where it gets more design attention. For Live v1, AUs render
-  // as a numeric overlay if their toggle is on.
+export function drawAus(
+  ctx: CanvasRenderingContext2D,
+  rect: Face['rect'] | undefined,
+  aus: Face['aus'] | undefined,
+  topN = 5,
+): void {
+  // Numeric overlay of the top-N AUs by intensity. Renders ABOVE the
+  // face rect so it doesn't collide with the emotion overlay (which
+  // renders below). A full heatmap painted on the face is the future
+  // upgrade but the numeric panel is the useful 80%.
+  if (!rect || !aus) return;
+  const [x, y, w, h] = rect;
+  if (x == null || y == null || w == null || h == null) return;
+
+  const sorted = Object.entries(aus)
+    .filter(([, v]) => typeof v === 'number')
+    .sort((a, b) => (b[1] as number) - (a[1] as number))
+    .slice(0, topN);
+  if (sorted.length === 0) return;
+
+  const lineH = 14;
+  const panelW = 110;
+  const panelH = sorted.length * lineH + 6;
+  const panelX = x;
+  const panelY = y - panelH - 4;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(panelX, panelY, panelW, panelH);
+  ctx.font = '11px ui-monospace, monospace';
+  sorted.forEach(([k, v], i) => {
+    const val = v as number;
+    // Color-graded by intensity: gray (low) → yellow (mid) → red (high).
+    if (val >= 0.66) ctx.fillStyle = '#fca5a5';
+    else if (val >= 0.33) ctx.fillStyle = '#fcd34d';
+    else ctx.fillStyle = '#d4d4d8';
+    ctx.fillText(
+      `${k}: ${val.toFixed(2)}`,
+      panelX + 4, panelY + 14 + i * lineH,
+    );
+  });
 }
+
+/** @deprecated kept for API compat — use drawAus. */
+export function drawAuHeatmap(): void {}
