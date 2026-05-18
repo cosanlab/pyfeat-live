@@ -99,22 +99,35 @@ async def upload_frame(request: Request) -> Response:
 
 
 async def _run_detection(live, img: Image.Image) -> None:
-    """Detect on ``img``, bake overlays onto it, cache encoded bytes.
+    """Detect on a (possibly downscaled) copy of ``img``, bake overlay
+    onto the SOURCE-resolution frame, cache encoded bytes.
+
+    Splitting detection-input resolution from bake/display resolution
+    is what makes ``live.detection_size`` a pure speed knob — the
+    overlay always lands at source pixel density, no matter how
+    coarse the detector ran.
 
     Wrapped in try/finally so a single bad detection doesn't leave
-    ``_detection_in_flight`` stuck True. The cached JPEG bytes are
-    what upload_frame returns to the display path.
+    ``_detection_in_flight`` stuck True.
     """
     loop = asyncio.get_running_loop()
     try:
+        # Decide detection-input resolution.
+        det_img, scale_x, scale_y = _detection_input(img, live.detection_size)
+
         async with live.detector_lock:
             t0 = time.perf_counter()
             fex = await loop.run_in_executor(
-                None, detect_pil_images, live.detector, [img],
+                None, detect_pil_images, live.detector, [det_img],
             )
             dur = time.perf_counter() - t0
 
-        # Bake overlay onto the detection-input frame (a copy of img).
+        # Scale detector pixel coords back to the source frame's space
+        # before drawing. No-op when det == source.
+        if fex is not None and len(fex) > 0 and (scale_x != 1.0 or scale_y != 1.0):
+            fex = _scale_fex_coords(fex, scale_x, scale_y)
+
+        # Bake overlay onto a copy of the source-resolution image.
         frame_arr = np.asarray(img).copy()
         if fex is not None and len(fex) > 0:
             draw_overlays(
@@ -127,13 +140,50 @@ async def _run_detection(live, img: Image.Image) -> None:
 
         live._cached_baked_jpeg = encode_jpeg(frame_arr, quality=95)
         live._cached_fex = fex
-        # Throttle the next detection — caps at the measured per-call
-        # cost under steady-state (no queueing).
         live._next_detection_at = time.perf_counter() + dur
     except Exception:
         pass
     finally:
         live._detection_in_flight = False
+
+
+def _detection_input(
+    img: Image.Image, target_size: tuple[int, int] | None,
+) -> tuple[Image.Image, float, float]:
+    """Return (image_for_detector, scale_x, scale_y).
+
+    scales are (source_dim / target_dim) — multiply detector pixel
+    coords by these to map back to source space.
+    """
+    if target_size is None:
+        return img, 1.0, 1.0
+    tw, th = target_size
+    if tw >= img.width and th >= img.height:
+        return img, 1.0, 1.0
+    det_img = img.resize((tw, th), Image.LANCZOS)
+    return det_img, img.width / tw, img.height / th
+
+
+def _scale_fex_coords(fex, sx: float, sy: float):
+    """Multiply every pixel-coord column in a fex DataFrame by (sx, sy).
+
+    py-feat columns we touch:
+      * FaceRect{X,Y,Width,Height}
+      * x_N / y_N landmark pairs (N = 0..67 dlib, 0..477 MP)
+    """
+    out = fex.copy()
+    for col in ("FaceRectX", "FaceRectWidth"):
+        if col in out.columns:
+            out[col] = out[col] * sx
+    for col in ("FaceRectY", "FaceRectHeight"):
+        if col in out.columns:
+            out[col] = out[col] * sy
+    for col in out.columns:
+        if col.startswith("x_"):
+            out[col] = out[col] * sx
+        elif col.startswith("y_"):
+            out[col] = out[col] * sy
+    return out
 
 
 class ConfigureRequest(BaseModel):
@@ -177,6 +227,10 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
         live.toggles = req.toggles
     if req.landmark_style is not None:
         live.landmark_style = req.landmark_style
+    if req.detection_res is not None:
+        live.detection_size = (
+            int(req.detection_res["w"]), int(req.detection_res["h"]),
+        )
     live.reset()
     return req.model_dump()
 

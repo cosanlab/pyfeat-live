@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass
@@ -31,6 +31,11 @@ class LiveSession:
     toggles: dict[str, bool] = field(default_factory=dict)
     landmark_style: str = "mesh"
     mp_landmarks: bool = False
+    # Optional (w, h) the detector input is resized to before py-feat
+    # runs. The bake happens at the SOURCE resolution with detector
+    # coords scaled back, so this is a pure speed knob — capture and
+    # display quality are unaffected. None = use source size as-is.
+    detection_size: Optional[tuple[int, int]] = None
     # Decoupled-detection state used by /api/live/frame's bake-and-
     # return loop. The handler reads ``_cached_fex`` to draw overlays
     # on EVERY uploaded frame, and launches a fresh detection in

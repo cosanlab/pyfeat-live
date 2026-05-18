@@ -155,13 +155,16 @@
       const profile = (window as any).__pyfeatProfile === true;
       const t0 = profile ? performance.now() : 0;
 
-      // 1. Grab current frame from <video> onto hidden canvas at the
-      // current detection resolution. drawImage downscales for us.
-      const dW = detectionRes.w, dH = detectionRes.h;
-      if (captureCanvas.width !== dW) captureCanvas.width = dW;
-      if (captureCanvas.height !== dH) captureCanvas.height = dH;
+      // 1. Grab current frame from <video> at the camera's NATIVE
+      // resolution. The backend handles any downscale for the
+      // detector run via `detection_res` in /configure — we keep
+      // capture+display at full quality so overlays land at full
+      // pixel density regardless of detector input size.
+      const sW = sourceVideo.videoWidth, sH = sourceVideo.videoHeight;
+      if (captureCanvas.width !== sW) captureCanvas.width = sW;
+      if (captureCanvas.height !== sH) captureCanvas.height = sH;
       const ctx = captureCanvas.getContext('2d')!;
-      ctx.drawImage(sourceVideo, 0, 0, dW, dH);
+      ctx.drawImage(sourceVideo, 0, 0, sW, sH);
       const tDraw = profile ? performance.now() : 0;
 
       // 2. JPEG-encode
