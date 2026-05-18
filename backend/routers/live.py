@@ -81,3 +81,38 @@ async def upload_frame(request: Request) -> dict:
         video_width=img.width, video_height=img.height,
     )
     return live.snapshot()
+
+
+from fastapi import WebSocket, WebSocketDisconnect
+
+
+@router.websocket("/ws")
+async def live_ws(ws: WebSocket) -> None:
+    """Push detection results to the connected client."""
+    await ws.accept()
+    live = ws.app.state.live
+
+    # Subscribe first so we don't miss any publish() between here and
+    # the initial snapshot send. The subscribe() call enqueues the
+    # current snapshot only if a detection has already happened
+    # (frame_index > -1), so a freshly-started session doesn't spam an
+    # empty placeholder. The client will receive the first real result
+    # as soon as the first frame is uploaded.
+    queue = live.subscribe()
+    snap = live.snapshot()
+    if snap["frame_index"] > -1:
+        try:
+            await ws.send_json(snap)
+        except WebSocketDisconnect:
+            live.unsubscribe(queue)
+            return
+
+    try:
+        while True:
+            state = await queue.get()
+            try:
+                await ws.send_json(state)
+            except WebSocketDisconnect:
+                break
+    finally:
+        live.unsubscribe(queue)
