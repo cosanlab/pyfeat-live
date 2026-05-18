@@ -24,6 +24,12 @@ class LiveSession:
 
     detector: Any = None  # py-feat Detector | MPDetector | None
     recorder: Any = None  # SessionRecorder | None
+    # Overlay configuration mirrored from /api/live/configure so the
+    # bake path can read them on every frame without bouncing through
+    # the frontend.
+    toggles: dict = field(default_factory=dict)
+    landmark_style: str = "mesh"
+    mp_landmarks: bool = False
     _state: dict = field(default_factory=lambda: {
         "frame_index": -1,
         "ts": 0.0,
