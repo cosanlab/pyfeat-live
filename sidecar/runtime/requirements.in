@@ -11,10 +11,10 @@
 # requirements.txt --generate-hashes` once we add a .in input. For now
 # this file is the source of truth.
 py-feat @ git+https://github.com/cosanlab/py-feat@437b651
-streamlit==1.57.0
-streamlit-webrtc==0.64.6
+fastapi>=0.115
+uvicorn[standard]>=0.34
+python-multipart>=0.0.18
 plotly==6.7.0
 watchdog==6.0.0
-tornado==6.5.5
 av==16.1.0
 pillow==12.2.0

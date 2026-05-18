@@ -469,6 +469,10 @@ easing-functions==1.0.4 \
     --hash=sha256:27f2ce64adecde3d2d90d503ad564fc944e8f20221ba2eacf96be37c28c7ae4b \
     --hash=sha256:e18c7931d445b85f28c4d15ad0a9a47bb65d4e2eefc0db3840448fae25e3f9de
     # via py-feat
+fastapi==0.136.1 \
+    --hash=sha256:7af665ad7acfa0a3baf8983d393b6b471b9da10ede59c60045f49fbc89a0fa7f \
+    --hash=sha256:a6e9d7eeada96c93a4d69cb03836b44fa34e2854accb7244a1ece36cd4781c3f
+    # via -r sidecar/runtime/requirements.in
 filelock==3.29.0 \
     --hash=sha256:69974355e960702e789734cb4871f884ea6fe50bd8404051a3530bc07809cf90 \
     --hash=sha256:96f5f6344709aa1572bbf631c640e4ebeeb519e08da902c39a001882f30ac258
@@ -1964,16 +1968,6 @@ starlette==1.0.0 \
     --hash=sha256:6a4beaf1f81bb472fd19ea9b918b50dc3a77a6f2e190a12954b25e6ed5eea149 \
     --hash=sha256:d3ec55e0bb321692d275455ddfd3df75fff145d009685eb40dc91fc66b03d38b
     # via streamlit
-streamlit==1.57.0 \
-    --hash=sha256:0b028d305c1a1a757071b2c9504966787602842fc8af6e873795ca58d2b4d12f \
-    --hash=sha256:0d1d41972aeade5637dbb0e7f0eefa5312272f85304923d240a1b1f0475249c8
-    # via
-    #   -r sidecar/runtime/requirements.in
-    #   streamlit-webrtc
-streamlit-webrtc==0.64.6 \
-    --hash=sha256:ed822238c496a6fef40e3b5a1e91c695b35e578dde9c1d717ee2ec274967ccda \
-    --hash=sha256:f1e25a85651b792d5fccf1fb02a0e254abc9878b49ff8947551b628452ef3b82
-    # via -r sidecar/runtime/requirements.in
 sympy==1.14.0 \
     --hash=sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517 \
     --hash=sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5

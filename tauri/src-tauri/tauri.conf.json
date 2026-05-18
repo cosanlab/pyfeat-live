@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": null,
     "beforeDevCommand": null,
-    "beforeBuildCommand": null
+    "beforeBuildCommand": "cd ../../frontend && pnpm install && pnpm build"
   },
   "app": {
     "windows": [],
@@ -35,7 +35,8 @@
     "resources": {
       "../../sidecar/sidecar.py": "runtime/sidecar.py",
       "../../sidecar/runtime/requirements.txt": "runtime/requirements.txt",
-      "../../pyfeatlive": "pyfeatlive"
+      "../../backend": "backend",
+      "../../pyfeatlive_core": "pyfeatlive_core"
     },
     "macOS": {
       "frameworks": [],
