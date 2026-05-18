@@ -26,10 +26,16 @@
 
   $effect(() => {
     if (!canvas) return;
-    canvas.width = width;
-    canvas.height = height;
+    // Render at device-pixel-ratio resolution so canvas text/lines stay
+    // crisp when the canvas is CSS-scaled larger than its logical size
+    // (the video stage stretches a 640x360 canvas to fit the container).
+    // Drawing coords stay in logical WIDTH/HEIGHT space via ctx.scale.
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== width * dpr) canvas.width = width * dpr;
+    if (canvas.height !== height * dpr) canvas.height = height * dpr;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
     for (const face of faces) {
       if (toggles.rects) O.drawRect(ctx, face.rect);

@@ -270,6 +270,7 @@
 
     <LiveControlBar
       {toggles}
+      isMpDetector={config.detector_type === 'MPDetector'}
       onToggleChange={(k, v) => (toggles = { ...toggles, [k]: v })}
       {isRecording}
       onRecord={record}

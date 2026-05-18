@@ -155,7 +155,19 @@ def detect_pil_images(
         face_size=face_size,
         face_detection_threshold=0.5,
     )
-    df = detector.forward(faces_data, batch_data)
+    try:
+        df = detector.forward(faces_data, batch_data)
+    except (ValueError, RuntimeError) as exc:
+        # py-feat 0.7 has known shape-mismatch bugs in MPDetector.forward
+        # when certain (au/emotion) model combos are paired with the MP
+        # 478-point mesh — e.g. resmasknet + MP triggers a HOG-extraction
+        # landmark shape error. Don't kill the whole frame loop; return
+        # an empty Fex so the client sees "0 faces" instead of HTTP 500.
+        import logging
+        logging.getLogger(__name__).warning(
+            "detector.forward failed (%s); returning empty Fex", exc,
+        )
+        return Fex(pd.DataFrame(), **_fex_wrap_kwargs(detector))
 
     # Mirror Detector.detect()'s post-forward annotation: tag each face
     # row with its source frame index and a placeholder input filename.
@@ -195,7 +207,13 @@ def detect_pil_images(
             # Pose estimation is best-effort; if the canonical face
             # model can't be aligned (e.g., extreme pose, partial
             # face), keep the NaN-fill rather than crashing the stream.
-            logger.debug("MPDetector pose estimation failed: %s", e)
+            # Logged as warning rather than debug so silent failures
+            # don't get hidden — pose-NaN is invisible in the UI
+            # otherwise (overlay just doesn't draw).
+            logger.warning(
+                "MPDetector pose backfill failed (%s); pose columns left NaN",
+                e,
+            )
 
     # MPDetector AUs: forward() emits ARKit-style blendshape columns
     # but no FACS AU columns. Apply the deterministic Ozel

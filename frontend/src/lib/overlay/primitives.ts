@@ -117,37 +117,64 @@ export function drawPose(
   ctx: CanvasRenderingContext2D,
   rect: Face['rect'] | undefined, pose: Face['pose'] | undefined,
 ): void {
+  // Three orthogonal axes drawn from the face center, oriented by the
+  // full 3D Euler rotation (pitch / roll / yaw combined). Each axis's
+  // 2D screen position is a projection of its 3D direction through the
+  // rotation matrix. Ported verbatim from v1 overlay_renderer.js
+  // drawPose — the per-axis-only math we shipped initially was wrong
+  // (only one Euler angle per axis).
   if (!rect || !pose) return;
   const [x, y, w, h] = rect;
   const [pitch, roll, yaw] = pose;
   if (x == null || y == null || w == null || h == null) return;
   if (pitch == null || roll == null || yaw == null) return;
+  if (!Number.isFinite(pitch) || !Number.isFinite(roll) || !Number.isFinite(yaw)) return;
 
-  const cx = x + w / 2, cy = y + h / 2;
-  const len = Math.min(w, h) * 0.4;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const size = Math.min(w, h) / 2;
+  const p = (pitch * Math.PI) / 180;
+  const r = (roll * Math.PI) / 180;
+  const yw = (-yaw * Math.PI) / 180;
 
-  // X axis (red, yaw)
-  ctx.strokeStyle = '#ef4444';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(cx + len * Math.cos((yaw * Math.PI) / 180), cy);
-  ctx.stroke();
+  const x1 = cx + size * (Math.cos(yw) * Math.cos(r));
+  const y1 = cy - size * (
+    Math.cos(p) * Math.sin(r) + Math.cos(r) * Math.sin(p) * Math.sin(yw)
+  );
+  const x2 = cx + size * (-Math.cos(yw) * Math.sin(r));
+  const y2 = cy - size * (
+    Math.cos(p) * Math.cos(r) - Math.sin(p) * Math.sin(yw) * Math.sin(r)
+  );
+  const x3 = cx + size * Math.sin(yw);
+  const y3 = cy - size * (-Math.cos(yw) * Math.sin(p));
 
-  // Y axis (green, pitch)
-  ctx.strokeStyle = '#22c55e';
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(cx, cy + len * Math.cos((pitch * Math.PI) / 180));
-  ctx.stroke();
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(255, 60, 60, 1)';
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x1, y1); ctx.stroke();
+  ctx.strokeStyle = 'rgba(60, 255, 60, 1)';
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x2, y2); ctx.stroke();
+  ctx.strokeStyle = 'rgba(80, 140, 255, 1)';
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x3, y3); ctx.stroke();
+  ctx.lineCap = 'butt';
 
-  // Z axis (blue, roll)
-  ctx.strokeStyle = '#3b82f6';
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(cx + len * Math.sin((roll * Math.PI) / 180),
-             cy - len * Math.cos((roll * Math.PI) / 180));
-  ctx.stroke();
+  // Numeric readout panel to the right of the face.
+  const sign = (v: number) => (v >= 0 ? `+${v.toFixed(1)}` : v.toFixed(1));
+  const lines = [`Pitch ${sign(pitch)}°`, `Yaw ${sign(yaw)}°`, `Roll ${sign(roll)}°`];
+  ctx.font = '12px ui-monospace, monospace';
+  let maxW = 0;
+  for (const ln of lines) maxW = Math.max(maxW, ctx.measureText(ln).width);
+  const panelW = maxW + 12;
+  const panelH = lines.length * 16 + 6;
+  const px = Math.min(x + w + 6, x + w + 6);
+  const py = Math.max(8, y + h - panelH);
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(px, py, panelW, panelH);
+  ctx.fillStyle = '#ffffff';
+  ctx.textBaseline = 'top';
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i]!, px + 6, py + 4 + i * 16);
+  }
 }
 
 export function drawEmotions(

@@ -7,6 +7,7 @@
 
   type Props = {
     toggles: OverlayToggles;
+    isMpDetector: boolean;
     onToggleChange: (key: keyof OverlayToggles, value: boolean) => void;
     isRecording: boolean;
     onRecord: () => void;
@@ -15,28 +16,39 @@
     onCapture: () => void;
   };
   let {
-    toggles, onToggleChange, isRecording,
+    toggles, isMpDetector, onToggleChange, isRecording,
     onRecord, onPause, onStop, onCapture,
   }: Props = $props();
 
-  const CHIP_DEFS: { key: keyof OverlayToggles; label: string }[] = [
+  type Chip = {
+    key: keyof OverlayToggles;
+    label: string;
+    requires?: 'mp';   // marker: overlay only meaningful with MPDetector
+  };
+  const CHIP_DEFS: Chip[] = [
     { key: 'rects', label: 'Faceboxes' },
     { key: 'landmarks', label: 'Landmarks' },
     { key: 'poses', label: 'Pose' },
-    { key: 'gaze', label: 'Gaze' },
+    { key: 'gaze', label: 'Gaze', requires: 'mp' },
     { key: 'aus', label: 'AUs' },
     { key: 'emotions', label: 'Emotions' },
   ];
+
+  function unavailable(chip: Chip): boolean {
+    return chip.requires === 'mp' && !isMpDetector;
+  }
 </script>
 
 <div class="flex items-center gap-2 px-4 py-2.5 bg-zinc-950 border-t border-zinc-900">
   <!-- overlay chips -->
   <div class="flex gap-1.5 flex-wrap">
     {#each CHIP_DEFS as chip}
+      {@const dim = unavailable(chip)}
       <button
-        class="px-2.5 py-1 rounded-md text-[11px] font-medium border {toggles[chip.key] ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'}"
+        class="px-2.5 py-1 rounded-md text-[11px] font-medium border {toggles[chip.key] && !dim ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'} {dim ? 'opacity-50' : ''}"
+        title={dim ? 'Gaze requires MPDetector (no separate gaze model in py-feat — it comes from the MP face mesh).' : ''}
         onclick={() => onToggleChange(chip.key, !toggles[chip.key])}
-      >{chip.label}</button>
+      >{chip.label}{dim ? ' · MP only' : ''}</button>
     {/each}
   </div>
 
