@@ -45,35 +45,82 @@
   function xFor(frame: number): number {
     return PAD_LEFT + (frame / Math.max(1, totalFrames)) * PLOT_W;
   }
-  function yFor(value: number): number {
-    // Assume 0..1 range; will need to be axis-aware for pose/gaze later.
-    return PAD_TOP + (1 - Math.max(0, Math.min(1, value))) * PLOT_H;
+  // Compute per-series [min, max] across fexRows so lines fit the
+  // plot whatever the natural range is (emotions 0-1, pose ±90°,
+  // gaze radians, etc.). Falls back to [0, 1] if a series is empty
+  // or constant.
+  const seriesRange = $derived.by(() => {
+    const ranges: Record<string, [number, number]> = {};
+    for (const s of selectedSeries) {
+      let lo = Infinity, hi = -Infinity;
+      for (const row of fexRows) {
+        const v = row[s];
+        if (typeof v !== 'number' || Number.isNaN(v)) continue;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+      if (lo === Infinity || lo === hi) ranges[s] = [0, 1];
+      else ranges[s] = [lo, hi];
+    }
+    return ranges;
+  });
+
+  function yFor(value: number, range: [number, number]): number {
+    const [lo, hi] = range;
+    const span = hi - lo || 1;
+    const norm = (value - lo) / span;
+    return PAD_TOP + (1 - Math.max(0, Math.min(1, norm))) * PLOT_H;
   }
 
-  // Build polylines: for each (identity, series) pair, walk fexRows and collect
-  // x,y points where row.face_idx is mapped to this identity AND row[series] is numeric.
+  // Build polylines for each (selected-identity × selected-series).
+  // If the user hasn't assigned any identities yet, we fall back to
+  // grouping by face_idx so lines are visible immediately on session
+  // load (no manual identity setup required before seeing data).
   const lines = $derived.by(() => {
     const out: { points: string; color: string; dash: string; label: string }[] = [];
-    selectedIdentityIds.forEach((iid, idIdx) => {
+
+    // Determine the "groups" to draw — either user-selected identities
+    // or, as fallback, the distinct face_idx values present in fex.
+    let groups: { key: string; label: string; matches: (f: number, fi: number) => boolean }[];
+    if (selectedIdentityIds.length > 0) {
+      groups = selectedIdentityIds.map((iid) => {
+        const ident = identities.find(i => i.identity_id === iid);
+        return {
+          key: iid,
+          label: ident?.name ?? 'Unknown',
+          matches: (f: number, fi: number) => idByPair.get(`${f}:${fi}`) === iid,
+        };
+      });
+    } else {
+      // Fallback: one group per face_idx present in fex
+      const faceIdxes = new Set<number>();
+      for (const row of fexRows) faceIdxes.add(Number(row.face_idx ?? 0));
+      groups = [...faceIdxes].sort((a, b) => a - b).map((fi) => ({
+        key: `face_${fi}`,
+        label: `Face ${fi}`,
+        matches: (_f: number, rowFi: number) => rowFi === fi,
+      }));
+    }
+
+    groups.forEach((g, idIdx) => {
       const dash = dashForIdentityOrder(idIdx);
-      const ident = identities.find(i => i.identity_id === iid);
       selectedSeries.forEach((s, sIdx) => {
         const color = colorForSeriesIndex(sIdx);
+        const range = seriesRange[s] ?? [0, 1];
         const pts: string[] = [];
         for (const row of fexRows) {
           const f = Number(row.frame ?? 0);
           const fi = Number(row.face_idx ?? 0);
-          const mapped = idByPair.get(`${f}:${fi}`);
-          if (mapped !== iid) continue;
+          if (!g.matches(f, fi)) continue;
           const v = row[s];
           if (typeof v !== 'number' || Number.isNaN(v)) continue;
-          pts.push(`${xFor(f).toFixed(1)},${yFor(v).toFixed(1)}`);
+          pts.push(`${xFor(f).toFixed(1)},${yFor(v, range).toFixed(1)}`);
         }
         if (pts.length > 0) {
           out.push({
             points: pts.join(' '),
             color, dash,
-            label: `${s} · ${ident?.name ?? 'Unknown'}`,
+            label: `${s} · ${g.label}`,
           });
         }
       });
@@ -81,10 +128,18 @@
     return out;
   });
 
-  // Series options to expose as chips: union of numeric columns excluding (frame, face_idx, FaceRect*, FaceScore).
+  // Series options to expose as chips: numeric columns the researcher
+  // likely wants to plot over time. Excluded:
+  //   - frame / face_idx / FaceRect* / FaceScore / input / approx_time
+  //     — bookkeeping, not analytics
+  //   - x_N / y_N / z_N landmark coordinates — too many to be useful as
+  //     individual chips (68 or 478 per axis)
+  //   - Identity_N face-embedding dims — high-dimensional embeddings
+  //     (e.g., ArcFace's 512 numbers per face); not interpretable
+  //     individually
   const availableSeries = $derived.by(() => {
     if (fexRows.length === 0) return [];
-    const skipPattern = /^(frame|face_idx|FaceRect|FaceScore|input|approx_time)/;
+    const skipPattern = /^(frame|face_idx|FaceRect|FaceScore|input|approx_time|x_\d|y_\d|z_\d|Identity_)/;
     const sample = fexRows[0];
     return Object.keys(sample).filter(k => !skipPattern.test(k));
   });
@@ -141,10 +196,12 @@
     onclick={handlePlotClick}
     role="presentation"
   >
-    <!-- Grid -->
+    <!-- Grid: normalized fractions of plot height (each series now
+         maps its natural range onto 0..1, so the grid shows percent
+         of each series' min→max span rather than absolute values). -->
     {#each [0.25, 0.5, 0.75, 1.0] as v}
-      <line x1={PAD_LEFT} y1={yFor(v)} x2={PAD_LEFT + PLOT_W} y2={yFor(v)} stroke="#27272a" stroke-width="0.5" />
-      <text x="4" y={yFor(v) + 3} fill="#52525b" font-family="ui-monospace,monospace" font-size="9">{v.toFixed(2)}</text>
+      <line x1={PAD_LEFT} y1={yFor(v, [0, 1])} x2={PAD_LEFT + PLOT_W} y2={yFor(v, [0, 1])} stroke="#27272a" stroke-width="0.5" />
+      <text x="4" y={yFor(v, [0, 1]) + 3} fill="#52525b" font-family="ui-monospace,monospace" font-size="9">{(v * 100).toFixed(0)}%</text>
     {/each}
 
     <!-- Annotation overlays -->
