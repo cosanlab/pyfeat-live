@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import ChevronLeft from '@lucide/svelte/icons/chevron-left';
-  import ChevronRight from '@lucide/svelte/icons/chevron-right';
+  import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
+  import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open';
   import { liveApi, systemApi } from '../lib/api';
   import type { LiveConfigure, ComputeInfo } from '../lib/api';
   import type { OverlayToggles } from '../lib/overlay/types';
@@ -28,13 +28,13 @@
   let detectionRes: DetectionRes = $state(DETECTION_PRESETS[0]!);
 
   let config: LiveConfigure = $state({
-    detector_type: 'MPDetector',
+    detector_type: 'Detector',
     face_model: 'retinaface',
-    landmark_model: 'mp_facemesh_v2',
-    au_model: 'mp_blendshapes',
+    landmark_model: 'mobilefacenet',
+    au_model: 'xgb',
     emotion_model: 'resmasknet',
     identity_model: 'arcface',
-    gaze_model: 'mp_iris (built-in)',
+    gaze_model: 'l2cs',
     device: 'mps',
   });
 
@@ -43,7 +43,14 @@
   let apiError: string | null = $state(null);
 
   type LandmarkStyle = 'points' | 'lines' | 'mesh';
-  let landmarkStyle: LandmarkStyle = $state('mesh');
+  // Default depends on detector type — Detector's 68 landmarks form
+  // tidy face-part curves under 'lines'; MPDetector's 478-point mesh
+  // looks best as 'mesh'. Per-type default applied here for initial
+  // state and re-applied on switchDetectorType (see applyConfig
+  // wrapper in Live.svelte for that).
+  let landmarkStyle: LandmarkStyle = $state(
+    config.detector_type === 'Detector' ? 'lines' : 'mesh',
+  );
 
   let toggles: OverlayToggles = $state({
     rects: true, landmarks: true, poses: false,
@@ -101,6 +108,13 @@
   // /api/live/frame call, so changing any of these here takes effect on
   // the next round trip.
   async function applyConfig(c: LiveConfigure) {
+    // Re-default landmark style on detector_type flip — Detector's 68
+    // anatomical landmarks look best as 'lines'; MPDetector's 478-
+    // point mesh looks best as 'mesh'. Only re-default on actual
+    // type change so the user can still override after the fact.
+    if (c.detector_type !== config.detector_type) {
+      landmarkStyle = c.detector_type === 'Detector' ? 'lines' : 'mesh';
+    }
     config = c;
     try {
       await liveApi.configure({
@@ -342,19 +356,19 @@
         onDetectionResChange={onDetectionResChange}
       />
       <button
-        class="absolute top-1/2 -right-3 -translate-y-1/2 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-50 inline-flex items-center justify-center z-10"
+        class="absolute top-3 right-2 w-7 h-7 rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 inline-flex items-center justify-center transition-colors z-10"
         onclick={() => (sidebarCollapsed = true)}
         aria-label="Collapse sidebar"
         title="Collapse sidebar"
-      ><ChevronLeft size={12} /></button>
+      ><PanelLeftClose size={16} /></button>
     </div>
   {:else}
     <button
-      class="w-6 self-start mt-3 ml-1 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-50 inline-flex items-center justify-center"
+      class="self-start mt-3 ml-2 w-7 h-7 rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 inline-flex items-center justify-center transition-colors"
       onclick={() => (sidebarCollapsed = false)}
       aria-label="Expand sidebar"
       title="Expand sidebar"
-    ><ChevronRight size={12} /></button>
+    ><PanelLeftOpen size={16} /></button>
   {/if}
 
   <div class="flex-1 flex flex-col">

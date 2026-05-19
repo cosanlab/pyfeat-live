@@ -1,5 +1,4 @@
 <script lang="ts">
-  import Moon from '@lucide/svelte/icons/moon';
   import type { View } from '../types';
 
   type Props = { view: View; onViewChange: (v: View) => void };
@@ -25,11 +24,5 @@
         {tab.label}
       </button>
     {/each}
-    <button
-      class="ml-2 w-7 h-7 rounded inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300"
-      aria-label="Toggle theme"
-    >
-      <Moon size={14} />
-    </button>
   </nav>
 </header>
