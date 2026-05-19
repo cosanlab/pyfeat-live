@@ -302,19 +302,6 @@ def _draw_pose(
     # Numeric pitch/yaw/roll panel is rendered as HTML on the frontend
     # (sent via X-Live-Meta header) so text reads correctly under the
     # CSS selfie-mirror. The 3-axis indicator above stays as pixels.
-    return
-    _draw_text_panel(
-        drw,
-        x + w + 6 * scale,
-        y + h - 60 * scale,
-        [
-            f"Pitch  {float(pitch):+6.1f}°",
-            f"Yaw    {float(yaw):+6.1f}°",
-            f"Roll   {float(roll):+6.1f}°",
-        ],
-        font_small,
-        scale=scale,
-    )
 
 
 def _draw_gaze(
@@ -414,27 +401,6 @@ def _draw_emotions(
     the canvas's CSS transform, so labels stay legible.
     """
     return
-    emotion_cols = (
-        "anger", "disgust", "fear", "happiness",
-        "sadness", "surprise", "neutral",
-    )
-    has_index = hasattr(row, "index")
-    present = [
-        c for c in emotion_cols
-        if (c in row.index if has_index else c in row)
-    ]
-    if not present:
-        return
-    scored = sorted(
-        ((c, float(row[c])) for c in present if not np.isnan(row[c])),
-        key=lambda t: -t[1],
-    )[:3]
-    if not scored:
-        return
-    lines = [f"{c.capitalize()}  {v:.2f}" for c, v in scored]
-    tx = float(row["FaceRectX"])
-    ty = max(8.0 * scale, float(row["FaceRectY"]) - 78.0 * scale)
-    _draw_text_panel(drw, tx, ty, lines, font_label, scale=scale)
 
 
 # ---------------------------------------------------------------------------
