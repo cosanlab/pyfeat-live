@@ -133,6 +133,20 @@
     const csvUrl = sessionsApi.fexUrl(id);
     const text = await fetch(csvUrl).then(r => r.text());
     fexRows = parseFexCsv(text);
+    // Recovery for legacy sessions recorded with the pre-fix recorder
+    // that emitted frame=0 for every row and no face_idx column. If
+    // all `frame` values are 0/missing, infer the frame index from
+    // row order (single-face common case). If face_idx is missing,
+    // default to 0 so identity logic works.
+    const frameAllZero = fexRows.length > 1 && fexRows.every(
+      r => !r.frame || Number(r.frame) === 0,
+    );
+    if (frameAllZero) {
+      fexRows.forEach((r, i) => { r.frame = i; });
+    }
+    if (fexRows.length > 0 && !('face_idx' in fexRows[0])) {
+      fexRows.forEach(r => { r.face_idx = 0; });
+    }
   }
 
   function parseFexCsv(text: string): Record<string, number | string | null>[] {
