@@ -17,11 +17,13 @@
     onToggleIdentity: (iid: string) => void;
     onToggleSeries: (s: string) => void;
     onSeek: (frame: number) => void;
+    // shift+drag horizontally to create an exclude-range annotation
+    onDragRangeComplete: (start: number, end: number) => void;
   };
   let {
     fexRows, totalFrames, currentFrame, identities, assignments, annotations,
     selectedIdentityIds, selectedSeries,
-    onToggleIdentity, onToggleSeries, onSeek,
+    onToggleIdentity, onToggleSeries, onSeek, onDragRangeComplete,
   }: Props = $props();
 
   const VIEWBOX_W = 720;
@@ -144,16 +146,54 @@
     return Object.keys(sample).filter(k => !skipPattern.test(k));
   });
 
-  function handlePlotClick(e: MouseEvent) {
-    const svg = e.currentTarget as SVGSVGElement;
+  // Convert a pointer x-pixel to a clamped frame index (inverse of xFor).
+  function frameAt(svg: SVGSVGElement, clientX: number): number {
     const r = svg.getBoundingClientRect();
-    const cx = ((e.clientX - r.left) / r.width) * VIEWBOX_W;
-    if (cx < PAD_LEFT || cx > PAD_LEFT + PLOT_W) return;
-    const frame = Math.round(((cx - PAD_LEFT) / PLOT_W) * totalFrames);
-    onSeek(frame);
+    const cx = ((clientX - r.left) / r.width) * VIEWBOX_W;
+    const ratio = Math.max(0, Math.min(1, (cx - PAD_LEFT) / PLOT_W));
+    return Math.round(ratio * totalFrames);
+  }
+
+  // Shift+drag creates an exclude range; plain click seeks.
+  let dragStartFrame: number | null = $state(null);
+  let dragCurrentFrame: number | null = $state(null);
+
+  function handlePointerDown(e: PointerEvent) {
+    const svg = e.currentTarget as SVGSVGElement;
+    if (e.shiftKey) {
+      svg.setPointerCapture(e.pointerId);
+      const f = frameAt(svg, e.clientX);
+      dragStartFrame = f;
+      dragCurrentFrame = f;
+    } else {
+      onSeek(frameAt(svg, e.clientX));
+    }
+  }
+
+  function handlePointerMove(e: PointerEvent) {
+    if (dragStartFrame === null) return;
+    dragCurrentFrame = frameAt(e.currentTarget as SVGSVGElement, e.clientX);
+  }
+
+  function handlePointerUp(e: PointerEvent) {
+    const svg = e.currentTarget as SVGSVGElement;
+    svg.releasePointerCapture?.(e.pointerId);
+    if (dragStartFrame !== null && dragCurrentFrame !== null) {
+      const a = Math.min(dragStartFrame, dragCurrentFrame);
+      const b = Math.max(dragStartFrame, dragCurrentFrame);
+      if (b > a) onDragRangeComplete(a, b);
+    }
+    dragStartFrame = null;
+    dragCurrentFrame = null;
   }
 
   const cursorX = $derived(xFor(currentFrame));
+  const dragHighlight = $derived.by(() => {
+    if (dragStartFrame === null || dragCurrentFrame === null) return null;
+    const a = Math.min(dragStartFrame, dragCurrentFrame);
+    const b = Math.max(dragStartFrame, dragCurrentFrame);
+    return { x: xFor(a), width: Math.max(0, xFor(b) - xFor(a)) };
+  });
 </script>
 
 <div class="px-3.5 py-3 bg-zinc-950 border-t border-zinc-900">
@@ -192,8 +232,10 @@
   <!-- Plot SVG -->
   <svg
     viewBox="0 0 {VIEWBOX_W} {VIEWBOX_H}"
-    class="w-full h-[200px] bg-zinc-950 border border-zinc-900 rounded cursor-crosshair"
-    onclick={handlePlotClick}
+    class="w-full h-[200px] bg-zinc-950 border border-zinc-900 rounded cursor-crosshair touch-none select-none"
+    onpointerdown={handlePointerDown}
+    onpointermove={handlePointerMove}
+    onpointerup={handlePointerUp}
     role="presentation"
   >
     <!-- Grid: normalized fractions of plot height (each series now
@@ -227,6 +269,19 @@
     {#each lines as ln}
       <polyline points={ln.points} fill="none" stroke={ln.color} stroke-width="1.5" stroke-dasharray={ln.dash} />
     {/each}
+
+    <!-- Shift+drag highlight (pending exclude range) -->
+    {#if dragHighlight}
+      <rect
+        x={dragHighlight.x}
+        y={PAD_TOP}
+        width={Math.max(1, dragHighlight.width)}
+        height={PLOT_H}
+        fill="rgba(239,68,68,0.18)"
+        stroke="rgba(239,68,68,0.5)"
+        stroke-width="0.5"
+      />
+    {/if}
 
     <!-- Cursor at current frame -->
     <line x1={cursorX} y1={PAD_TOP} x2={cursorX} y2={PAD_TOP + PLOT_H} stroke="#fafafa" stroke-width="1" opacity="0.7" />

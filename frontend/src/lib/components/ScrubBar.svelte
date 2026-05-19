@@ -28,34 +28,42 @@
   let track: HTMLDivElement | null = $state(null);
   let dragStartFrame: number | null = $state(null);
   let dragCurrentFrame: number | null = $state(null);
-  let isShiftDrag = $state(false);  // shift+drag also creates exclude range
+  let isShiftDrag = $state(false);  // shift+drag creates an exclude range
+  let isSeekDrag = $state(false);   // plain drag scrubs the playhead
 
-  function frameAt(e: MouseEvent): number {
+  function frameAt(e: { clientX: number }): number {
     if (!track) return 0;
     const r = track.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
     return Math.round(ratio * totalFrames);
   }
 
-  function handleMouseDown(e: MouseEvent) {
+  function handlePointerDown(e: PointerEvent) {
     const f = frameAt(e);
+    // Capture the pointer so the drag keeps tracking even if the
+    // cursor leaves the (very thin) track element.
+    track?.setPointerCapture(e.pointerId);
     if (e.shiftKey) {
       isShiftDrag = true;
       dragStartFrame = f;
       dragCurrentFrame = f;
     } else {
+      isSeekDrag = true;
       onSeek(f);
     }
   }
 
-  function handleMouseMove(e: MouseEvent) {
-    if (dragStartFrame !== null) {
+  function handlePointerMove(e: PointerEvent) {
+    if (isShiftDrag && dragStartFrame !== null) {
       dragCurrentFrame = frameAt(e);
+    } else if (isSeekDrag) {
+      onSeek(frameAt(e));
     }
   }
 
-  function handleMouseUp() {
-    if (dragStartFrame !== null && dragCurrentFrame !== null) {
+  function handlePointerUp(e: PointerEvent) {
+    track?.releasePointerCapture?.(e.pointerId);
+    if (isShiftDrag && dragStartFrame !== null && dragCurrentFrame !== null) {
       const a = Math.min(dragStartFrame, dragCurrentFrame);
       const b = Math.max(dragStartFrame, dragCurrentFrame);
       if (b > a) {
@@ -65,6 +73,7 @@
     dragStartFrame = null;
     dragCurrentFrame = null;
     isShiftDrag = false;
+    isSeekDrag = false;
   }
 
   function formatTime(frame: number): string {
@@ -85,8 +94,6 @@
     };
   });
 </script>
-
-<svelte:window onmouseup={handleMouseUp} onmousemove={handleMouseMove} />
 
 <div class="bg-zinc-950 border-t border-zinc-900 px-3.5 py-2.5">
   <!-- Annotation lane (above the scrub track) -->
@@ -143,8 +150,10 @@
     <!-- Track -->
     <div
       bind:this={track}
-      class="flex-1 h-1.5 bg-zinc-900 rounded relative cursor-pointer select-none"
-      onmousedown={handleMouseDown}
+      class="flex-1 h-1.5 bg-zinc-900 rounded relative cursor-pointer select-none touch-none"
+      onpointerdown={handlePointerDown}
+      onpointermove={handlePointerMove}
+      onpointerup={handlePointerUp}
       role="slider"
       aria-valuemin={0}
       aria-valuemax={totalFrames}

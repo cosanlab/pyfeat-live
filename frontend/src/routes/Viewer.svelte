@@ -43,6 +43,16 @@
     aus: false, emotions: false,
   });
 
+  // Overlay toggle chips (mirrors the Live page control bar).
+  const OVERLAY_CHIPS: { key: keyof OverlayToggles; label: string }[] = [
+    { key: 'rects', label: 'Faceboxes' },
+    { key: 'landmarks', label: 'Landmarks' },
+    { key: 'poses', label: 'Pose' },
+    { key: 'gaze', label: 'Gaze' },
+    { key: 'aus', label: 'AUs' },
+    { key: 'emotions', label: 'Emotions' },
+  ];
+
   // Annotation popover state
   let popover: { kind: AnnotationKind; startFrame: number; endFrame: number; label: string } | null = $state(null);
   // Identity assign dialog
@@ -293,6 +303,14 @@
       onFrameAdvance={(f) => (currentFrame = f)}
       onPlaybackEnd={() => (isPlaying = false)}
     />
+    <div class="flex items-center gap-1.5 flex-wrap px-3.5 py-2 bg-zinc-950 border-t border-zinc-900">
+      {#each OVERLAY_CHIPS as chip}
+        <button
+          class="px-2.5 py-1 rounded-md text-[11px] font-medium border {toggles[chip.key] ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'}"
+          onclick={() => (toggles = { ...toggles, [chip.key]: !toggles[chip.key] })}
+        >{chip.label}</button>
+      {/each}
+    </div>
     <ScrubBar
       {currentFrame}
       {totalFrames}
@@ -327,6 +345,7 @@
           : [...selectedSeries, s];
       }}
       onSeek={onSeek}
+      onDragRangeComplete={onDragRangeComplete}
     />
   </div>
 
