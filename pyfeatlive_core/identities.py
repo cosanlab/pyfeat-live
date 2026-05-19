@@ -338,9 +338,25 @@ def cluster_session(session_dir: Path, threshold: float = 0.8) -> dict:
             denom = (np.linalg.norm(a) * np.linalg.norm(b)) or 1.0
             sim[i, j] = float(np.dot(a, b) / denom)
 
+    # Legacy sessions (recorded before the recorder frame/face_idx fix)
+    # may lack a face_idx column and have frame all-zero. Default
+    # face_idx to 0 and infer frame from row order so clustering still
+    # produces usable assignments rather than crashing.
+    has_face_idx = "face_idx" in df.columns
+    has_frame = "frame" in df.columns
+    frame_all_zero = has_frame and (df["frame"] == 0).all()
+
+    def _frame(idx, row):
+        if has_frame and not frame_all_zero:
+            return int(row["frame"])
+        return idx
+
+    def _face_idx(row):
+        return int(row["face_idx"]) if has_face_idx else 0
+
     return {
         "cluster_assignments": [
-            (int(row["frame"]), int(row["face_idx"]), cluster_ids_int[idx])
+            (_frame(idx, row), _face_idx(row), cluster_ids_int[idx])
             for idx, (_, row) in enumerate(df.iterrows())
         ],
         "cluster_centroids": {

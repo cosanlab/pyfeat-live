@@ -53,6 +53,12 @@ class LiveSession:
     # frame whose positions the overlay was computed on. Display
     # rate = detection rate (~10 Hz) but overlay drift is zero.
     _cached_baked_jpeg: bytes | None = None
+    # (width, height) of the frame the overlay was actually baked onto
+    # — i.e. the source upload resolution, which is NOT the detection
+    # input size when detection_size downscaling is active. The
+    # X-Live-Meta header reports these so the frontend's HTML overlays
+    # position correctly. None until the first detection completes.
+    _cached_frame_dims: tuple[int, int] | None = None
     # Monotonic counter incremented each time _cached_baked_jpeg is
     # replaced (i.e., each completed detection). Sent back to the
     # frontend via the X-Detection-Generation header so the UI can
@@ -89,6 +95,7 @@ class LiveSession:
         }
         self._cached_fex = None
         self._cached_baked_jpeg = None
+        self._cached_frame_dims = None
         self._next_detection_at = 0.0
         self._detection_in_flight = False
         # Bump generation so the frontend's X-Detection-Generation

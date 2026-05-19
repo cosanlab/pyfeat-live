@@ -250,17 +250,22 @@
       }
       const tNet = profile ? performance.now() : 0;
 
-      // 4. Decode + paint to displayCanvas (DPR-scaled for sharpness).
+      // 4. Decode + paint to displayCanvas. Size the canvas backing
+      // to the BITMAP's own dimensions and draw 1:1, so we never
+      // distort or mis-scale regardless of the camera's resolution
+      // (640x360, 1280x720, 4:3, whatever). The canvas element's CSS
+      // (object-contain) handles fitting it into the stage preserving
+      // aspect — overlay stays locked to the face because it's baked
+      // into the same pixels.
       if (displayCanvas) {
         try {
           const bitmap = await createImageBitmap(baked);
           if (signal.aborted) { bitmap.close(); return; }
-          const dpr = window.devicePixelRatio || 1;
-          if (displayCanvas.width !== WIDTH * dpr) displayCanvas.width = WIDTH * dpr;
-          if (displayCanvas.height !== HEIGHT * dpr) displayCanvas.height = HEIGHT * dpr;
+          if (displayCanvas.width !== bitmap.width) displayCanvas.width = bitmap.width;
+          if (displayCanvas.height !== bitmap.height) displayCanvas.height = bitmap.height;
           const dctx = displayCanvas.getContext('2d')!;
-          dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          dctx.drawImage(bitmap, 0, 0, WIDTH, HEIGHT);
+          dctx.setTransform(1, 0, 0, 1, 0, 0);
+          dctx.drawImage(bitmap, 0, 0);
           bitmap.close();
         } catch (e) {
           // Decode failures shouldn't kill the loop — just skip this frame.
@@ -440,7 +445,7 @@
              carry non-mirrored camera frames and Gaze360 convention. -->
         <canvas
           bind:this={displayCanvas}
-          class="absolute inset-0 w-full h-full object-cover"
+          class="absolute inset-0 w-full h-full object-contain"
           style="transform: scaleX(-1);"
         ></canvas>
 

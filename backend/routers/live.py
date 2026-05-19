@@ -95,7 +95,7 @@ async def upload_frame(request: Request) -> Response:
 
     # --- return cached locked frame (or echo source on first call) -
     headers = {"X-Detection-Generation": str(live._detection_generation)}
-    meta_json = _live_meta_header(cached_fex)
+    meta_json = _live_meta_header(cached_fex, live._cached_frame_dims)
     if meta_json is not None:
         headers["X-Live-Meta"] = meta_json
     if live._cached_baked_jpeg is not None:
@@ -110,7 +110,7 @@ async def upload_frame(request: Request) -> Response:
     )
 
 
-def _live_meta_header(fex) -> Optional[str]:
+def _live_meta_header(fex, frame_dims=None) -> Optional[str]:
     """Compact JSON for the frontend HTML overlays (emotions panel,
     pose readout, face bbox). Rendered as DOM on top of the canvas so
     text stays legible under the canvas's selfie-mirror CSS transform.
@@ -134,11 +134,13 @@ def _live_meta_header(fex) -> Optional[str]:
             float(row["FaceRectX"]), float(row["FaceRectY"]),
             float(row["FaceRectWidth"]), float(row["FaceRectHeight"]),
         ]
-        if "FrameWidth" in row.index and "FrameHeight" in row.index:
-            fw = row["FrameWidth"]
-            fh = row["FrameHeight"]
-            if not (pd.isna(fw) or pd.isna(fh)):
-                meta["frame"] = [int(fw), int(fh)]
+        # Use the TRUE bake dimensions (source upload size) the caller
+        # passed in. The fex's FrameWidth/FrameHeight reflect the
+        # DETECTION input size, which differs from the bake size when
+        # detection_size downscaling is active — using those would
+        # mis-position the HTML overlays by the downscale factor.
+        if frame_dims is not None:
+            meta["frame"] = [int(frame_dims[0]), int(frame_dims[1])]
     except (KeyError, TypeError, ValueError):
         return None
     # Top-3 emotions
@@ -216,6 +218,10 @@ async def _run_detection(live, img: Image.Image) -> None:
         # survive intact, no DCT quantization "+" artifacts.
         live._cached_baked_jpeg = encode_png(frame_arr)
         live._cached_fex = fex
+        # Record the TRUE bake resolution (source upload size). This is
+        # what the overlay coords are in — NOT the detection input size.
+        # frame_arr is HxWx3, so shape[1]=width, shape[0]=height.
+        live._cached_frame_dims = (frame_arr.shape[1], frame_arr.shape[0])
         live._detection_generation += 1
         # No cooldown — _detection_in_flight alone is enough to
         # prevent queueing. Adding a `dur` cooldown after each
