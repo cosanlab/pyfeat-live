@@ -6,7 +6,9 @@
 
   const tabs: { id: View; label: string }[] = [
     { id: 'live', label: 'Live' },
-    { id: 'analyze', label: 'Analyze' },
+    // Internal id stays 'analyze' (API routes are /api/analyze/*); only
+    // the user-facing label changes. Room for a real analysis UI later.
+    { id: 'analyze', label: 'Extract' },
     { id: 'viewer', label: 'Viewer' },
   ];
 </script>

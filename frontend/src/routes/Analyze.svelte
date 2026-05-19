@@ -165,7 +165,7 @@
 <div class="flex flex-1 flex-col overflow-hidden">
   <!-- Page header -->
   <div class="flex items-center gap-3 px-5 py-3 border-b border-zinc-900">
-    <h1 class="text-[14px] font-semibold text-zinc-50">Analyze</h1>
+    <h1 class="text-[14px] font-semibold text-zinc-50">Extract</h1>
     <div class="ml-4 flex items-center gap-2">
       <span class="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">Default preset</span>
       <select
