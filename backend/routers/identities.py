@@ -289,6 +289,48 @@ def cluster_identities(session_id: str, req: ClusterRequest) -> dict:
     }
 
 
+@router.post("/api/sessions/{session_id}/identities/{keep_id}/merge/{absorb_id}")
+def merge_identities(
+    session_id: str, keep_id: str, absorb_id: str,
+) -> dict:
+    """Merge two identities: keep ``keep_id``'s metadata, retag every
+    assignment that pointed at ``absorb_id`` to ``keep_id``, then
+    delete the absorbed identity from the catalog. ``apply_identity_labels_to_fex``
+    keeps fex.csv's ``IdentityLabel`` column in sync.
+
+    Returns the updated identities list so the UI can refresh without
+    a separate round trip.
+    """
+    if keep_id == absorb_id:
+        raise HTTPException(400, "keep_id and absorb_id must differ")
+    d = _session_dir(session_id)
+    existing = read_identities(d)
+    ids = {i.identity_id for i in existing}
+    if keep_id not in ids:
+        raise HTTPException(404, "keep identity not found")
+    if absorb_id not in ids:
+        raise HTTPException(404, "absorb identity not found")
+
+    # Retag assignments
+    assignments = read_assignments(d)
+    new_assignments = [
+        IdentityAssignment(
+            frame=a.frame,
+            face_idx=a.face_idx,
+            identity_id=keep_id if a.identity_id == absorb_id else a.identity_id,
+        )
+        for a in assignments
+    ]
+    write_assignments(d, new_assignments)
+
+    # Drop the absorbed identity from the catalog
+    kept = [i for i in existing if i.identity_id != absorb_id]
+    write_identities(d, kept)
+    apply_identity_labels_to_fex(d)
+
+    return {"identities": [_identity_to_dict(i) for i in kept]}
+
+
 @router.post("/api/sessions/{session_id}/identities/{identity_id}/assign")
 def assign_identity(
     session_id: str, identity_id: str, req: AssignRequest,
