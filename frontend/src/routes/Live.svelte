@@ -469,8 +469,8 @@
              a right anchor. -->
         {#if isStreaming && liveMeta && toggles.emotions && liveMeta.emo && liveMeta.emo.length > 0}
           <div
-            class="absolute px-2.5 py-1.5 rounded bg-black/70 text-white text-[10.5px] font-mono pointer-events-none whitespace-nowrap"
-            style="right: {((liveMeta.bbox[0]) / WIDTH * 100).toFixed(2)}%; top: {Math.max(2, (liveMeta.bbox[1] - 76) / HEIGHT * 100).toFixed(2)}%;"
+            class="absolute px-3.5 py-2 rounded-md bg-black/70 text-white text-[15px] leading-snug font-mono pointer-events-none whitespace-nowrap"
+            style="right: {((liveMeta.bbox[0]) / WIDTH * 100).toFixed(2)}%; top: {Math.max(2, (liveMeta.bbox[1] - 92) / HEIGHT * 100).toFixed(2)}%;"
           >
             {#each liveMeta.emo as [name, val]}
               <div>{name.charAt(0).toUpperCase() + name.slice(1)}  {val.toFixed(2)}</div>
@@ -479,8 +479,8 @@
         {/if}
         {#if isStreaming && liveMeta && toggles.poses && liveMeta.pose}
           <div
-            class="absolute px-2.5 py-1.5 rounded bg-black/70 text-white text-[10.5px] font-mono pointer-events-none whitespace-nowrap"
-            style="left: {((liveMeta.bbox[0] - 100) / WIDTH * 100).toFixed(2)}%; top: {((liveMeta.bbox[1] + liveMeta.bbox[3] - 60) / HEIGHT * 100).toFixed(2)}%;"
+            class="absolute px-3.5 py-2 rounded-md bg-black/70 text-white text-[15px] leading-snug font-mono pointer-events-none whitespace-nowrap"
+            style="left: {((liveMeta.bbox[0] - 110) / WIDTH * 100).toFixed(2)}%; top: {((liveMeta.bbox[1] + liveMeta.bbox[3] - 76) / HEIGHT * 100).toFixed(2)}%;"
           >
             <div>Pitch  {liveMeta.pose.p.toFixed(1)}°</div>
             <div>Yaw    {liveMeta.pose.y.toFixed(1)}°</div>
