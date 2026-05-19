@@ -12,6 +12,7 @@ from pyfeatlive_core.identities import (
     Identity,
     IdentityAssignment,
     apply_identity_labels_to_fex,
+    cluster_session,
     new_identity_id,
     read_assignments,
     read_identities,
@@ -233,6 +234,58 @@ def auto_init_identities(session_id: str) -> dict:
         "created": len(new_idents),
         "assignments": len(new_assignments),
         "grouped_by": group_col,
+    }
+
+
+class ClusterRequest(BaseModel):
+    threshold: float = 0.8
+
+
+@router.post("/api/sessions/{session_id}/identities/cluster")
+def cluster_identities(session_id: str, req: ClusterRequest) -> dict:
+    """Re-cluster faces using ArcFace embeddings + the given
+    similarity threshold. Replaces existing identities + assignments
+    with one new identity per cluster. Returns the cluster centroid
+    similarity matrix so the UI can suggest merges.
+    """
+    d = _session_dir(session_id)
+    try:
+        result = cluster_session(d, threshold=req.threshold)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    # Replace existing identities with one per cluster
+    n = result["n_clusters"]
+    new_idents: list[Identity] = []
+    cluster_id_to_identity: dict[int, str] = {}
+    for idx, cid in enumerate(result["cluster_ids"]):
+        hue = int((idx * 360 / max(1, n)) % 360)
+        ident = Identity(
+            identity_id=new_identity_id(),
+            name=f"Person {idx}",
+            color=f"hsl({hue}, 70%, 55%)",
+            created_at=time.time(),
+            source="cluster",
+        )
+        new_idents.append(ident)
+        cluster_id_to_identity[cid] = ident.identity_id
+    write_identities(d, new_idents)
+
+    # Bulk-replace assignments
+    new_assignments = [
+        IdentityAssignment(
+            frame=f, face_idx=fi,
+            identity_id=cluster_id_to_identity[c],
+        )
+        for (f, fi, c) in result["cluster_assignments"]
+    ]
+    write_assignments(d, new_assignments)
+    apply_identity_labels_to_fex(d)
+
+    return {
+        "identities": [_identity_to_dict(i) for i in new_idents],
+        "similarity": result["similarity"],
+        "n_clusters": n,
     }
 
 

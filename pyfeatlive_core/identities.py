@@ -218,3 +218,81 @@ def apply_identity_labels_to_fex(session_dir: Path) -> int:
     df.to_csv(tmp, index=False)
     tmp.replace(fex_path)
     return len(df)
+
+
+def cluster_session(session_dir: Path, threshold: float = 0.8) -> dict:
+    """Re-cluster a session's faces using ArcFace embeddings.
+
+    Loads fex.csv, runs py-feat's compute_identities at the given
+    threshold, returns:
+      {
+        "cluster_assignments": [(frame, face_idx, cluster_id), ...],
+        "cluster_centroids": {cluster_id: [emb_vec]},
+        "similarity": [[cosine_sim_matrix]],
+        "n_clusters": int,
+      }
+
+    Raises ValueError if the fex.csv has no Identity_N embedding
+    columns (i.e. identity_model wasn't used at detection time).
+    """
+    import pandas as pd
+    import numpy as np
+    from feat import Fex
+
+    fex_path = session_dir / "fex.csv"
+    if not fex_path.exists():
+        raise ValueError("no fex.csv in session")
+
+    df = pd.read_csv(fex_path)
+    emb_cols = [c for c in df.columns if c.startswith("Identity_")]
+    if not emb_cols:
+        raise ValueError(
+            "fex.csv has no ArcFace embedding columns — "
+            "identity_model must be enabled to cluster",
+        )
+
+    # Wrap as Fex so we can use compute_identities. Pass the actual
+    # embedding columns found in this fex.csv as identity_columns so
+    # the identity_embeddings accessor works regardless of whether the
+    # session used 0-indexed or 1-indexed naming.
+    fex = Fex(df, identity_columns=emb_cols)
+    clustered = fex.compute_identities(threshold=threshold, inplace=False)
+    # cluster_identities returns strings like "Person_0", "Person_1", …
+    cluster_labels = clustered["Identity"].tolist()
+
+    # Map string labels to stable integer ids ordered by first appearance
+    label_to_id: dict[str, int] = {}
+    for label in cluster_labels:
+        if label not in label_to_id:
+            label_to_id[label] = len(label_to_id)
+    cluster_ids_int = [label_to_id[lbl] for lbl in cluster_labels]
+
+    # Compute centroid per cluster
+    embeddings = df[emb_cols].to_numpy(dtype=np.float32)
+    unique_clusters = sorted(set(cluster_ids_int))
+    centroids: dict[int, np.ndarray] = {}
+    for cid in unique_clusters:
+        mask = [i == cid for i in cluster_ids_int]
+        centroids[cid] = embeddings[mask].mean(axis=0)
+
+    # Cosine similarity matrix between centroids
+    n = len(unique_clusters)
+    sim = np.zeros((n, n), dtype=np.float32)
+    for i, ci in enumerate(unique_clusters):
+        for j, cj in enumerate(unique_clusters):
+            a, b = centroids[ci], centroids[cj]
+            denom = (np.linalg.norm(a) * np.linalg.norm(b)) or 1.0
+            sim[i, j] = float(np.dot(a, b) / denom)
+
+    return {
+        "cluster_assignments": [
+            (int(row["frame"]), int(row["face_idx"]), cluster_ids_int[idx])
+            for idx, (_, row) in enumerate(df.iterrows())
+        ],
+        "cluster_centroids": {
+            int(cid): centroids[cid].tolist() for cid in unique_clusters
+        },
+        "similarity": sim.tolist(),
+        "n_clusters": n,
+        "cluster_ids": unique_clusters,
+    }
