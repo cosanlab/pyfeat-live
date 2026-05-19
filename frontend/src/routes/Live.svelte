@@ -419,14 +419,16 @@
           playsinline
           muted
         ></video>
-        <!-- Selfie-style horizontal mirror via CSS so what the user sees
-             matches mirror intuition ("I look left, my image goes left").
-             The recorded MP4 and the fex CSV are unchanged — they still
-             carry the non-mirrored camera frame and standard Gaze360
-             coordinate-convention data for analysis. -->
+        <!-- Selfie-style horizontal mirror so what the user sees
+             matches mirror intuition ("I look left, my image goes
+             left"). Inline style instead of Tailwind utility so we
+             don't depend on JIT picking up `-scale-x-100`. The
+             recorded MP4 and the fex CSV are unchanged — they still
+             carry non-mirrored camera frames and Gaze360 convention. -->
         <canvas
           bind:this={displayCanvas}
-          class="absolute inset-0 w-full h-full object-cover -scale-x-100"
+          class="absolute inset-0 w-full h-full object-cover"
+          style="transform: scaleX(-1);"
         ></canvas>
 
         {#if isStreaming}
