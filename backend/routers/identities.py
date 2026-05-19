@@ -19,6 +19,7 @@ from pyfeatlive_core.identities import (
     upsert_assignment,
     write_assignments,
     write_identities,
+    write_identities_and_assignments,
 )
 from pyfeatlive_core.recorder import default_sessions_root
 
@@ -269,9 +270,7 @@ def cluster_identities(session_id: str, req: ClusterRequest) -> dict:
         )
         new_idents.append(ident)
         cluster_id_to_identity[cid] = ident.identity_id
-    write_identities(d, new_idents)
 
-    # Bulk-replace assignments
     new_assignments = [
         IdentityAssignment(
             frame=f, face_idx=fi,
@@ -279,8 +278,9 @@ def cluster_identities(session_id: str, req: ClusterRequest) -> dict:
         )
         for (f, fi, c) in result["cluster_assignments"]
     ]
-    write_assignments(d, new_assignments)
-    apply_identity_labels_to_fex(d)
+    # Atomic-with-rollback write of all 3 files. If any step fails,
+    # the previous identities + assignments + fex labels are restored.
+    write_identities_and_assignments(d, new_idents, new_assignments)
 
     return {
         "identities": [_identity_to_dict(i) for i in new_idents],
@@ -321,12 +321,11 @@ def merge_identities(
         )
         for a in assignments
     ]
-    write_assignments(d, new_assignments)
-
     # Drop the absorbed identity from the catalog
     kept = [i for i in existing if i.identity_id != absorb_id]
-    write_identities(d, kept)
-    apply_identity_labels_to_fex(d)
+    # Atomic-with-rollback write of all 3 files. If anything fails
+    # the prior identities + assignments + fex labels are restored.
+    write_identities_and_assignments(d, kept, new_assignments)
 
     return {"identities": [_identity_to_dict(i) for i in kept]}
 

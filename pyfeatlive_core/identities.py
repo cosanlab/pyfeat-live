@@ -156,6 +156,48 @@ def upsert_assignment(
     write_assignments(session_dir, by_pair.values())
 
 
+def write_identities_and_assignments(
+    session_dir: Path,
+    identities: Iterable[Identity],
+    assignments: Iterable[IdentityAssignment],
+) -> None:
+    """Best-effort transactional write of identities + assignments
+    + fex.csv ``IdentityLabel`` column.
+
+    Each individual file write is atomic via ``tmp.replace(p)``, but
+    the THREE-file SEQUENCE is not. If a later write fails (disk full,
+    permission, fex parse error) we'd otherwise leave identities.csv
+    pointing at the new state while assignments.csv still references
+    the old UUIDs.
+
+    This helper:
+      1. Snapshots the prior identities + assignments to memory
+      2. Runs the three writes in order
+      3. On any exception, restores the snapshot and re-raises
+
+    Not crash-safe (an OS-level kill mid-rollback can still leave
+    inconsistent state on disk), but covers the common case of an
+    application-level write failure.
+    """
+    identities = list(identities)
+    assignments = list(assignments)
+    prev_idents = read_identities(session_dir)
+    prev_assigns = read_assignments(session_dir)
+    try:
+        write_identities(session_dir, identities)
+        write_assignments(session_dir, assignments)
+        apply_identity_labels_to_fex(session_dir)
+    except Exception:
+        # Best-effort rollback to the previous state.
+        try:
+            write_identities(session_dir, prev_idents)
+            write_assignments(session_dir, prev_assigns)
+            apply_identity_labels_to_fex(session_dir)
+        except Exception:
+            pass  # If rollback also fails we can't do much else
+        raise
+
+
 def apply_identity_labels_to_fex(session_dir: Path) -> int:
     """Write the current identity labels back into the session's fex.csv.
 
@@ -240,15 +282,27 @@ def cluster_session(session_dir: Path, threshold: float = 0.8) -> dict:
     from feat import Fex
 
     fex_path = session_dir / "fex.csv"
-    if not fex_path.exists():
+    if not fex_path.exists() or fex_path.stat().st_size == 0:
         raise ValueError("no fex.csv in session")
 
     df = pd.read_csv(fex_path)
+    if len(df) == 0:
+        raise ValueError("fex.csv is empty — no detections to cluster")
     emb_cols = [c for c in df.columns if c.startswith("Identity_")]
     if not emb_cols:
         raise ValueError(
             "fex.csv has no ArcFace embedding columns — "
             "identity_model must be enabled to cluster",
+        )
+
+    # Drop rows where embeddings are NaN (failed detections still
+    # emit a row but with NaN feature columns). Clustering on NaN
+    # propagates through to centroids/similarity matrix and breaks
+    # downstream consumers.
+    df = df.dropna(subset=emb_cols).reset_index(drop=True)
+    if len(df) == 0:
+        raise ValueError(
+            "fex.csv has no rows with valid ArcFace embeddings",
         )
 
     # Wrap as Fex so we can use compute_identities. Pass the actual
