@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import csv as _csv
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from pyfeatlive_core.recorder import default_sessions_root
 from pyfeatlive_core.session_io import (
@@ -14,6 +15,7 @@ from pyfeatlive_core.session_io import (
     load_metadata,
     session_summary,
 )
+from pyfeatlive_core.thumbnails import extract_face_crop
 
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -59,9 +61,6 @@ def get_session(session_id: str) -> dict:
     summary = session_summary(d)
     summary["metadata"] = load_metadata(d)
     return summary
-
-
-from fastapi import Response
 
 
 def _serve_range(file_path: Path, range_header: str) -> Response:
@@ -134,3 +133,35 @@ def get_session_fex(session_id: str) -> Response:
         media_type="text/csv",
         headers={"Content-Length": str(fex.stat().st_size)},
     )
+
+
+@router.get("/{session_id}/face-thumbnail/{frame}/{face_idx}")
+def face_thumbnail(session_id: str, frame: int, face_idx: int) -> Response:
+    d = _resolve_session(session_id)
+    video_path = d / VIDEO_FILENAME
+    if not video_path.exists():
+        raise HTTPException(404, "no video in session")
+
+    fex_path = d / FEX_FILENAME
+    if not fex_path.exists():
+        raise HTTPException(404, "no fex.csv in session")
+
+    bbox = None
+    with open(fex_path, newline="") as f:
+        for row in _csv.DictReader(f):
+            try:
+                if int(row["frame"]) == frame and int(row["face_idx"]) == face_idx:
+                    bbox = (
+                        float(row["FaceRectX"]), float(row["FaceRectY"]),
+                        float(row["FaceRectWidth"]), float(row["FaceRectHeight"]),
+                    )
+                    break
+            except (KeyError, ValueError):
+                continue
+    if bbox is None:
+        raise HTTPException(404, "face not found for that (frame, face_idx)")
+
+    png_bytes = extract_face_crop(video_path, frame, bbox)
+    if png_bytes is None:
+        raise HTTPException(500, "frame extraction failed")
+    return Response(content=png_bytes, media_type="image/png")
