@@ -102,6 +102,30 @@
   function cancelEdit() {
     editingId = null;
   }
+
+  // --- Drag-to-merge ------------------------------------------------
+  // Drag one cluster card onto another to merge them. The dragged
+  // identity (absorb) is folded into the drop target (keep); the
+  // target keeps its name + color, gains the dragged one's frames.
+  let dragId: string | null = $state(null);
+  let dropTargetId: string | null = $state(null);
+  let merging = $state(false);
+
+  async function doMerge(keepId: string, absorbId: string) {
+    if (keepId === absorbId || merging) return;
+    merging = true;
+    error = null;
+    try {
+      const resp = await identitiesApi.merge(sessionId, keepId, absorbId);
+      onMerge(resp);
+    } catch (e: unknown) {
+      error = `Merge failed: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      merging = false;
+      dragId = null;
+      dropTargetId = null;
+    }
+  }
 </script>
 
 <section class="border-t border-zinc-900 pt-3 mt-3">
@@ -151,11 +175,40 @@
       no clusters yet — click Re-cluster
     </div>
   {:else}
+    <p class="text-[10px] text-zinc-500 mb-2 leading-snug">
+      Drag one face onto another to merge them into the same person.
+    </p>
     <div class="grid grid-cols-2 gap-2">
       {#each identities as ident (ident.identity_id)}
         {@const first = firstAssignmentByIdentity.get(ident.identity_id)}
         {@const count = frameCountByIdentity.get(ident.identity_id) ?? 0}
-        <div class="flex flex-col items-center gap-1.5 p-1.5 rounded border border-zinc-800 bg-zinc-950">
+        <div
+          class="flex flex-col items-center gap-1.5 p-1.5 rounded border bg-zinc-950 transition-colors cursor-grab active:cursor-grabbing
+            {dropTargetId === ident.identity_id && dragId !== ident.identity_id
+              ? 'border-green-400 ring-1 ring-green-400'
+              : 'border-zinc-800'}
+            {dragId === ident.identity_id ? 'opacity-40' : ''}"
+          draggable="true"
+          role="listitem"
+          ondragstart={() => (dragId = ident.identity_id)}
+          ondragend={() => { dragId = null; dropTargetId = null; }}
+          ondragover={(e) => {
+            if (dragId && dragId !== ident.identity_id) {
+              e.preventDefault();
+              dropTargetId = ident.identity_id;
+            }
+          }}
+          ondragleave={() => {
+            if (dropTargetId === ident.identity_id) dropTargetId = null;
+          }}
+          ondrop={(e) => {
+            e.preventDefault();
+            if (dragId && dragId !== ident.identity_id) {
+              // Drop target = keep, dragged = absorb.
+              doMerge(ident.identity_id, dragId);
+            }
+          }}
+        >
           {#if first}
             <IdentityThumbnail
               {sessionId}

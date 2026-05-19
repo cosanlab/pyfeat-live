@@ -241,8 +241,24 @@ class SessionRecorder:
                 str(self.dir / "video.mp4"), mode="w", format="mp4"
             )
             stream = self._video_container.add_stream("libx264", rate=self.config.fps)
-            stream.width = frame.width or self.config.width
-            stream.height = frame.height or self.config.height
+            # Encode at the CONFIGURED recording resolution, not the
+            # camera's native size. Real-time h264 of 720p+ frames in
+            # this writer thread starves the detector thread for CPU —
+            # detection (and the locked display) crater to ~1 fps during
+            # recording. Downscaling to the config size (default 640x360)
+            # makes encode ~4x cheaper and keeps detection responsive.
+            # Width is honored; height is derived from the first frame's
+            # aspect so we never distort a non-16:9 camera.
+            target_w = self.config.width or frame.width or 640
+            src_w = frame.width or target_w
+            src_h = frame.height or self.config.height or 360
+            target_h = max(2, round(target_w * src_h / src_w))
+            # h264 needs even dimensions for yuv420p.
+            target_w -= target_w % 2
+            target_h -= target_h % 2
+            self._enc_w, self._enc_h = target_w, target_h
+            stream.width = target_w
+            stream.height = target_h
             stream.pix_fmt = "yuv420p"
             self._video_stream = stream
         except Exception as e:
@@ -262,9 +278,16 @@ class SessionRecorder:
         # will be slightly compressed in real time vs wall-clock,
         # which is the right trade-off — the alternative is a
         # warning-spammy or invalid file).
-        new_frame = av.VideoFrame.from_ndarray(
-            frame.to_ndarray(format="rgb24"), format="rgb24"
-        )
+        arr = frame.to_ndarray(format="rgb24")
+        # Downscale to the encode resolution if the source is larger.
+        if arr.shape[1] != self._enc_w or arr.shape[0] != self._enc_h:
+            from PIL import Image
+            arr = np.asarray(
+                Image.fromarray(arr, "RGB").resize(
+                    (self._enc_w, self._enc_h), Image.BILINEAR,
+                )
+            )
+        new_frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
         try:
             for packet in self._video_stream.encode(new_frame):
                 self._video_container.mux(packet)

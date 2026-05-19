@@ -104,37 +104,48 @@
 </script>
 
 <div
-  class="relative flex-1 bg-black flex items-center justify-center min-h-[240px] cursor-crosshair"
+  class="relative flex-1 bg-black flex items-center justify-center min-h-[240px] cursor-crosshair overflow-hidden"
   onclick={handleStageClick}
   role="presentation"
 >
   {#if videoUrl}
-    <video
-      bind:this={video}
-      src={videoUrl}
-      class="max-w-full max-h-full"
-      playsinline
-      muted
-      ontimeupdate={onTimeUpdate}
-      onended={onEnded}
-    ></video>
+    <!-- Aspect-locked container so the video AND the overlay canvas
+         occupy the EXACT same box. Previously the video was
+         max-w/max-h (letterboxed + centred) while the overlay canvas
+         filled the whole stage, so landmark coords (in video pixel
+         space) were drawn onto a differently-sized/positioned canvas
+         and appeared offset. Both now fill this aspect-matched box. -->
+    <div
+      class="relative"
+      style="aspect-ratio: {width} / {height}; max-width: 100%; max-height: 100%; width: 100%;"
+    >
+      <video
+        bind:this={video}
+        src={videoUrl}
+        class="absolute inset-0 w-full h-full object-contain"
+        playsinline
+        muted
+        ontimeupdate={onTimeUpdate}
+        onended={onEnded}
+      ></video>
+      <OverlayCanvas {faces} {mpLandmarks} {width} {height} {toggles} {edges} />
+
+      <!-- Identity badges, positioned over each face box -->
+      {#each faces as face (face.face_idx)}
+        {#if face.rect && identityByFace.get(face.face_idx)}
+          {@const [rx, ry] = face.rect as [number, number, number, number]}
+          {@const ident = identityByFace.get(face.face_idx)!}
+          <span
+            class="absolute px-2 py-0.5 rounded text-[10.5px] font-semibold pointer-events-none"
+            style:left="{(rx / width) * 100}%"
+            style:top="calc({(ry / height) * 100}% - 22px)"
+            style:background-color={ident.color}
+            style:color="#0a0a0a"
+          >{ident.name}</span>
+        {/if}
+      {/each}
+    </div>
   {:else}
     <div class="text-zinc-600 text-xs font-mono">no video</div>
   {/if}
-  <OverlayCanvas {faces} {mpLandmarks} {width} {height} {toggles} {edges} />
-
-  <!-- Identity badges, positioned over each face box -->
-  {#each faces as face (face.face_idx)}
-    {#if face.rect && identityByFace.get(face.face_idx)}
-      {@const [rx, ry] = face.rect as [number, number, number, number]}
-      {@const ident = identityByFace.get(face.face_idx)!}
-      <span
-        class="absolute px-2 py-0.5 rounded text-[10.5px] font-semibold pointer-events-none"
-        style:left="{(rx / width) * 100}%"
-        style:top="calc({(ry / height) * 100}% - 22px)"
-        style:background-color={ident.color}
-        style:color="#0a0a0a"
-      >{ident.name}</span>
-    {/if}
-  {/each}
 </div>
