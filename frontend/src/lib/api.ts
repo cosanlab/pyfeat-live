@@ -92,6 +92,17 @@ export interface LiveHints {
   detection_res?: { w: number; h: number };
 }
 
+// Compact metadata for HTML overlays (emotion + pose panels) rendered
+// on top of the canvas. Avoids baking text into the mirrored canvas.
+export interface LiveMeta {
+  // Source-frame (non-mirrored) face bounding box: [x, y, w, h]
+  bbox: [number, number, number, number];
+  // Top-3 [emotion_name, prob]
+  emo?: [string, number][];
+  // Pose in degrees
+  pose?: { p: number; y: number; r: number };
+}
+
 export const liveApi = {
   configure: (cfg: LiveConfigure) =>
     request<LiveConfigure>('/api/live/configure', {
@@ -107,7 +118,11 @@ export const liveApi = {
   // POST a JPEG of the current camera frame; backend bakes overlays and
   // returns the baked JPEG. The display canvas renders the returned blob
   // so what the user sees is exactly the frame detection ran on.
-  uploadFrame: async (jpeg: Blob): Promise<{ blob: Blob; generation: number }> => {
+  uploadFrame: async (jpeg: Blob): Promise<{
+    blob: Blob;
+    generation: number;
+    meta: LiveMeta | null;
+  }> => {
     const r = await fetch('/api/live/frame', {
       method: 'POST',
       headers: { 'Content-Type': 'image/jpeg' },
@@ -118,7 +133,12 @@ export const liveApi = {
     const generation = parseInt(
       r.headers.get('X-Detection-Generation') ?? '0', 10,
     );
-    return { blob, generation };
+    const metaRaw = r.headers.get('X-Live-Meta');
+    let meta: LiveMeta | null = null;
+    if (metaRaw) {
+      try { meta = JSON.parse(metaRaw); } catch { /* malformed; ignore */ }
+    }
+    return { blob, generation, meta };
   },
   recordingStart: (body: {
     record_video: boolean;

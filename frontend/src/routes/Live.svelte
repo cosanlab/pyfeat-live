@@ -3,7 +3,7 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import { liveApi, systemApi } from '../lib/api';
-  import type { LiveConfigure, ComputeInfo } from '../lib/api';
+  import type { LiveConfigure, ComputeInfo, LiveMeta } from '../lib/api';
   import type { OverlayToggles } from '../lib/overlay/types';
   import { cameraStore, refreshDevices, startCamera, stopCamera } from '../lib/webrtc/useCamera.svelte';
   import LiveSidebar from '../lib/components/LiveSidebar.svelte';
@@ -83,6 +83,11 @@
   const fpsWindow: number[] = [];
   let lastGeneration = -1;
   let frameIndex = $state(0);
+
+  // Latest live-meta from the backend (emotion top-3 + pose + bbox).
+  // Rendered as HTML overlays on top of the (mirrored) canvas so
+  // text reads correctly. Reset on Stop.
+  let liveMeta: LiveMeta | null = $state(null);
 
   // 1) On mount: fetch compute info + enumerate cameras + configure detector
   onMount(async () => {
@@ -221,13 +226,14 @@
       if (!blob) { await new Promise((r) => setTimeout(r, 16)); continue; }
       const tEnc = profile ? performance.now() : 0;
 
-      // 3. Round-trip to backend; receive baked JPEG + generation
+      // 3. Round-trip to backend; receive baked JPEG + generation + meta
       let baked: Blob;
       let generation = -1;
       try {
         const r = await liveApi.uploadFrame(blob);
         baked = r.blob;
         generation = r.generation;
+        liveMeta = r.meta;
         apiError = null;
       } catch (e: any) {
         if (signal.aborted) return;
@@ -297,6 +303,7 @@
     }
     isStreaming = false;
     isPaused = false;
+    liveMeta = null;
     stopLoop();
     stopCamera();
     if (sourceVideo) sourceVideo.srcObject = null;
@@ -452,6 +459,33 @@
           <span class="absolute bottom-3.5 left-3.5 px-2.5 py-1 rounded text-[10.5px] font-mono bg-white/10 border border-white/10 backdrop-blur">
             {fps.toFixed(0)} fps · frame {frameIndex}
           </span>
+        {/if}
+
+        <!-- HTML overlays for text-bearing meta: emotion top-3 and
+             pose readout. Positioned as siblings of the canvas so
+             the canvas's scaleX(-1) mirror doesn't flip the text.
+             Bbox coords are in source-frame (non-mirrored) space, so
+             we mirror-compensate horizontally via (100% - x/W)% using
+             a right anchor. -->
+        {#if isStreaming && liveMeta && toggles.emotions && liveMeta.emo && liveMeta.emo.length > 0}
+          <div
+            class="absolute px-2.5 py-1.5 rounded bg-black/70 text-white text-[10.5px] font-mono pointer-events-none whitespace-nowrap"
+            style="right: {((liveMeta.bbox[0]) / WIDTH * 100).toFixed(2)}%; top: {Math.max(2, (liveMeta.bbox[1] - 76) / HEIGHT * 100).toFixed(2)}%;"
+          >
+            {#each liveMeta.emo as [name, val]}
+              <div>{name.charAt(0).toUpperCase() + name.slice(1)}  {val.toFixed(2)}</div>
+            {/each}
+          </div>
+        {/if}
+        {#if isStreaming && liveMeta && toggles.poses && liveMeta.pose}
+          <div
+            class="absolute px-2.5 py-1.5 rounded bg-black/70 text-white text-[10.5px] font-mono pointer-events-none whitespace-nowrap"
+            style="left: {((liveMeta.bbox[0] - 100) / WIDTH * 100).toFixed(2)}%; top: {((liveMeta.bbox[1] + liveMeta.bbox[3] - 60) / HEIGHT * 100).toFixed(2)}%;"
+          >
+            <div>Pitch  {liveMeta.pose.p.toFixed(1)}°</div>
+            <div>Yaw    {liveMeta.pose.y.toFixed(1)}°</div>
+            <div>Roll   {liveMeta.pose.r.toFixed(1)}°</div>
+          </div>
         {/if}
       </div>
     </div>

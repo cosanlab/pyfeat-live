@@ -66,12 +66,15 @@ async def upload_frame(request: Request) -> Response:
         loop = asyncio.get_running_loop()
         loop.create_task(_run_detection(live, img))
 
+    # Snapshot the cached fex once so both the recorder feed and the
+    # response-header meta dump see consistent data.
+    cached_fex = live._cached_fex
+
     # --- feed recorder (uses LIVE upload-rate frames, not display) -
     # Recording wants smooth video at upload cadence regardless of
     # the detection-locked display. For overlay mode we bake on a
     # copy of the source using cached fex (drift OK for the file).
     if live.recorder is not None:
-        cached_fex = live._cached_fex
         if live.recorder.config.video_mode == "overlay":
             feed_arr = np.asarray(img).copy()
             if cached_fex is not None and len(cached_fex) > 0:
@@ -92,6 +95,9 @@ async def upload_frame(request: Request) -> Response:
 
     # --- return cached locked frame (or echo source on first call) -
     headers = {"X-Detection-Generation": str(live._detection_generation)}
+    meta_json = _live_meta_header(cached_fex)
+    if meta_json is not None:
+        headers["X-Live-Meta"] = meta_json
     if live._cached_baked_jpeg is not None:
         return Response(
             content=live._cached_baked_jpeg,
@@ -102,6 +108,52 @@ async def upload_frame(request: Request) -> Response:
     return Response(
         content=body, media_type="image/jpeg", headers=headers,
     )
+
+
+def _live_meta_header(fex) -> Optional[str]:
+    """Compact JSON for the frontend HTML overlays (emotions panel,
+    pose readout, face bbox). Rendered as DOM on top of the canvas so
+    text stays legible under the canvas's selfie-mirror CSS transform.
+
+    Returns None when there's no detection to show. Header bytes stay
+    well under 1 KB even with all fields populated.
+    """
+    if fex is None or len(fex) == 0:
+        return None
+    import json
+    import pandas as pd
+    row = fex.iloc[0]
+    meta: dict = {}
+    # Face bbox (source-frame coords, non-mirrored)
+    try:
+        meta["bbox"] = [
+            float(row["FaceRectX"]), float(row["FaceRectY"]),
+            float(row["FaceRectWidth"]), float(row["FaceRectHeight"]),
+        ]
+    except (KeyError, TypeError, ValueError):
+        return None
+    # Top-3 emotions
+    emo_cols = ("anger", "disgust", "fear", "happiness",
+                "sadness", "surprise", "neutral")
+    present = [c for c in emo_cols
+               if c in row.index and not pd.isna(row[c])]
+    if present:
+        scored = sorted(
+            ((c, round(float(row[c]), 3)) for c in present),
+            key=lambda t: -t[1],
+        )[:3]
+        meta["emo"] = scored
+    # Pose readout (degrees)
+    if all(c in row.index for c in ("Pitch", "Yaw", "Roll")):
+        try:
+            p, y, r = float(row["Pitch"]), float(row["Yaw"]), float(row["Roll"])
+            if not any(pd.isna(v) for v in (p, y, r)):
+                meta["pose"] = {
+                    "p": round(p, 1), "y": round(y, 1), "r": round(r, 1),
+                }
+        except (TypeError, ValueError):
+            pass
+    return json.dumps(meta, separators=(",", ":"))
 
 
 async def _run_detection(live, img: Image.Image) -> None:

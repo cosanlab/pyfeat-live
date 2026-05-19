@@ -299,6 +299,10 @@ def _draw_pose(
     drw.line([cx, cy, x1, y1], fill=(255, 60, 60, 255), width=3 * scale)
     drw.line([cx, cy, x2, y2], fill=(60, 255, 60, 255), width=3 * scale)
     drw.line([cx, cy, x3, y3], fill=(80, 140, 255, 255), width=3 * scale)
+    # Numeric pitch/yaw/roll panel is rendered as HTML on the frontend
+    # (sent via X-Live-Meta header) so text reads correctly under the
+    # CSS selfie-mirror. The 3-axis indicator above stays as pixels.
+    return
     _draw_text_panel(
         drw,
         x + w + 6 * scale,
@@ -399,7 +403,16 @@ def _draw_emotions(
     drw: ImageDraw.ImageDraw, row: pd.Series, font_label: ImageFont.FreeTypeFont,
     *, scale: int = 1,
 ) -> None:
-    """Top-3 emotions as a text panel above the face rect."""
+    """Top-3 emotions — rendered as HTML overlay on the frontend.
+
+    The text panel used to be baked into the JPEG here, but CSS
+    `scaleX(-1)` on the live display canvas (selfie mirror) flips
+    baked text into unreadable mirror-script. The frontend now reads
+    emotion top-3 from the X-Live-Meta response header and renders
+    it as HTML on top of the mirrored canvas — HTML doesn't inherit
+    the canvas's CSS transform, so labels stay legible.
+    """
+    return
     emotion_cols = (
         "anger", "disgust", "fear", "happiness",
         "sadness", "surprise", "neutral",
