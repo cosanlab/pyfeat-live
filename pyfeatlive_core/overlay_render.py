@@ -357,50 +357,41 @@ def _draw_gaze(
     end_y = origin_y + length * dir_y
 
     color = (255, 220, 0, 255)  # LIVE_YELLOW + full alpha
-    # Subtle dark drop-shadow so the arrow stays visible against skin.
-    drw.line(
-        [(origin_x + 1 * scale, origin_y + 1 * scale),
-         (end_x + 1 * scale, end_y + 1 * scale)],
-        fill=(0, 0, 0, 140),
-        width=5 * scale,
-    )
-    drw.line([(origin_x, origin_y), (end_x, end_y)], fill=color, width=4 * scale)
 
     norm = float(np.hypot(dir_x, dir_y))
     if norm > 1e-3:
-        # Filled triangular arrowhead at the line tip.
+        # Compute the arrowhead geometry first so we can end the
+        # shaft line exactly at its base — no overdraw, no gap.
         nx = dir_x / norm
         ny = dir_y / norm
         px = -ny
         py = nx
-        head_length = 16 * scale
-        head_width = 11 * scale
+        head_length = 14 * scale
+        head_width = 9 * scale
         bx = end_x - nx * head_length
         by = end_y - ny * head_length
+        # Shaft ends at the arrowhead's base.
+        drw.line(
+            [(origin_x, origin_y), (bx, by)], fill=color, width=4 * scale,
+        )
+        # Filled arrowhead — no outline.
         corner1 = (bx + px * head_width, by + py * head_width)
         corner2 = (bx - px * head_width, by - py * head_width)
-        drw.polygon(
-            [(end_x, end_y), corner1, corner2],
-            fill=color,
-            outline=(120, 80, 0, 255),
-        )
+        drw.polygon([(end_x, end_y), corner1, corner2], fill=color)
     else:
-        # Looking straight at camera — draw a small disc instead.
+        # Looking straight at the camera — no direction. Draw a small
+        # filled disc at the origin to indicate "centered gaze".
         r = 6 * scale
         drw.ellipse(
             [origin_x - r, origin_y - r, origin_x + r, origin_y + r],
             fill=color,
-            outline=(120, 80, 0, 255),
-            width=2 * scale,
         )
 
-    # Origin disc — marks where the gaze vector starts.
+    # Origin marker — small filled disc at the eye-between point.
     r = 3 * scale
     drw.ellipse(
         [origin_x - r, origin_y - r, origin_x + r, origin_y + r],
-        fill=(255, 240, 100, 255),
-        outline=(120, 80, 0, 255),
-        width=1 * scale,
+        fill=color,
     )
 
 
