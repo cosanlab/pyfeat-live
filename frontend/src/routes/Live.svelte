@@ -87,7 +87,13 @@
   // Latest live-meta from the backend (emotion top-3 + pose + bbox).
   // Rendered as HTML overlays on top of the (mirrored) canvas so
   // text reads correctly. Reset on Stop.
-  let liveMeta: LiveMeta | null = $state(null);
+  let liveMeta = $state<LiveMeta | null>(null);
+
+  // Actual source-frame dimensions for positioning HTML overlays.
+  // Prefer the X-Live-Meta backend value (most accurate); fall back
+  // to the layout constants if no frame has been received yet.
+  const srcW = $derived((liveMeta?.frame ?? [WIDTH, HEIGHT])[0]);
+  const srcH = $derived((liveMeta?.frame ?? [WIDTH, HEIGHT])[1]);
 
   // 1) On mount: fetch compute info + enumerate cameras + configure detector
   onMount(async () => {
@@ -470,7 +476,7 @@
         {#if isStreaming && liveMeta && toggles.emotions && liveMeta.emo && liveMeta.emo.length > 0}
           <div
             class="absolute px-3.5 py-2 rounded-md bg-black/70 text-white text-[15px] leading-snug font-mono pointer-events-none whitespace-nowrap"
-            style="right: {((liveMeta.bbox[0]) / WIDTH * 100).toFixed(2)}%; top: {Math.max(2, (liveMeta.bbox[1] - 92) / HEIGHT * 100).toFixed(2)}%;"
+            style="right: {((liveMeta.bbox[0]) / srcW * 100).toFixed(2)}%; top: {Math.max(2, (liveMeta.bbox[1] - 92) / srcH * 100).toFixed(2)}%;"
           >
             {#each liveMeta.emo as [name, val]}
               <div>{name.charAt(0).toUpperCase() + name.slice(1)}  {val.toFixed(2)}</div>
@@ -480,7 +486,7 @@
         {#if isStreaming && liveMeta && toggles.poses && liveMeta.pose}
           <div
             class="absolute px-3.5 py-2 rounded-md bg-black/70 text-white text-[15px] leading-snug font-mono pointer-events-none whitespace-nowrap"
-            style="left: {((liveMeta.bbox[0] - 110) / WIDTH * 100).toFixed(2)}%; top: {((liveMeta.bbox[1] + liveMeta.bbox[3] - 76) / HEIGHT * 100).toFixed(2)}%;"
+            style="left: {((liveMeta.bbox[0] - 110) / srcW * 100).toFixed(2)}%; top: {((liveMeta.bbox[1] + liveMeta.bbox[3] - 76) / srcH * 100).toFixed(2)}%;"
           >
             <div>Pitch  {liveMeta.pose.p.toFixed(1)}°</div>
             <div>Yaw    {liveMeta.pose.y.toFixed(1)}°</div>

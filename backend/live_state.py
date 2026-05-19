@@ -75,11 +75,23 @@ class LiveSession:
     detector_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def reset(self) -> None:
-        """Clear per-session detection state; called by /configure."""
+        """Clear per-session detection state; called by /configure.
+
+        Critically: must clear the cached baked frame too, otherwise
+        a /configure that swaps the detector (e.g., classic Detector
+        → MPDetector) returns the previous detector's last baked
+        frame on the next /api/live/frame upload until a new
+        detection completes. The display would show stale pixels.
+        """
         self._state = {
             "frame_index": -1, "ts": 0.0, "faces": [],
             "mp_landmarks": False, "video_width": 0, "video_height": 0,
         }
         self._cached_fex = None
+        self._cached_baked_jpeg = None
         self._next_detection_at = 0.0
         self._detection_in_flight = False
+        # Bump generation so the frontend's X-Detection-Generation
+        # check sees the next baked frame as "new" even if the count
+        # of detections-so-far happens to land on the same value.
+        self._detection_generation += 1

@@ -124,12 +124,21 @@ def _live_meta_header(fex) -> Optional[str]:
     import pandas as pd
     row = fex.iloc[0]
     meta: dict = {}
-    # Face bbox (source-frame coords, non-mirrored)
+    # Face bbox in source-frame coords (non-mirrored). Pair it with
+    # the actual source frame dimensions so the frontend can position
+    # HTML overlays correctly regardless of what resolution the
+    # camera actually delivered (browsers ignore getUserMedia's
+    # `ideal` constraint when they can't satisfy it).
     try:
         meta["bbox"] = [
             float(row["FaceRectX"]), float(row["FaceRectY"]),
             float(row["FaceRectWidth"]), float(row["FaceRectHeight"]),
         ]
+        if "FrameWidth" in row.index and "FrameHeight" in row.index:
+            fw = row["FrameWidth"]
+            fh = row["FrameHeight"]
+            if not (pd.isna(fw) or pd.isna(fh)):
+                meta["frame"] = [int(fw), int(fh)]
     except (KeyError, TypeError, ValueError):
         return None
     # Top-3 emotions

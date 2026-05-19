@@ -97,6 +97,10 @@ export interface LiveHints {
 export interface LiveMeta {
   // Source-frame (non-mirrored) face bounding box: [x, y, w, h]
   bbox: [number, number, number, number];
+  // Actual source-frame dimensions [width, height]. Cameras may
+  // ignore getUserMedia's {ideal:...} so the frontend needs the
+  // real dims to position HTML overlays correctly.
+  frame?: [number, number];
   // Top-3 [emotion_name, prob]
   emo?: [string, number][];
   // Pose in degrees
