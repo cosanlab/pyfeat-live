@@ -5,9 +5,11 @@
   import Play from '@lucide/svelte/icons/play';
   import Camera from '@lucide/svelte/icons/camera';
   import type { OverlayToggles } from '../overlay/types';
+  import type { LiveConfigure } from '../api';
 
   type Props = {
     toggles: OverlayToggles;
+    config: LiveConfigure;
     isMpDetector: boolean;
     isStreaming: boolean;
     isPaused: boolean;
@@ -21,7 +23,7 @@
     onCapture: () => void;
   };
   let {
-    toggles, isMpDetector,
+    toggles, config, isMpDetector,
     isStreaming, isPaused, isRecording,
     onToggleChange,
     onStartStream, onPauseStream, onStopStream,
@@ -31,21 +33,25 @@
   type Chip = {
     key: keyof OverlayToggles;
     label: string;
+    // Which detector field — if set to null — disables this chip.
+    // Faceboxes/Landmarks/Pose stay always-on (no field required).
+    requires?: keyof LiveConfigure;
   };
   const CHIP_DEFS: Chip[] = [
     { key: 'rects', label: 'Faceboxes' },
     { key: 'landmarks', label: 'Landmarks' },
     { key: 'poses', label: 'Pose' },
-    { key: 'gaze', label: 'Gaze' },
-    { key: 'aus', label: 'AUs' },
-    { key: 'emotions', label: 'Emotions' },
+    { key: 'gaze', label: 'Gaze', requires: 'gaze_model' },
+    { key: 'aus', label: 'AUs', requires: 'au_model' },
+    { key: 'emotions', label: 'Emotions', requires: 'emotion_model' },
   ];
 
-  // All overlays now work on both detector types — Detector via L2CS
-  // gaze model (since the py-feat v0.7-dev bump), MPDetector via iris
-  // landmarks. No chip needs to be dimmed.
-  function unavailable(_chip: Chip): boolean {
-    return false;
+  // A chip is "unavailable" when the model that feeds it is set to
+  // null in the current config — the backend won't emit that channel
+  // at all so the overlay would have nothing to draw.
+  function unavailable(chip: Chip): boolean {
+    if (!chip.requires) return false;
+    return config[chip.requires] == null;
   }
 </script>
 
@@ -55,8 +61,9 @@
     {#each CHIP_DEFS as chip}
       {@const dim = unavailable(chip)}
       <button
-        class="px-2.5 py-1 rounded-md text-[11px] font-medium border {toggles[chip.key] && !dim ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'} {dim ? 'opacity-50' : ''}"
-        title=""
+        class="px-2.5 py-1 rounded-md text-[11px] font-medium border {toggles[chip.key] && !dim ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'} {dim ? 'opacity-40 cursor-not-allowed' : ''}"
+        title={dim ? `${chip.label} requires ${String(chip.requires)} — pick a model in the sidebar to enable.` : ''}
+        disabled={dim}
         onclick={() => onToggleChange(chip.key, !toggles[chip.key])}
       >{chip.label}</button>
     {/each}

@@ -492,6 +492,7 @@
 
     <LiveControlBar
       {toggles}
+      {config}
       isMpDetector={config.detector_type === 'MPDetector'}
       onToggleChange={onToggleChange}
       {isStreaming}
