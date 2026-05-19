@@ -172,6 +172,19 @@ export const identitiesApi = {
     request<Identity[]>(`/api/sessions/${encodeURIComponent(sessionId)}/identities`),
   assignments: (sessionId: string) =>
     request<IdentityAssignment[]>(`/api/sessions/${encodeURIComponent(sessionId)}/identities/assignments`),
+  // Idempotent: creates one identity per detected face (or per ArcFace
+  // cluster if compute_identities ran upstream). No-op if identities
+  // already exist for the session. Returns the resulting list + counts.
+  autoInit: (sessionId: string) =>
+    request<{
+      identities: Identity[];
+      created: number;
+      assignments: number;
+      grouped_by?: string;
+    }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/identities/auto-init`,
+      { method: 'POST' },
+    ),
   create: (sessionId: string, body: { name: string; color: string }) =>
     request<Identity>(
       `/api/sessions/${encodeURIComponent(sessionId)}/identities`,

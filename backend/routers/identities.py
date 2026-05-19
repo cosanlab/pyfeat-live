@@ -131,6 +131,101 @@ class AssignRequest(BaseModel):
     face_idx: int
 
 
+@router.post("/api/sessions/{session_id}/identities/auto-init", status_code=201)
+def auto_init_identities(session_id: str) -> dict:
+    """Create one identity per detected face in the session, idempotently.
+
+    Scans the session's fex.csv:
+      * If a clustering ``Identity`` column is present, groups rows by
+        cluster id (the ArcFace clustering py-feat's ``compute_identities``
+        emits when identity_model was enabled).
+      * Otherwise falls back to grouping by ``face_idx`` so the Viewer
+        always has at least one identity per detected face.
+
+    Creates an identity record per group with a default name (e.g.
+    "Face 0", "Face 1") and an HSL-spread color so the Viewer's
+    timeseries lines + face badges are visually distinguishable.
+    Bulk-writes assignments so every detected face row maps to its
+    group's identity.
+
+    No-op when identities already exist — re-invoking is safe and
+    returns the current list.
+    """
+    import csv as _csv
+    d = _session_dir(session_id)
+    existing = read_identities(d)
+    if existing:
+        # Already initialized — return as-is.
+        return {
+            "identities": [_identity_to_dict(i) for i in existing],
+            "created": 0, "assignments": len(read_assignments(d)),
+        }
+
+    fex_path = d / "fex.csv"
+    if not fex_path.exists() or fex_path.stat().st_size == 0:
+        return {"identities": [], "created": 0, "assignments": 0}
+
+    # Decide which column to group rows by.
+    with open(fex_path, newline="", encoding="utf-8") as f:
+        reader = _csv.DictReader(f)
+        rows = list(reader)
+        fieldnames = reader.fieldnames or []
+    group_col = "Identity" if "Identity" in fieldnames else "face_idx"
+
+    # Group: cluster_value -> [(frame, face_idx), ...]
+    groups: dict[str, list[tuple[int, int]]] = {}
+    for row in rows:
+        raw = row.get(group_col)
+        if raw is None or raw == "":
+            continue
+        try:
+            frame = int(row["frame"])
+            face_idx = int(row["face_idx"])
+        except (KeyError, ValueError):
+            continue
+        groups.setdefault(str(raw), []).append((frame, face_idx))
+
+    if not groups:
+        return {"identities": [], "created": 0, "assignments": 0}
+
+    # Create one identity per group with auto-assigned HSL-spread color.
+    n = len(groups)
+    new_idents: list[Identity] = []
+    cluster_to_id: dict[str, str] = {}
+    label_prefix = "Person" if group_col == "Identity" else "Face"
+    for idx, (cluster_value, _) in enumerate(sorted(groups.items())):
+        hue = int((idx * 360 / max(1, n)) % 360)
+        color = f"hsl({hue}, 70%, 55%)"
+        ident = Identity(
+            identity_id=new_identity_id(),
+            name=f"{label_prefix} {idx}",
+            color=color,
+            created_at=time.time(),
+            source="auto",
+        )
+        new_idents.append(ident)
+        cluster_to_id[cluster_value] = ident.identity_id
+
+    write_identities(d, new_idents)
+
+    # Bulk-write all assignments.
+    new_assignments = []
+    for cluster_value, pairs in groups.items():
+        iid = cluster_to_id[cluster_value]
+        for frame, face_idx in pairs:
+            new_assignments.append(IdentityAssignment(
+                frame=frame, face_idx=face_idx, identity_id=iid,
+            ))
+    write_assignments(d, new_assignments)
+
+    return {
+        "identities": [_identity_to_dict(i) for i in new_idents],
+        "created": len(new_idents),
+        "assignments": len(new_assignments),
+        "grouped_by": group_col,
+    }
+
+
 @router.post("/api/sessions/{session_id}/identities/{identity_id}/assign")
 def assign_identity(
     session_id: str, identity_id: str, req: AssignRequest,

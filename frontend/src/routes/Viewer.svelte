@@ -115,7 +115,20 @@
       identitiesApi.assignments(id),
       annotationsApi.list(id),
     ]);
-    selectedIdentityIds = identities.slice(0, 1).map(i => i.identity_id);
+    // Auto-create one identity per detected face / cluster if none exist
+    // yet. Idempotent on the backend; safe to call every load.
+    if (identities.length === 0) {
+      try {
+        const init = await identitiesApi.autoInit(id);
+        identities = init.identities;
+        if (init.assignments > 0) {
+          assignments = await identitiesApi.assignments(id);
+        }
+      } catch (e) {
+        console.warn('identities auto-init failed', e);
+      }
+    }
+    selectedIdentityIds = identities.map(i => i.identity_id);
     // Fetch fex CSV and parse
     const csvUrl = sessionsApi.fexUrl(id);
     const text = await fetch(csvUrl).then(r => r.text());
