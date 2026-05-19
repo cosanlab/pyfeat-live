@@ -25,6 +25,9 @@
 
   let identities: Identity[] = $state([]);
   let assignments: IdentityAssignment[] = $state([]);
+  // Centroid-cosine matrix from the latest cluster run; null until the
+  // user triggers Re-cluster. Used by the merge-suggestions panel.
+  let similarity: number[][] | null = $state(null);
   let annotations: Annotation[] = $state([]);
   let annotationFilter: AnnotationFilter = $state('all');
   let currentAnnotationId: string | null = $state(null);
@@ -109,6 +112,7 @@
     currentSessionId = id;
     currentFrame = 0;
     isPlaying = false;
+    similarity = null;
     [currentSession, identities, assignments, annotations] = await Promise.all([
       sessionsApi.get(id),
       identitiesApi.list(id),
@@ -216,6 +220,29 @@
     selectedIdentityIds = [ident.identity_id, ...selectedIdentityIds];
   }
 
+  // Cluster endpoint replaces identities + assignments wholesale, so refetch
+  // both. The similarity matrix powers the merge-suggestions panel.
+  async function onClusterChange(resp: {
+    identities: Identity[]; similarity: number[][]; n_clusters: number;
+  }) {
+    if (!currentSessionId) return;
+    identities = resp.identities;
+    similarity = resp.similarity;
+    assignments = await identitiesApi.assignments(currentSessionId);
+    selectedIdentityIds = identities.map(i => i.identity_id);
+  }
+
+  // Merge endpoint drops the absorbed identity and retags its assignments.
+  // The returned similarity matrix is now stale (different identity count)
+  // so we clear it — user can Re-cluster to repopulate suggestions.
+  async function onMerge(resp: { identities: Identity[] }) {
+    if (!currentSessionId) return;
+    identities = resp.identities;
+    similarity = null;
+    assignments = await identitiesApi.assignments(currentSessionId);
+    selectedIdentityIds = identities.map(i => i.identity_id);
+  }
+
   // Hotkeys for annotation creation.
   function onKey(e: KeyboardEvent) {
     if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
@@ -315,6 +342,10 @@
       if (!selectedIdentityIds.includes(iid)) selectedIdentityIds = [iid, ...selectedIdentityIds];
     }}
     {currentFrameValues}
+    sessionId={currentSessionId}
+    {similarity}
+    {onClusterChange}
+    {onMerge}
   />
 </div>
 

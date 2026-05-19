@@ -1,6 +1,13 @@
 <script lang="ts">
   import Plus from '@lucide/svelte/icons/plus';
   import type { Identity, IdentityAssignment } from '../types';
+  import IdentityClusterPanel from './IdentityClusterPanel.svelte';
+
+  type ClusterResponse = {
+    identities: Identity[];
+    similarity: number[][];
+    n_clusters: number;
+  };
 
   type Props = {
     currentFrame: number;
@@ -13,11 +20,18 @@
     onSelectIdentity: (iid: string) => void;
     // The current row from fex (for selected identity at currentFrame).
     currentFrameValues: Record<string, number | null> | null;
+    // Cluster panel wiring. When sessionId is null (no session loaded),
+    // the cluster panel hides itself.
+    sessionId: string | null;
+    similarity: number[][] | null;
+    onClusterChange: (resp: ClusterResponse) => void;
+    onMerge: (resp: { identities: Identity[] }) => void;
   };
   let {
     currentFrame, totalFrames, fps, faceCount,
     identities, assignments, selectedIdentityIds,
     onSelectIdentity, currentFrameValues,
+    sessionId, similarity, onClusterChange, onMerge,
   }: Props = $props();
 
   function formatTime(frame: number): string {
@@ -82,6 +96,18 @@
       Click a face in the video to assign
     </div>
   </section>
+
+  <!-- Clustering controls -->
+  {#if sessionId}
+    <IdentityClusterPanel
+      {sessionId}
+      {identities}
+      {assignments}
+      {similarity}
+      {onClusterChange}
+      {onMerge}
+    />
+  {/if}
 
   <!-- This-frame values -->
   {#if currentFrameValues}
