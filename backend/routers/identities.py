@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from pyfeatlive_core.identities import (
     Identity,
     IdentityAssignment,
+    apply_identity_labels_to_fex,
     new_identity_id,
     read_assignments,
     read_identities,
@@ -80,6 +81,7 @@ def create_identity(session_id: str, req: CreateIdentityRequest) -> dict:
         created_at=time.time(), source=req.source,
     )
     write_identities(d, existing + [ident])
+    apply_identity_labels_to_fex(d)
     return _identity_to_dict(ident)
 
 
@@ -107,6 +109,9 @@ def patch_identity(
     if found is None:
         raise HTTPException(404, "identity not found")
     write_identities(d, out)
+    # Rename propagates to the fex.csv IdentityLabel column so
+    # downstream analysis sees the updated name.
+    apply_identity_labels_to_fex(d)
     return _identity_to_dict(found)
 
 
@@ -123,6 +128,7 @@ def delete_identity(session_id: str, identity_id: str) -> None:
     # Drop assignments that referenced this identity_id
     assignments = [a for a in read_assignments(d) if a.identity_id != identity_id]
     write_assignments(d, assignments)
+    apply_identity_labels_to_fex(d)
     return None
 
 
@@ -218,6 +224,10 @@ def auto_init_identities(session_id: str) -> dict:
             ))
     write_assignments(d, new_assignments)
 
+    # Stamp fex.csv with the new identity labels so downstream tools
+    # see them without joining tables.
+    apply_identity_labels_to_fex(d)
+
     return {
         "identities": [_identity_to_dict(i) for i in new_idents],
         "created": len(new_idents),
@@ -237,6 +247,7 @@ def assign_identity(
     upsert_assignment(
         d, frame=req.frame, face_idx=req.face_idx, identity_id=identity_id,
     )
+    apply_identity_labels_to_fex(d)
     return {
         "frame": req.frame, "face_idx": req.face_idx,
         "identity_id": identity_id,

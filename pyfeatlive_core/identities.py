@@ -154,3 +154,67 @@ def upsert_assignment(
         frame=int(frame), face_idx=int(face_idx), identity_id=identity_id,
     )
     write_assignments(session_dir, by_pair.values())
+
+
+def apply_identity_labels_to_fex(session_dir: Path) -> int:
+    """Write the current identity labels back into the session's fex.csv.
+
+    Adds (or overwrites) an ``IdentityLabel`` column that maps each
+    fex row's ``(frame, face_idx)`` to the user-friendly identity
+    name via the session's assignments. Rows without an assignment
+    get an empty label. This makes downstream analysis (loading
+    fex.csv into pandas/R) see the canonical identity labels without
+    a separate join against identities.csv + assignments.csv.
+
+    Idempotent — repeated calls just overwrite the column with the
+    latest state. Returns the number of fex rows processed (0 if
+    fex.csv doesn't exist or is empty).
+    """
+    import pandas as pd
+    fex_path = session_dir / "fex.csv"
+    if not fex_path.exists() or fex_path.stat().st_size == 0:
+        return 0
+
+    identities_by_id = {i.identity_id: i for i in read_identities(session_dir)}
+    assignments = read_assignments(session_dir)
+    if not assignments and not identities_by_id:
+        # Nothing to label; if a stale IdentityLabel column exists,
+        # clear it. Otherwise no-op.
+        df = pd.read_csv(fex_path)
+        if "IdentityLabel" not in df.columns:
+            return len(df)
+        df["IdentityLabel"] = ""
+        tmp = fex_path.with_suffix(".csv.tmp")
+        df.to_csv(tmp, index=False)
+        tmp.replace(fex_path)
+        return len(df)
+
+    # Build (frame, face_idx) -> name lookup
+    rows: list[dict] = []
+    for a in assignments:
+        ident = identities_by_id.get(a.identity_id)
+        if ident is None:
+            continue
+        rows.append({
+            "frame": int(a.frame),
+            "face_idx": int(a.face_idx),
+            "IdentityLabel": ident.name,
+        })
+
+    df = pd.read_csv(fex_path)
+    if "IdentityLabel" in df.columns:
+        df = df.drop(columns=["IdentityLabel"])
+    if rows:
+        labels_df = pd.DataFrame(rows)
+        # Ensure types match for the merge keys
+        df["frame"] = df["frame"].astype(int)
+        df["face_idx"] = df["face_idx"].astype(int)
+        df = df.merge(labels_df, on=["frame", "face_idx"], how="left")
+        df["IdentityLabel"] = df["IdentityLabel"].fillna("")
+    else:
+        df["IdentityLabel"] = ""
+
+    tmp = fex_path.with_suffix(".csv.tmp")
+    df.to_csv(tmp, index=False)
+    tmp.replace(fex_path)
+    return len(df)
