@@ -225,7 +225,7 @@ class SessionRecorder:
                 if self.config.record_video:
                     self._write_video(frame, idx)
                 if self.config.record_fex and fex is not None and len(fex):
-                    self._write_fex(fex)
+                    self._write_fex(fex, idx)
                 self.frames_written += 1
         except Exception as e:
             logger.exception("Writer thread crashed: %s", e)
@@ -291,8 +291,18 @@ class SessionRecorder:
         self._csv_writer = csv.DictWriter(self._csv_file, fieldnames=list(columns))
         self._csv_writer.writeheader()
 
-    def _write_fex(self, fex: pd.DataFrame) -> None:
+    def _write_fex(self, fex: pd.DataFrame, frame_idx: int) -> None:
         try:
+            # Stamp the canonical recorder frame index over whatever
+            # detect_pil_images put in fex.frame (always 0 in live mode
+            # because each detector call runs on a single frame with
+            # default frame_offset). Also add a face_idx column —
+            # py-feat's forward() doesn't emit one, but the Viewer +
+            # downstream analysis need (frame, face_idx) as the natural
+            # primary key for each row.
+            fex = fex.copy()
+            fex["frame"] = int(frame_idx)
+            fex["face_idx"] = list(range(len(fex)))
             self._ensure_csv(fex.columns)
             for row in fex.to_dict(orient="records"):
                 self._csv_writer.writerow(row)
