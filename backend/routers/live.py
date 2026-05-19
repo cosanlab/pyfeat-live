@@ -156,7 +156,12 @@ async def _run_detection(live, img: Image.Image) -> None:
         live._cached_baked_jpeg = encode_png(frame_arr)
         live._cached_fex = fex
         live._detection_generation += 1
-        live._next_detection_at = time.perf_counter() + dur
+        # No cooldown — _detection_in_flight alone is enough to
+        # prevent queueing. Adding a `dur` cooldown after each
+        # detection doubled the cycle time (100ms detect + 100ms
+        # idle = 5 fps instead of 10). Detections now run back-to-
+        # back as soon as the previous one releases the flag.
+        live._next_detection_at = 0.0
     except Exception:
         pass
     finally:
