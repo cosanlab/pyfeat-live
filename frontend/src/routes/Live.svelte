@@ -155,13 +155,30 @@
   }
 
   async function startStream() {
-    if (!cameraStore.selectedDeviceId) return;
-    const stream = await startCamera(cameraStore.selectedDeviceId, WIDTH, HEIGHT);
-    if (sourceVideo) {
-      sourceVideo.srcObject = stream;
-      await sourceVideo.play();
+    apiError = null;
+    if (!cameraStore.selectedDeviceId) {
+      apiError = cameraStore.devices.length === 0
+        ? 'No camera detected. Grant camera permission in browser settings and refresh.'
+        : 'No camera selected — pick one from the sidebar.';
+      return;
     }
-    await applyConfig(config);
+    try {
+      const stream = await startCamera(cameraStore.selectedDeviceId, WIDTH, HEIGHT);
+      if (sourceVideo) {
+        sourceVideo.srcObject = stream;
+        await sourceVideo.play();
+      }
+    } catch (e: any) {
+      apiError = `Camera failed to start: ${e?.message ?? e}`;
+      return;
+    }
+    try {
+      await applyConfig(config);
+    } catch (e: any) {
+      apiError = `Detector config failed: ${e?.message ?? e}`;
+      // Camera is up — surface error but let the loop run anyway so
+      // user sees the frame. Detection just won't happen.
+    }
     isPaused = false;
     isStreaming = true;
     loopAbort = new AbortController();
