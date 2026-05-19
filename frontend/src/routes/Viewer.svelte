@@ -228,12 +228,16 @@
       width={VIDEO_W}
       height={VIDEO_H}
       {currentFrame}
+      fps={FPS}
+      {isPlaying}
       faces={facesForCurrentFrame}
       {toggles}
       {mpLandmarks}
       {identities}
       {assignments}
       {onFaceClick}
+      onFrameAdvance={(f) => (currentFrame = f)}
+      onPlaybackEnd={() => (isPlaying = false)}
     />
     <ScrubBar
       {currentFrame}

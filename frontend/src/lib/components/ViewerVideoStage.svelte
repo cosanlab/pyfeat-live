@@ -8,6 +8,8 @@
     width: number;
     height: number;
     currentFrame: number;
+    fps: number;
+    isPlaying: boolean;
     faces: Face[];
     toggles: OverlayToggles;
     mpLandmarks: boolean;
@@ -15,13 +17,58 @@
     identities: Identity[];
     assignments: IdentityAssignment[];
     onFaceClick: (frame: number, faceIdx: number) => void;
+    onFrameAdvance: (frame: number) => void;   // video drives the parent
+    onPlaybackEnd: () => void;
   };
   let {
-    videoUrl, width, height, currentFrame, faces, toggles, mpLandmarks,
-    edges, identities, assignments, onFaceClick,
+    videoUrl, width, height, currentFrame, fps, isPlaying,
+    faces, toggles, mpLandmarks,
+    edges, identities, assignments,
+    onFaceClick, onFrameAdvance, onPlaybackEnd,
   }: Props = $props();
 
   let video: HTMLVideoElement | null = $state(null);
+
+  // True while we're programmatically seeking the video to match a
+  // currentFrame change from the parent. Suppresses the resulting
+  // timeupdate from echoing back as an onFrameAdvance call (which
+  // would cause a feedback loop).
+  let seekingFromProp = false;
+
+  // Sync prop `currentFrame` → video.currentTime. Triggered when the
+  // user scrubs, clicks an annotation, presses arrow keys, etc.
+  $effect(() => {
+    if (!video) return;
+    const targetTime = currentFrame / fps;
+    // Only seek when there's a meaningful difference — avoids
+    // self-feedback when the timeupdate handler below advances
+    // currentFrame during normal playback.
+    if (Math.abs(video.currentTime - targetTime) > 0.5 / fps) {
+      seekingFromProp = true;
+      video.currentTime = targetTime;
+    }
+  });
+
+  // Sync prop `isPlaying` → video.play() / .pause().
+  $effect(() => {
+    if (!video) return;
+    if (isPlaying) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  });
+
+  function onTimeUpdate() {
+    if (!video) return;
+    if (seekingFromProp) { seekingFromProp = false; return; }
+    const f = Math.round(video.currentTime * fps);
+    if (f !== currentFrame) onFrameAdvance(f);
+  }
+
+  function onEnded() {
+    onPlaybackEnd();
+  }
 
   // Resolve each face's identity badge (color + name) from assignments + identities.
   const identityByFace = $derived.by(() => {
@@ -68,6 +115,8 @@
       class="max-w-full max-h-full"
       playsinline
       muted
+      ontimeupdate={onTimeUpdate}
+      onended={onEnded}
     ></video>
   {:else}
     <div class="text-zinc-600 text-xs font-mono">no video</div>
