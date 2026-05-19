@@ -337,14 +337,20 @@ def _draw_gaze(
     origin_x, origin_y = _gaze_origin(row, mp_landmarks)
     w = float(row["FaceRectWidth"])
     h = float(row["FaceRectHeight"])
-    # v0.7-dev emits gaze_pitch / gaze_yaw in RADIANS already (both
-    # L2CS for classic Detector and the MP iris estimator). Earlier
-    # py-feat versions emitted degrees — keep this in radians from
-    # now on. Image-coord direction: positive pitch (looking up) →
-    # negative py.
+    # py-feat v0.7-dev emits gaze_pitch / gaze_yaw in RADIANS in the
+    # Gaze360 convention (used by L2CS and the MP iris estimator):
+    #   positive pitch → subject looking UP
+    #   positive yaw   → subject looking to THEIR LEFT (= image RIGHT
+    #                    in a non-mirrored camera view = image LEFT in
+    #                    a mirrored selfie-style view).
+    # The webcam stream is non-mirrored when drawn straight to canvas,
+    # so a subject looking to their RIGHT (positive image-x in image-
+    # coordinate space) corresponds to NEGATIVE yaw. The negation
+    # below maps L2CS yaw → image-x correctly. Pitch maps trivially
+    # (positive pitch up = negative image-y).
     gp_rad = float(gp)
     gy_rad = float(gy)
-    dir_x = float(np.sin(gy_rad))
+    dir_x = -float(np.sin(gy_rad))
     dir_y = -float(np.sin(gp_rad))
     length = min(w, h) * 0.9
     end_x = origin_x + length * dir_x

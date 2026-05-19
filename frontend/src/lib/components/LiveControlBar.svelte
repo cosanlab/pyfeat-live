@@ -31,19 +31,21 @@
   type Chip = {
     key: keyof OverlayToggles;
     label: string;
-    requires?: 'mp';   // marker: overlay only meaningful with MPDetector
   };
   const CHIP_DEFS: Chip[] = [
     { key: 'rects', label: 'Faceboxes' },
     { key: 'landmarks', label: 'Landmarks' },
     { key: 'poses', label: 'Pose' },
-    { key: 'gaze', label: 'Gaze', requires: 'mp' },
+    { key: 'gaze', label: 'Gaze' },
     { key: 'aus', label: 'AUs' },
     { key: 'emotions', label: 'Emotions' },
   ];
 
-  function unavailable(chip: Chip): boolean {
-    return chip.requires === 'mp' && !isMpDetector;
+  // All overlays now work on both detector types — Detector via L2CS
+  // gaze model (since the py-feat v0.7-dev bump), MPDetector via iris
+  // landmarks. No chip needs to be dimmed.
+  function unavailable(_chip: Chip): boolean {
+    return false;
   }
 </script>
 
@@ -54,9 +56,9 @@
       {@const dim = unavailable(chip)}
       <button
         class="px-2.5 py-1 rounded-md text-[11px] font-medium border {toggles[chip.key] && !dim ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'} {dim ? 'opacity-50' : ''}"
-        title={dim ? 'Gaze requires MPDetector (no separate gaze model in py-feat — it comes from the MP face mesh).' : ''}
+        title=""
         onclick={() => onToggleChange(chip.key, !toggles[chip.key])}
-      >{chip.label}{dim ? ' · MP only' : ''}</button>
+      >{chip.label}</button>
     {/each}
   </div>
 
