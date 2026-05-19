@@ -168,6 +168,10 @@ export const sessionsApi = {
   get: (id: string) => request<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`),
   fexUrl: (id: string) => `/api/sessions/${encodeURIComponent(id)}/fex`,
   videoUrl: (id: string) => `/api/sessions/${encodeURIComponent(id)}/video`,
+  // 96x96 PNG face crop pulled from video.mp4 at (frame, face_idx).
+  // Returns a URL — use as <img src=...> with loading="lazy".
+  faceThumbnailUrl: (id: string, frame: number, faceIdx: number) =>
+    `/api/sessions/${encodeURIComponent(id)}/face-thumbnail/${frame}/${faceIdx}`,
 };
 
 // ---------------- identities ----------------
@@ -210,6 +214,26 @@ export const identitiesApi = {
     request<IdentityAssignment>(
       `/api/sessions/${encodeURIComponent(sessionId)}/identities/${encodeURIComponent(iid)}/assign`,
       { method: 'POST', body: JSON.stringify(body) },
+    ),
+  // Re-cluster all faces using ArcFace embeddings at the given similarity
+  // threshold. Replaces identities + assignments wholesale; caller must
+  // refetch both. `similarity` is a centroid-cosine matrix sized n×n.
+  cluster: (sessionId: string, threshold: number) =>
+    request<{
+      identities: Identity[];
+      similarity: number[][];
+      n_clusters: number;
+    }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/identities/cluster`,
+      { method: 'POST', body: JSON.stringify({ threshold }) },
+    ),
+  // Merge two identities: keep ``keepId``'s metadata, retag every
+  // assignment that pointed at ``absorbId`` to ``keepId``, drop the
+  // absorbed identity. Returns the updated identities list.
+  merge: (sessionId: string, keepId: string, absorbId: string) =>
+    request<{ identities: Identity[] }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/identities/${encodeURIComponent(keepId)}/merge/${encodeURIComponent(absorbId)}`,
+      { method: 'POST' },
     ),
 };
 
