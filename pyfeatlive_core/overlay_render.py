@@ -341,20 +341,21 @@ def _draw_gaze(
     origin_x, origin_y = _gaze_origin(row, mp_landmarks)
     w = float(row["FaceRectWidth"])
     h = float(row["FaceRectHeight"])
-    # py-feat v0.7-dev emits gaze_pitch / gaze_yaw in RADIANS in the
-    # Gaze360 convention (L2CS for classic Detector, MP iris for
-    # MPDetector):
-    #   positive pitch → subject looking UP   → image-Y negative
-    #   positive yaw   → subject looking to THEIR LEFT, which in a
-    #                    non-mirrored camera view is image-RIGHT.
-    # We draw the arrow in the camera frame's image coordinates.
-    # The Live page displayCanvas applies CSS scaleX(-1) so the user
-    # sees the conventional selfie-style mirror — the arrow visually
-    # flips along with the face, preserving the intuitive "I look
-    # left, the arrow on me goes left" relationship.
+    # gaze_pitch / gaze_yaw are in RADIANS. Pitch maps cleanly:
+    # positive = looking up → image-Y negative.
+    #
+    # Yaw is empirically inverted from what py-feat's `estimate_gaze`
+    # docstring claims ("positive yaw → subject's left, i.e. camera's
+    # right"). Testing with the L2CS gaze model: when the subject
+    # looks to their right (camera's left, image-LEFT in non-mirrored
+    # capture), gaze_yaw is positive. So the spec'd `+sin(yaw)` would
+    # paint the arrow on the wrong side. The negation below is the
+    # empirically-correct mapping for the model versions we ship.
+    # (Probably worth filing as a py-feat docstring fix or model-
+    # output-sign bug upstream — see followup task.)
     gp_rad = float(gp)
     gy_rad = float(gy)
-    dir_x = float(np.sin(gy_rad))
+    dir_x = -float(np.sin(gy_rad))
     dir_y = -float(np.sin(gp_rad))
     length = min(w, h) * 0.9
     end_x = origin_x + length * dir_x
