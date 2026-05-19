@@ -12,7 +12,6 @@
 </script>
 
 <header class="flex items-center gap-3 px-4 py-2 border-b border-zinc-900 bg-zinc-950">
-  <span class="font-semibold text-zinc-50 text-xs">Py-feat Live</span>
   <nav class="ml-auto flex gap-1 items-center">
     {#each tabs as tab (tab.id)}
       <button

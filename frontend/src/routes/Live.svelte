@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
-  import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open';
+  import ChevronLeft from '@lucide/svelte/icons/chevron-left';
+  import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import { liveApi, systemApi } from '../lib/api';
   import type { LiveConfigure, ComputeInfo } from '../lib/api';
   import type { OverlayToggles } from '../lib/overlay/types';
@@ -86,15 +86,23 @@
 
   // 1) On mount: fetch compute info + enumerate cameras + configure detector
   onMount(async () => {
+    // Camera enumeration is purely browser-side; run it FIRST so a
+    // backend hiccup doesn't leave the sidebar with an empty camera
+    // picker. Each backend call is then guarded individually.
+    await refreshDevices();
     try {
       compute = await systemApi.compute();
       if (compute.mps.available) config.device = 'mps';
       else if (compute.cuda.available) config.device = 'cuda';
       else config.device = 'cpu';
-      await refreshDevices();
-      await applyConfig(config);
     } catch (e: any) {
       apiError = `Backend unreachable: ${e?.message ?? e}`;
+      return; // camera still works for picker UX
+    }
+    try {
+      await applyConfig(config);
+    } catch (e: any) {
+      apiError = `Detector config failed: ${e?.message ?? e}`;
     }
   });
 
@@ -356,19 +364,19 @@
         onDetectionResChange={onDetectionResChange}
       />
       <button
-        class="absolute top-3 right-2 w-7 h-7 rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 inline-flex items-center justify-center transition-colors z-10"
+        class="absolute top-4 -right-3 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-50 inline-flex items-center justify-center z-10"
         onclick={() => (sidebarCollapsed = true)}
         aria-label="Collapse sidebar"
         title="Collapse sidebar"
-      ><PanelLeftClose size={16} /></button>
+      ><ChevronLeft size={12} /></button>
     </div>
   {:else}
     <button
-      class="self-start mt-3 ml-2 w-7 h-7 rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 inline-flex items-center justify-center transition-colors"
+      class="self-start mt-4 ml-2 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-50 inline-flex items-center justify-center"
       onclick={() => (sidebarCollapsed = false)}
       aria-label="Expand sidebar"
       title="Expand sidebar"
-    ><PanelLeftOpen size={16} /></button>
+    ><ChevronRight size={12} /></button>
   {/if}
 
   <div class="flex-1 flex flex-col">
