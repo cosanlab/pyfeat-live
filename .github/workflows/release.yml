@@ -159,12 +159,18 @@ jobs:
           # its own keychain without an ambiguous duplicate identity.
           kc="$RUNNER_TEMP/presign.keychain-db"
           kcpass="$(openssl rand -base64 16)"
+          # Remember the original search list so we can restore it before
+          # tauri-action sets up its own keychain.
+          orig_list="$(security list-keychains -d user | sed 's/[" ]//g')"
           security create-keychain -p "$kcpass" "$kc"
           security set-keychain-settings -lut 21600 "$kc"
           security unlock-keychain -p "$kcpass" "$kc"
           echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/presign-cert.p12"
           security import "$RUNNER_TEMP/presign-cert.p12" -k "$kc" \
-            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            -P "$APPLE_CERTIFICATE_PASSWORD" -A -T /usr/bin/codesign
+          # The keychain must be in the search list or set-key-partition-list
+          # reports "item could not be found".
+          security list-keychains -d user -s "$kc" $orig_list
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: -s -k "$kcpass" "$kc" >/dev/null
           codesign --force --timestamp \
@@ -175,6 +181,8 @@ jobs:
             "$uv_bin"
           codesign --verify --strict --verbose=2 "$uv_bin"
           echo "uv pre-signed: $uv_bin"
+          # Restore the original search list and remove the throwaway keychain.
+          security list-keychains -d user -s $orig_list
           security delete-keychain "$kc"
           rm -f "$RUNNER_TEMP/presign-cert.p12"
 
