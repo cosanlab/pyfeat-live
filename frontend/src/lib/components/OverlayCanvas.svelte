@@ -50,7 +50,7 @@
         const useEdges = lmStyle === 'points' ? undefined : edges;
         O.drawLandmarks(ctx, face.lm, lmStyle, useEdges, style?.landmarks);
       }
-      if (toggles.poses) O.drawPose(ctx, face.rect, face.pose, style?.pose);
+      if (toggles.poses) O.drawPose(ctx, face.rect, face.pose, { ...style?.pose, yawOffset: mpLandmarks ? 0 : Math.PI });
       if (toggles.gaze) O.drawGaze(ctx, face, mpLandmarks, width, height, style?.gaze);
       if (toggles.aus) {
         O.drawAuHeatmap(ctx, face, auTable ?? null, mpLandmarks, mpToDlib68 ?? null,

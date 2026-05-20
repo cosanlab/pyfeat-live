@@ -141,14 +141,20 @@ export function drawGaze(
 export function drawPose(
   ctx: CanvasRenderingContext2D,
   rect: Face['rect'] | undefined, pose: Face['pose'] | undefined,
-  opts?: { sizeScale?: number },
+  opts?: { sizeScale?: number; yawOffset?: number },
 ): void {
-  // Three orthogonal axes drawn from the face center, oriented by the
-  // full 3D Euler rotation (pitch / roll / yaw combined). Each axis's
-  // 2D screen position is a projection of its 3D direction through the
-  // rotation matrix. Ported verbatim from v1 overlay_renderer.js
-  // drawPose — the per-axis-only math we shipped initially was wrong
-  // (only one Euler angle per axis).
+  // Three orthogonal head axes drawn from the face center. We reconstruct
+  // the rotation matrix py-feat decomposed and project its unit columns.
+  //
+  // py-feat's rotation_matrix_to_euler_angles defines the angles by their
+  // EXTRACTION formulas, which (despite the column names) are: Pitch =
+  // rotation about X, Roll = about Y, Yaw = about Z, composed as
+  //   R = Rz(Yaw) · Ry(Roll) · Rx(Pitch)
+  // in the canonical frame (X right, Y up, Z toward camera). Feeding the
+  // columns straight into that product rebuilds the exact R, so the axes
+  // track the head regardless of the (mislabeled) column names. The old
+  // hand-rolled projection assigned roll/yaw to the wrong axes — it moved
+  // but didn't follow the head.
   if (!rect || !pose) return;
   const [x, y, w, h] = rect;
   const [pitch, roll, yaw] = pose;
@@ -159,23 +165,23 @@ export function drawPose(
   const cx = x + w / 2;
   const cy = y + h / 2;
   const size = Math.min(w, h) * (opts?.sizeScale ?? 0.5);
-  // Pitch/Roll/Yaw are in RADIANS (py-feat). Use them directly — the
-  // previous *π/180 treated them as degrees, shrinking every rotation by
-  // ~57x so the axes barely moved as the head turned.
-  const p = pitch;
-  const r = roll;
-  const yw = -yaw;
 
-  const x1 = cx + size * (Math.cos(yw) * Math.cos(r));
-  const y1 = cy - size * (
-    Math.cos(p) * Math.sin(r) + Math.cos(r) * Math.sin(p) * Math.sin(yw)
-  );
-  const x2 = cx + size * (-Math.cos(yw) * Math.sin(r));
-  const y2 = cy - size * (
-    Math.cos(p) * Math.cos(r) - Math.sin(p) * Math.sin(yw) * Math.sin(r)
-  );
-  const x3 = cx + size * Math.sin(yw);
-  const y3 = cy - size * (-Math.cos(yw) * Math.sin(p));
+  // Classic Detector (img2pose) reports a forward-facing head as yaw ≈ ±π,
+  // unlike the MPDetector convention this projection assumes — callers pass
+  // yawOffset (π for classic, 0 for MP) to bring "facing camera" back to 0.
+  const yawAdj = yaw + (opts?.yawOffset ?? 0);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  const cyw = Math.cos(yawAdj), syw = Math.sin(yawAdj);
+  // Columns of R = Rz(yaw)·Ry(roll)·Rx(pitch): the rotated X/Y/Z unit axes.
+  const ax: [number, number] = [cyw * cr, syw * cr];                       // X (red)
+  const ay: [number, number] = [cyw * sr * sp - syw * cp, syw * sr * sp + cyw * cp]; // Y (green)
+  const az: [number, number] = [cyw * sr * cp + syw * sp, syw * sr * cp - cyw * sp]; // Z (blue)
+  // Project onto the image plane (drop Z); image-Y points down, so negate.
+  const proj = (a: [number, number]): [number, number] => [cx + size * a[0], cy - size * a[1]];
+  const [x1, y1] = proj(ax);
+  const [x2, y2] = proj(ay);
+  const [x3, y3] = proj(az);
 
   ctx.lineWidth = 3;
   ctx.lineCap = 'round';
