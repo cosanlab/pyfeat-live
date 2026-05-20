@@ -128,7 +128,10 @@ echo
 push() {
     local name="$1" value="$2"
     printf '    %-40s ' "$name"
-    if echo -n "$value" | gh secret set "$name" --repo "$REPO" --body - >/dev/null; then
+    # NOTE: gh reads the secret from stdin only when --body is OMITTED.
+    # `--body -` sets the LITERAL string "-" (this bug shipped every secret
+    # as "-", which broke codesigning: "Invalid symbol 45, offset 0").
+    if printf '%s' "$value" | gh secret set "$name" --repo "$REPO" >/dev/null; then
         echo "ok"
     else
         echo "FAIL" >&2

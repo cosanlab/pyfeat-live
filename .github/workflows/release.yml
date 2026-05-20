@@ -143,19 +143,40 @@ jobs:
         if: startsWith(matrix.platform, 'macos') && env.APPLE_SIGNING_IDENTITY != ''
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
+          set -euo pipefail
           uv_bin="vendor/uv/uv-${{ matrix.target }}"
           if [ ! -f "$uv_bin" ]; then
             echo "uv binary not found at $uv_bin" >&2
             exit 1
           fi
+          # tauri-action imports the signing cert into its own keychain, but
+          # that step runs AFTER this one — so the Developer ID identity is
+          # not yet available here. Import the cert into a throwaway keychain
+          # so codesign can find it, then delete it so tauri-action manages
+          # its own keychain without an ambiguous duplicate identity.
+          kc="$RUNNER_TEMP/presign.keychain-db"
+          kcpass="$(openssl rand -base64 16)"
+          security create-keychain -p "$kcpass" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kcpass" "$kc"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/presign-cert.p12"
+          security import "$RUNNER_TEMP/presign-cert.p12" -k "$kc" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: -s -k "$kcpass" "$kc" >/dev/null
           codesign --force --timestamp \
             --sign "$APPLE_SIGNING_IDENTITY" \
+            --keychain "$kc" \
             --options=runtime \
             --entitlements tauri/src-tauri/entitlements.plist \
             "$uv_bin"
           codesign --verify --strict --verbose=2 "$uv_bin"
           echo "uv pre-signed: $uv_bin"
+          security delete-keychain "$kc"
+          rm -f "$RUNNER_TEMP/presign-cert.p12"
 
       # Decode the App Store Connect .p8 private key from a base64 secret
       # into a file on the runner. tauri-action expects APPLE_API_KEY_PATH
