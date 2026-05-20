@@ -154,30 +154,43 @@
     return Math.round(ratio * totalFrames);
   }
 
-  // Shift+drag creates an exclude range; plain click seeks.
+  // Shift+drag creates an exclude range; plain drag scrubs the playhead.
   let dragStartFrame: number | null = $state(null);
   let dragCurrentFrame: number | null = $state(null);
+  // True while a plain (non-shift) drag is scrubbing — distinguishes it
+  // from the shift+drag annotation gesture so pointermove knows which to do.
+  let seekDragging = $state(false);
 
   function handlePointerDown(e: PointerEvent) {
     const svg = e.currentTarget as SVGSVGElement;
+    svg.setPointerCapture(e.pointerId);
     if (e.shiftKey) {
-      svg.setPointerCapture(e.pointerId);
       const f = frameAt(svg, e.clientX);
       dragStartFrame = f;
       dragCurrentFrame = f;
     } else {
+      seekDragging = true;
       onSeek(frameAt(svg, e.clientX));
     }
   }
 
   function handlePointerMove(e: PointerEvent) {
+    const svg = e.currentTarget as SVGSVGElement;
+    if (seekDragging) {
+      onSeek(frameAt(svg, e.clientX));
+      return;
+    }
     if (dragStartFrame === null) return;
-    dragCurrentFrame = frameAt(e.currentTarget as SVGSVGElement, e.clientX);
+    dragCurrentFrame = frameAt(svg, e.clientX);
   }
 
   function handlePointerUp(e: PointerEvent) {
     const svg = e.currentTarget as SVGSVGElement;
     svg.releasePointerCapture?.(e.pointerId);
+    if (seekDragging) {
+      seekDragging = false;
+      return;
+    }
     if (dragStartFrame !== null && dragCurrentFrame !== null) {
       const a = Math.min(dragStartFrame, dragCurrentFrame);
       const b = Math.max(dragStartFrame, dragCurrentFrame);
