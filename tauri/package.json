@@ -1,7 +1,7 @@
 {
   "name": "pyfeatlive-tauri",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.8.0",
   "description": "Tauri shell that wraps the pyfeatlive Streamlit app as a native desktop application",
   "scripts": {
     "tauri": "tauri",

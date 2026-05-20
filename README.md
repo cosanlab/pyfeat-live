@@ -1,61 +1,118 @@
 # Py-feat live
 
-This is a standalone demo of using [py-feat](https://py-feat.org/) to analyze webcam frames in real time and display the results.
+Real-time facial expression analysis. Webcam → py-feat detection → live overlays. Plus a Viewer for recorded sessions and an Analyze page for batch processing files.
 
 ![](./demo.gif)
 
-## Installation
+## Install + run (desktop app)
 
-1. Install: `pip install git+https://github.com/cosanlab/pyfeat-live.git`   
-2. Run this command in the terminal to launch the GUI: `pyfeat-live`  
+The polished path is the Tauri-bundled desktop app:
 
-## Usage
-1. Choose your camera by clicking on `SELECT DEVICE`.
-2. Choose whether you would like to record the session by clicking `Record Session`. This will internally save the detections and frames as a video in memory. After you stop the session, there will be a button to download the Fex CSV file and also the corresponding video recording as an mp4.
-3. Choose which detector models you would like to use with the `Swap detectors` buttons. This can be changed after the session is started.
-4. Select which detectors you would like to run with the checkboxes. More detectors adds processing time and will slow the framerate. This can be changed on the fly.
-5. Start the session by clicking the red `START` button.
+1. Download the latest `.dmg` / `.exe` from [releases](https://github.com/cosanlab/pyfeat-live/releases).
+2. Install and launch. First run downloads model weights (a few minutes; cached after).
 
-## App Structure
+## Run from source (dev)
 
-In `setup.py` we define an `entry_point` that allows us to a define a console command "`pyfeat-live`" that the user can run in their terminal after they pip install the package. This mechanism gives us functionality similar to other CLI programs e.g. `fsleyes`. In other words, there is no need for the user to open a python interpreter or jupyter notebook and import anything. Once installed, the package is effectively a CLI app. 
+```bash
+git clone https://github.com/cosanlab/pyfeat-live.git
+cd pyfeat-live
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+```
 
-The `pyfeat-live` command essentially runs `python entry_point.py` which executes the `main()` function within `entry_point.py`. This function wraps `streamlit run app.py` and allows us to immediately open a browser tab and start the streamlit app when the user types `pyfeat-live` at their terminal. 
+Two terminals:
 
-## Pages and routing
+```bash
+# Terminal 1 — backend (FastAPI on :8765)
+.venv/bin/python -m uvicorn backend.main:app --reload --port 8765
 
-`app.py` is setup as a [multi-page streamlit app](https://docs.streamlit.io/develop/concepts/multipage-apps). This allows us some "templating" like functionality, whereby we can share UI across pages by putting it within this file (e.g. footer). We also define a page-router within this file that streamlit will setup for us, providing a more consistent user-experience. 
+# Terminal 2 — frontend (Svelte 5 + Vite on :5173)
+cd frontend && pnpm install && pnpm dev
+```
 
-Currently we have the following routes/pages:
-- "live page" -> `detect.py` that also currently acts as the homepage
-- "analyze page" -> `analyze.py` for a user to upload files to analyze and work with `py-feat` interactively
-- "view page" -> `view.py` for the user to interactively explore detections a la `fslview`/`fsleyes`
+Open <http://localhost:5173>. Grant camera permission when prompted.
 
-## Client-side "state"
+For a single-process dev launch (no HMR, but no Vite either):
 
-Python variables and values can be shared across pages and used to reactively update the UI. To do so we create custom keys in Streamlit's Session State dictionary in the following naming convention: `st.session_state.PAGE__KEY`. These can be as specific or general as needed, e.g. `st.session_state.analyze__ui_state` or `st.session_state.view__show_save_button`. These values can be used to keep data or objects in memory and are only wiped on page refreshes or `pyfeat-live` restarts.
+```bash
+cd frontend && pnpm build && cd ..
+pyfeat-live   # boots FastAPI + opens browser at http://127.0.0.1:8765
+```
 
-## Data download
+### Tests
 
-Until upstream `py-feat` <-> `huggingface` data storage and download integration is complete, each fresh environment install of `pyfeat-live` requires a fresh install of model weights. This will take a few minutes on first launch depending on internet speed.
-You can avoid this by install `pyfeat-live` into an existing python environment that has a working install of `py-feat`. 
+```bash
+.venv/bin/python -m pytest tests/backend tests/core   # ~92 passing
+cd frontend && pnpm check && pnpm build                # type-check + build
+```
 
-### Development Setup
+## Pages
 
-To run the barebones streamlit app for development, clone this repository then:
+### Live
 
-1. Create a new `conda` or `venv`
-2. `pip install -r requirements.txt`
-3. `pip install -e .`
-3. `pyfeat-live`
-4. Go to ` http://localhost:8501` in your browser
+Real-time webcam → py-feat detection → overlay-on-face rendering.
 
-If you run into installation issues with py-feat see [this issue](https://github.com/cosanlab/py-feat/issues/186)
+- **Detector / Models / Compute / Camera** in the sidebar (collapsible).
+- **Detection size** preset picker — trades resolution for speed.
+- **Landmark style** — points / lines / mesh.
+- **Overlay chips** — Faceboxes / Landmarks / Pose / Gaze (MP only) / AUs / Emotions.
+- **Stream controls** — Start / Pause / Stop the camera; recording is a separate Record button.
+- Records to `~/Documents/pyfeat-live/sessions/<timestamp>/` as `video.mp4 + fex.csv + metadata.json`.
+
+Live uses an **image-stream bake-and-return** pipeline. The frontend
+posts each camera frame to the backend as JPEG. The backend bakes
+detection overlays onto the frame using the most recently cached
+detection result, then returns the baked frame as JPEG bytes. The
+frontend paints the response to a canvas. Detection runs decoupled
+in a background executor (~10 Hz) so the display tracks the round-
+trip rate (15-25fps depending on machine), not the detection rate.
+
+Overlays are pixels in the returned image — never re-encoded
+through a video codec — so they stay sharp. Recording mode is
+independent: `clean` records the source frames (Viewer can re-apply
+overlays from `fex.csv` later), `overlay` records the baked frames
+(overlays burned in for a share-out clip).
+
+### Viewer
+
+Loads a recorded session, plays the video, draws overlays from the saved Fex CSV, lets you scrub, annotate, and assign identities to faces.
+
+- Left sidebar: Sessions tab (list of recordings) + Annotations tab (event / exclude / custom markers).
+- Center: video stage + scrub bar with annotation lane + unified time-series plot.
+- Right: per-frame Frame / Identities / numeric AU + emotion bars.
+- Click any face in the video → IdentityAssignDialog (create new or assign existing).
+- Press `E` for event marker, `C` for custom, shift+drag on scrub for exclude range.
+- Plot supports multi-select on identities AND series (chips). Click plot x-axis to seek.
+
+### Analyze
+
+Batch-process video / image files. Drop into the queue; each file gets a per-file pipeline snapshot from the active preset (or override via the gear icon).
+
+- Built-in presets: `MP · standard`, `MP · fast (cpu)`, `Classic · img2pose`, `Classic · retinaface`. Save custom presets via the preset modal.
+- Run queue with chosen compute device + batch size.
+- WebSocket pushes per-item progress.
+- Completed items become sessions you can open in the Viewer.
+
+## Architecture
+
+| Layer | Lives in |
+|---|---|
+| Desktop shell (Rust, webview, code-signing, installer) | `tauri/` |
+| Static SPA assets bundled into the Tauri binary | `tauri/dist/` (output of `frontend/`) |
+| Frontend (Svelte 5 + Vite + Tailwind + @lucide/svelte) | `frontend/` |
+| HTTP + WebSocket API | `backend/` (FastAPI) |
+| Framework-neutral pipeline (detector, recorder, sessions, identities, annotations, presets) | `pyfeatlive_core/` |
+| `pyfeat-live` CLI entry | `pyfeatlive/entry_point.py` |
+| Tauri-sidecar Python launcher | `sidecar/sidecar.py` |
+
+The Tauri shell spawns `sidecar.py` (which spawns uvicorn) as a child process, then opens the webview at `http://127.0.0.1:8765/`. The backend serves both `/api/*` and the bundled SPA, so the webview never crosses an origin.
+
+See `docs/superpowers/specs/2026-05-17-pyfeatlive-v2-svelte-rewrite-design.md` for the full design rationale.
 
 ## Profiling
 
-We also include a profiling script you can run with `python perf_testing.py`. This will generate a profiling file and save it as `basic.prof`
+`PYFEAT_LIVE_PROFILE=1 .venv/bin/python -m uvicorn backend.main:app --port 8765` logs per-frame timing breakdown of the detection pipeline (`recv / decode / lock_wait / detect / serialize`). Toggle the matching frontend instrumentation in the browser console with `window.__pyfeatProfile = true`.
 
-Then you can run `snakeviz basic.prof` to visualize what py-feat calls are taking taking the longest processing time on your system:
-
-![](./snakeviz.png)
+If you run into installation issues with py-feat see [this issue](https://github.com/cosanlab/py-feat/issues/186).

@@ -2636,7 +2636,7 @@ dependencies = [
 
 [[package]]
 name = "pyfeatlive-tauri"
-version = "1.0.0"
+version = "0.8.0"
 dependencies = [
  "block2",
  "env_logger",

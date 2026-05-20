@@ -93,3 +93,4 @@ vendor/uv/uv-*
 
 # --- Tauri-generated frontend cache ---
 tauri/dist/index.html.bak
+.superpowers/
