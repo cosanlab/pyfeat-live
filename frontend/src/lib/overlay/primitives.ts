@@ -11,14 +11,17 @@ const LIVE_GREEN = '#22c55e';
 export function drawRect(
   ctx: CanvasRenderingContext2D,
   rect: Face['rect'] | undefined,
-  style?: { color?: string; lineWidth?: number },
+  style?: { color?: string; lineWidth?: number; opacity?: number },
 ): void {
   if (!rect) return;
   const [x, y, w, h] = rect;
   if (x == null || y == null || w == null || h == null) return;
+  ctx.save();
+  ctx.globalAlpha = style?.opacity ?? 1;
   ctx.strokeStyle = style?.color ?? LIVE_GREEN;
   ctx.lineWidth = style?.lineWidth ?? 2;
   ctx.strokeRect(x, y, w, h);
+  ctx.restore();
 }
 
 export function drawLandmarks(
@@ -98,7 +101,7 @@ export function gazeOrigin(
 export function drawGaze(
   ctx: CanvasRenderingContext2D,
   face: Face, mpLandmarks: boolean, canvasW: number, canvasH: number,
-  opts?: { color?: string; lineWidth?: number },
+  opts?: { color?: string; lineWidth?: number; opacity?: number },
 ): void {
   if (!face.gaze) return;
   const [pitch, yaw] = face.gaze;
@@ -108,10 +111,19 @@ export function drawGaze(
   const [ox, oy] = origin;
   const color = opts?.color ?? LIVE_GREEN;
   const lw = opts?.lineWidth ?? 2;
-  // Map degrees to pixel delta. 30deg ~ 100px at default canvas size.
-  const scale = Math.max(canvasW, canvasH) / 18;
-  const dx = Math.sin((yaw * Math.PI) / 180) * scale;
-  const dy = -Math.sin((pitch * Math.PI) / 180) * scale;
+  ctx.save();
+  ctx.globalAlpha = opts?.opacity ?? 1;
+  // gaze_pitch / gaze_yaw are in RADIANS (py-feat / L2CS). Mirror the
+  // baked-overlay mapping in overlay_render.py:_draw_gaze — both axes use
+  // -sin(); yaw is empirically inverted from py-feat's docstring. Arrow
+  // length scales to the face so it reads at any face size.
+  let length = Math.max(canvasW, canvasH) / 12;
+  if (face.rect) {
+    const [, , w, h] = face.rect;
+    if (w != null && h != null) length = Math.min(w, h) * 0.9;
+  }
+  const dx = -Math.sin(yaw) * length;
+  const dy = -Math.sin(pitch) * length;
   ctx.strokeStyle = color;
   ctx.lineWidth = lw;
   ctx.beginPath();
@@ -123,6 +135,7 @@ export function drawGaze(
   ctx.beginPath();
   ctx.arc(ox, oy, Math.max(2, lw + 1), 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
 }
 
 export function drawPose(
@@ -146,9 +159,12 @@ export function drawPose(
   const cx = x + w / 2;
   const cy = y + h / 2;
   const size = Math.min(w, h) * (opts?.sizeScale ?? 0.5);
-  const p = (pitch * Math.PI) / 180;
-  const r = (roll * Math.PI) / 180;
-  const yw = (-yaw * Math.PI) / 180;
+  // Pitch/Roll/Yaw are in RADIANS (py-feat). Use them directly — the
+  // previous *π/180 treated them as degrees, shrinking every rotation by
+  // ~57x so the axes barely moved as the head turned.
+  const p = pitch;
+  const r = roll;
+  const yw = -yaw;
 
   const x1 = cx + size * (Math.cos(yw) * Math.cos(r));
   const y1 = cy - size * (
@@ -174,8 +190,9 @@ export function drawPose(
   // Numeric readout panel to the right of the face. Font + panel
   // scale to the face height so the text doesn't dwarf small faces or
   // get lost on large ones.
+  const deg = (v: number) => v * 180 / Math.PI;
   const sign = (v: number) => (v >= 0 ? `+${v.toFixed(1)}` : v.toFixed(1));
-  const lines = [`Pitch ${sign(pitch)}°`, `Yaw ${sign(yaw)}°`, `Roll ${sign(roll)}°`];
+  const lines = [`Pitch ${sign(deg(pitch))}°`, `Yaw ${sign(deg(yaw))}°`, `Roll ${sign(deg(roll))}°`];
   const fontPx = Math.max(9, Math.min(14, Math.round(h * 0.045)));
   const lineH = Math.round(fontPx * 1.3);
   ctx.font = `${fontPx}px ui-monospace, monospace`;
@@ -201,7 +218,7 @@ export function drawEmotions(
   ctx: CanvasRenderingContext2D,
   rect: Face['rect'] | undefined,
   emotions: Face['emotions'] | undefined,
-  opts?: { color?: string; fontSize?: number },
+  opts?: { color?: string; fontSize?: number; opacity?: number },
 ): void {
   if (!rect || !emotions) return;
   const [x, y, w, h] = rect;
@@ -229,10 +246,13 @@ export function drawEmotions(
   ctx.fillRect(x, py, panelW, panelH);
   ctx.font = `${fontPx}px ui-monospace, monospace`;
   ctx.textBaseline = 'top';
+  ctx.save();
+  ctx.globalAlpha = opts?.opacity ?? 1;
   ctx.fillStyle = opts?.color ?? '#ffffff';
   sorted.forEach(([k, v], i) => {
     ctx.fillText(`${k}: ${(v as number).toFixed(2)}`, x + 6, py + 3 + i * lineH);
   });
+  ctx.restore();
 }
 
 export function drawAusText(

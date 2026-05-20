@@ -282,9 +282,12 @@ def _draw_pose(
     cx = x + w / 2
     cy = y + h / 2
     size = min(w, h) / 2
-    p = float(pitch) * np.pi / 180.0
-    r = float(roll) * np.pi / 180.0
-    yw = -float(yaw) * np.pi / 180.0
+    # Pitch/Roll/Yaw are in RADIANS (py-feat). Use them directly — the
+    # previous *π/180 treated them as degrees, shrinking every rotation by
+    # ~57x so the axes barely moved as the head turned.
+    p = float(pitch)
+    r = float(roll)
+    yw = -float(yaw)
     # Standard 3D-axis-from-Euler. The y-component is NEGATED because v1
     # computed in math-coords (origin bottom-left) then flipped via
     # img_height - y. In PIL we're in image coords (origin top-left)

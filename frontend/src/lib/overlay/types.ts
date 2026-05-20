@@ -35,21 +35,21 @@ export type LandmarkStyle = 'mesh' | 'lines' | 'points';
 // which fall back to these same defaults when no style is supplied (so the
 // Live page, which doesn't pass a style, is unaffected).
 export interface OverlayStyleConfig {
-  faceboxes: { color: string; lineWidth: number };
+  faceboxes: { color: string; opacity: number; lineWidth: number };
   landmarks: { style: LandmarkStyle; color: string; opacity: number; size: number };
   pose: { sizeScale: number };           // axis length as fraction of face; XYZ colors fixed
-  gaze: { color: string; lineWidth: number };
+  gaze: { color: string; opacity: number; lineWidth: number };
   aus: { colormap: import('./colormaps').ColormapName; opacity: number };
-  emotions: { color: string; fontSize: number };
+  emotions: { color: string; opacity: number; fontSize: number };
 }
 
 export function defaultOverlayStyle(): OverlayStyleConfig {
   return {
-    faceboxes: { color: '#22c55e', lineWidth: 2 },
+    faceboxes: { color: '#22c55e', opacity: 1, lineWidth: 2 },
     landmarks: { style: 'mesh', color: '#22c55e', opacity: 1, size: 1.2 },
     pose: { sizeScale: 0.5 },
-    gaze: { color: '#22c55e', lineWidth: 2 },
+    gaze: { color: '#22c55e', opacity: 1, lineWidth: 2 },
     aus: { colormap: 'Blues', opacity: 0.55 },
-    emotions: { color: '#ffffff', fontSize: 12 },
+    emotions: { color: '#ffffff', opacity: 1, fontSize: 12 },
   };
 }

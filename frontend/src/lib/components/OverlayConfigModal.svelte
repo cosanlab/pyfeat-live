@@ -82,6 +82,10 @@
                 <input type="color" class="h-5 w-7 rounded bg-transparent" value={style.faceboxes.color}
                   oninput={(e) => upd('faceboxes', { color: (e.target as HTMLInputElement).value })} />
               </label>
+              <label class="flex items-center gap-1.5">opacity
+                <input type="range" min="0.1" max="1" step="0.05" class="accent-green-500 w-20" value={style.faceboxes.opacity}
+                  oninput={(e) => upd('faceboxes', { opacity: +(e.target as HTMLInputElement).value })} />
+              </label>
               <label class="flex items-center gap-1.5">width
                 <input type="range" min="1" max="6" step="1" class="accent-green-500 w-24" value={style.faceboxes.lineWidth}
                   oninput={(e) => upd('faceboxes', { lineWidth: +(e.target as HTMLInputElement).value })} />
@@ -121,6 +125,10 @@
                 <input type="color" class="h-5 w-7 rounded bg-transparent" value={style.gaze.color}
                   oninput={(e) => upd('gaze', { color: (e.target as HTMLInputElement).value })} />
               </label>
+              <label class="flex items-center gap-1.5">opacity
+                <input type="range" min="0.1" max="1" step="0.05" class="accent-green-500 w-20" value={style.gaze.opacity}
+                  oninput={(e) => upd('gaze', { opacity: +(e.target as HTMLInputElement).value })} />
+              </label>
               <label class="flex items-center gap-1.5">size
                 <input type="range" min="1" max="6" step="1" class="accent-green-500 w-24" value={style.gaze.lineWidth}
                   oninput={(e) => upd('gaze', { lineWidth: +(e.target as HTMLInputElement).value })} />
@@ -145,6 +153,10 @@
               <label class="flex items-center gap-1.5">color
                 <input type="color" class="h-5 w-7 rounded bg-transparent" value={style.emotions.color}
                   oninput={(e) => upd('emotions', { color: (e.target as HTMLInputElement).value })} />
+              </label>
+              <label class="flex items-center gap-1.5">opacity
+                <input type="range" min="0.1" max="1" step="0.05" class="accent-green-500 w-20" value={style.emotions.opacity}
+                  oninput={(e) => upd('emotions', { opacity: +(e.target as HTMLInputElement).value })} />
               </label>
               <label class="flex items-center gap-1.5">font
                 <input type="range" min="8" max="28" step="1" class="accent-green-500 w-24" value={style.emotions.fontSize}
