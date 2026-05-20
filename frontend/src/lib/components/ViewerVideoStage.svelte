@@ -35,6 +35,42 @@
 
   let video: HTMLVideoElement | null = $state(null);
 
+  // --- Corner-drag resize -----------------------------------------------
+  // The aspect-locked box defaults to filling the stage (scale 1). Dragging
+  // a corner handle shrinks/grows it (aspect preserved). The box is centred,
+  // so a corner moved by dx changes width by 2·dx to keep it centred.
+  let boxEl: HTMLDivElement | null = $state(null);
+  let scale = $state(1);
+  let resizing: { startX: number; startW: number; contW: number; signX: number } | null = null;
+  // Set on resize-end so the synthetic click that follows pointerup doesn't
+  // run the face hit-test (which could select a face under the handle).
+  let suppressClick = false;
+
+  function startResize(e: PointerEvent, signX: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!boxEl?.parentElement) return;
+    resizing = {
+      startX: e.clientX,
+      startW: boxEl.getBoundingClientRect().width,
+      contW: boxEl.parentElement.getBoundingClientRect().width,
+      signX,
+    };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function moveResize(e: PointerEvent) {
+    if (!resizing) return;
+    const dx = (e.clientX - resizing.startX) * resizing.signX;
+    const newW = resizing.startW + dx * 2;
+    scale = Math.min(1, Math.max(0.3, newW / resizing.contW));
+  }
+  function endResize(e: PointerEvent) {
+    if (!resizing) return;
+    resizing = null;
+    suppressClick = true;
+    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+  }
+
   // True while we're programmatically seeking the video to match a
   // currentFrame change from the parent. Suppresses the resulting
   // timeupdate from echoing back as an onFrameAdvance call (which
@@ -91,6 +127,7 @@
   function handleStageClick(e: MouseEvent) {
     // Hit-test face rects; emit click for the first hit so the parent
     // can open the identity assignment dialog.
+    if (suppressClick) { suppressClick = false; return; }
     if (!faces || faces.length === 0) return;
     const stage = e.currentTarget as HTMLDivElement;
     const r = stage.getBoundingClientRect();
@@ -122,8 +159,9 @@
          space) were drawn onto a differently-sized/positioned canvas
          and appeared offset. Both now fill this aspect-matched box. -->
     <div
-      class="relative"
-      style="aspect-ratio: {width} / {height}; max-width: 100%; max-height: 100%; width: 100%;"
+      bind:this={boxEl}
+      class="group relative"
+      style="aspect-ratio: {width} / {height}; max-width: 100%; max-height: 100%; width: {scale * 100}%;"
     >
       <video
         bind:this={video}
@@ -136,6 +174,20 @@
         onended={onEnded}
       ></video>
       <OverlayCanvas {faces} {mpLandmarks} {width} {height} {toggles} {edges} {auTable} {mpToDlib68} {style} />
+
+      <!-- Corner resize handles. Hidden until the stage is hovered to keep
+           the frame clean. Each adjusts the box scale (aspect preserved);
+           signX is +1 for right corners, -1 for left. -->
+      {#each [{ pos: 'top-0 left-0', sx: -1, cur: 'nwse' }, { pos: 'top-0 right-0', sx: 1, cur: 'nesw' }, { pos: 'bottom-0 left-0', sx: -1, cur: 'nesw' }, { pos: 'bottom-0 right-0', sx: 1, cur: 'nwse' }] as hnd}
+        <div
+          class="absolute {hnd.pos} w-3 h-3 z-20 rounded-sm bg-green-400/70 border border-green-200/80 opacity-0 group-hover:opacity-100 transition-opacity"
+          style:cursor="{hnd.cur}-resize"
+          role="presentation"
+          onpointerdown={(e) => startResize(e, hnd.sx)}
+          onpointermove={moveResize}
+          onpointerup={endResize}
+        ></div>
+      {/each}
 
       <!-- Identity badges, positioned over each face box -->
       {#each faces as face (face.face_idx)}
