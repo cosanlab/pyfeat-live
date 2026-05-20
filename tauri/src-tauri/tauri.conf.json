@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": null,
     "beforeDevCommand": null,
-    "beforeBuildCommand": "cd ../../frontend && pnpm install && pnpm build"
+    "beforeBuildCommand": "cd ../frontend && pnpm install && pnpm build"
   },
   "app": {
     "windows": [],
