@@ -54,7 +54,7 @@
 
   let toggles: OverlayToggles = $state({
     rects: true, landmarks: true, poses: false,
-    gaze: true, aus: false, emotions: false,
+    gaze: false, aus: false, emotions: false,
   });
 
   // Hidden <video> element — holds the camera MediaStream. We never
