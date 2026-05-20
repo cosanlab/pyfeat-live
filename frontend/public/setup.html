@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data: http://127.0.0.1:* http://localhost:*; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" />
+    <title>Py-feat Live — Setting up</title>
+    <style>
+      :root { color-scheme: light dark; }
+      html, body {
+        margin: 0; padding: 0; height: 100%; width: 100%;
+        background: #0e1117;
+        color: #fafafa;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                     Helvetica, Arial, sans-serif;
+        display: flex; flex-direction: column;
+        align-items: stretch;
+      }
+      header {
+        padding: 1.5em 2em 0.6em;
+        text-align: center;
+      }
+      header h1 { margin: 0; font-size: 1.4em; font-weight: 500; }
+      header p { margin: 0.4em 0 0; opacity: 0.6; font-size: 0.9em; }
+      .spinner {
+        width: 16px; height: 16px;
+        border: 2px solid #444;
+        border-top-color: #0f9d58;
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+        display: inline-block;
+        vertical-align: middle;
+        margin-right: 0.6em;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      #log {
+        flex: 1; min-height: 0;
+        margin: 0.6em 1.2em 1.2em;
+        padding: 1em;
+        background: #181c24;
+        border: 1px solid #2a2e3a;
+        border-radius: 6px;
+        font-family: ui-monospace, "SF Mono", "Fira Code", Menlo, monospace;
+        font-size: 0.78em;
+        line-height: 1.4;
+        color: #cfd3da;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .stderr { color: #ffb37c; }
+      .err {
+        color: #ff7c7c;
+        padding: 0.8em 1.2em;
+        font-size: 0.9em;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1><span class="spinner" id="spin"></span><span id="status">Preparing runtime…</span></h1>
+      <p id="hint">First-run install — Python and ML libraries (~1.5GB). Subsequent launches will be instant.</p>
+    </header>
+    <pre id="log"></pre>
+
+    <script>
+      // Port comes from the URL fragment the Rust shell appends
+      // (setup.html#8501). We poll the backend's health endpoint and, on
+      // the first success, navigate the webview to the backend origin —
+      // the FastAPI server serves the built Svelte SPA at "/" and the
+      // "/api" routes, so loading the app from http://127.0.0.1:<port>
+      // (rather than the tauri:// scheme) is what makes the SPA's relative
+      // fetch("/api/...") calls resolve. Without this redirect the SPA runs
+      // under tauri:// and every API call throws "The string did not match
+      // the expected pattern."
+      const port = parseInt(location.hash.slice(1), 10) || 8501;
+      const target = `http://127.0.0.1:${port}`;
+      const log = document.getElementById("log");
+      const status = document.getElementById("status");
+      const hint = document.getElementById("hint");
+      const spin = document.getElementById("spin");
+
+      function append(stream, line) {
+        const span = document.createElement("span");
+        if (stream === "stderr") span.className = "stderr";
+        span.textContent = line + "\n";
+        log.appendChild(span);
+        log.scrollTop = log.scrollHeight;
+      }
+
+      // Stream the Rust-side bootstrap logs / status into the splash when
+      // the global Tauri API is available (withGlobalTauri). Tolerated as
+      // optional — the health poll below is the source of truth for "ready".
+      if (window.__TAURI__ && window.__TAURI__.event) {
+        const { event } = window.__TAURI__;
+        event.listen("bootstrap://log", (e) => {
+          append(e.payload.stream, e.payload.line);
+        });
+        event.listen("bootstrap://done", () => {
+          status.textContent = "Starting Py-feat Live…";
+          hint.textContent = "Loading models — this takes 10–20s on first launch.";
+        });
+        event.listen("bootstrap://error", (e) => {
+          spin.style.display = "none";
+          status.textContent = "Setup failed";
+          hint.textContent = "See the log below; you may need internet access for the first run.";
+          const div = document.createElement("div");
+          div.className = "err";
+          div.textContent = String(e.payload);
+          document.body.appendChild(div);
+        });
+      }
+
+      // Poll the FastAPI backend's health endpoint, independent of the
+      // bootstrap events. First success redirects — works whether the
+      // bootstrap was skipped (warm install), completed (cold install), or
+      // never emitted events.
+      let attempts = 0;
+      async function poll() {
+        attempts += 1;
+        try {
+          const r = await fetch(`${target}/api/system/health`, { cache: "no-store" });
+          if (r.ok) {
+            status.textContent = "Ready";
+            spin.style.display = "none";
+            location.replace(target);
+            return;
+          }
+        } catch (_) {
+          // ECONNREFUSED while the backend is still booting — keep polling.
+        }
+        if (attempts === 60) {
+          append("stderr", `backend not responding at ${target} after 30s`);
+          hint.textContent = "Still waiting for the runtime — check the log below.";
+        }
+        setTimeout(poll, 500);
+      }
+      poll();
+    </script>
+  </body>
+</html>
