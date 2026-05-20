@@ -1,6 +1,6 @@
 <script lang="ts">
   import OverlayCanvas from './OverlayCanvas.svelte';
-  import type { Face, OverlayToggles } from '../overlay/types';
+  import type { Face, OverlayToggles, OverlayStyleConfig } from '../overlay/types';
   import type { Identity, IdentityAssignment } from '../types';
   import type { AuTable } from '../api';
 
@@ -17,6 +17,8 @@
     edges?: number[][];
     auTable?: AuTable | null;
     mpToDlib68?: number[] | null;
+    style?: OverlayStyleConfig | null;
+    showVideo?: boolean;
     identities: Identity[];
     assignments: IdentityAssignment[];
     onFaceClick: (frame: number, faceIdx: number) => void;
@@ -26,7 +28,8 @@
   let {
     videoUrl, width, height, currentFrame, fps, isPlaying,
     faces, toggles, mpLandmarks,
-    edges, auTable = null, mpToDlib68 = null, identities, assignments,
+    edges, auTable = null, mpToDlib68 = null, style = null, showVideo = true,
+    identities, assignments,
     onFaceClick, onFrameAdvance, onPlaybackEnd,
   }: Props = $props();
 
@@ -126,12 +129,13 @@
         bind:this={video}
         src={videoUrl}
         class="absolute inset-0 w-full h-full object-contain"
+        class:invisible={!showVideo}
         playsinline
         muted
         ontimeupdate={onTimeUpdate}
         onended={onEnded}
       ></video>
-      <OverlayCanvas {faces} {mpLandmarks} {width} {height} {toggles} {edges} {auTable} {mpToDlib68} />
+      <OverlayCanvas {faces} {mpLandmarks} {width} {height} {toggles} {edges} {auTable} {mpToDlib68} {style} />
 
       <!-- Identity badges, positioned over each face box -->
       {#each faces as face (face.face_idx)}

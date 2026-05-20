@@ -5,7 +5,8 @@
   import type {
     SessionSummary, SessionDetail, Identity, IdentityAssignment, Annotation, AnnotationKind,
   } from '../lib/types';
-  import type { Face, OverlayToggles } from '../lib/overlay/types';
+  import type { Face, OverlayToggles, OverlayStyleConfig } from '../lib/overlay/types';
+  import { defaultOverlayStyle } from '../lib/overlay/types';
   import ViewerLeftPane from '../lib/components/ViewerLeftPane.svelte';
   import ViewerVideoStage from '../lib/components/ViewerVideoStage.svelte';
   import ScrubBar from '../lib/components/ScrubBar.svelte';
@@ -13,6 +14,12 @@
   import ViewerInspector from '../lib/components/ViewerInspector.svelte';
   import AnnotationPopover from '../lib/components/AnnotationPopover.svelte';
   import IdentityAssignDialog from '../lib/components/IdentityAssignDialog.svelte';
+  import OverlayConfigModal from '../lib/components/OverlayConfigModal.svelte';
+  import PanelLeft from '@lucide/svelte/icons/panel-left';
+  import PanelRight from '@lucide/svelte/icons/panel-right';
+  import Eye from '@lucide/svelte/icons/eye';
+  import EyeOff from '@lucide/svelte/icons/eye-off';
+  import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 
   type LeftTab = 'sessions' | 'annotations';
   type AnnotationFilter = 'all' | AnnotationKind;
@@ -53,6 +60,28 @@
     { key: 'aus', label: 'AUs' },
     { key: 'emotions', label: 'Emotions' },
   ];
+
+  // --- Layout + overlay-style state -------------------------------------
+  let leftCollapsed = $state(false);
+  let rightCollapsed = $state(false);
+  let showVideo = $state(true);
+  let showOverlayConfig = $state(false);
+  const hasVideo = $derived((currentSession as SessionDetail | null)?.has_video ?? false);
+
+  // Per-overlay visual style, persisted to localStorage so colors/sizes/
+  // colormap survive reloads and apply across all sessions.
+  const OVERLAY_STYLE_KEY = 'pyfeatlive.overlayStyle';
+  function loadOverlayStyle(): OverlayStyleConfig {
+    try {
+      const raw = localStorage.getItem(OVERLAY_STYLE_KEY);
+      if (raw) return { ...defaultOverlayStyle(), ...JSON.parse(raw) };
+    } catch { /* ignore corrupt/unavailable storage */ }
+    return defaultOverlayStyle();
+  }
+  let overlayStyle: OverlayStyleConfig = $state(loadOverlayStyle());
+  $effect(() => {
+    try { localStorage.setItem(OVERLAY_STYLE_KEY, JSON.stringify(overlayStyle)); } catch { /* noop */ }
+  });
 
   // Annotation popover state
   let popover: { kind: AnnotationKind; startFrame: number; endFrame: number; label: string } | null = $state(null);
@@ -318,25 +347,27 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="flex flex-1 overflow-hidden">
-  <ViewerLeftPane
-    activeTab={leftTab}
-    onTabChange={(t) => leftTab = t}
-    {sessions}
-    {currentSessionId}
-    {sessionFilter}
-    onSelectSession={selectSession}
-    onSessionFilterChange={(v) => sessionFilter = v}
-    {annotations}
-    {currentAnnotationId}
-    annotationFilter={annotationFilter}
-    onSelectAnnotation={(a) => { currentAnnotationId = a.annotation_id; onSeek(a.start_frame); }}
-    onAnnotationFilterChange={(f) => annotationFilter = f}
-    {onAddAnnotationAtCurrentTime}
-  />
+  {#if !leftCollapsed}
+    <ViewerLeftPane
+      activeTab={leftTab}
+      onTabChange={(t) => leftTab = t}
+      {sessions}
+      {currentSessionId}
+      {sessionFilter}
+      onSelectSession={selectSession}
+      onSessionFilterChange={(v) => sessionFilter = v}
+      {annotations}
+      {currentAnnotationId}
+      annotationFilter={annotationFilter}
+      onSelectAnnotation={(a) => { currentAnnotationId = a.annotation_id; onSeek(a.start_frame); }}
+      onAnnotationFilterChange={(f) => annotationFilter = f}
+      {onAddAnnotationAtCurrentTime}
+    />
+  {/if}
 
-  <div class="flex-1 flex flex-col">
+  <div class="flex-1 flex flex-col min-w-0">
     <ViewerVideoStage
-      videoUrl={currentSessionId ? sessionsApi.videoUrl(currentSessionId) : null}
+      videoUrl={currentSessionId && hasVideo ? sessionsApi.videoUrl(currentSessionId) : null}
       width={VIDEO_W}
       height={VIDEO_H}
       {currentFrame}
@@ -348,19 +379,46 @@
       edges={overlayEdges}
       {auTable}
       mpToDlib68={auTable?.mpToDlib68 ?? null}
+      style={overlayStyle}
+      {showVideo}
       {identities}
       {assignments}
       {onFaceClick}
       onFrameAdvance={(f) => (currentFrame = f)}
       onPlaybackEnd={() => (isPlaying = false)}
     />
-    <div class="flex items-center gap-1.5 flex-wrap px-3.5 py-2 bg-zinc-950 border-t border-zinc-900">
-      {#each OVERLAY_CHIPS as chip}
+    <div class="flex items-center gap-1.5 px-3.5 py-2 bg-zinc-950 border-t border-zinc-900">
+      <button
+        class="p-1.5 rounded-md border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+        title={leftCollapsed ? 'Show left sidebar' : 'Hide left sidebar'}
+        onclick={() => (leftCollapsed = !leftCollapsed)}
+      ><PanelLeft size={14} /></button>
+      <div class="w-px h-4 bg-zinc-800 mx-0.5"></div>
+      <div class="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+        {#each OVERLAY_CHIPS as chip}
+          <button
+            class="px-2.5 py-1 rounded-md text-[11px] font-medium border {toggles[chip.key] ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'}"
+            onclick={() => (toggles = { ...toggles, [chip.key]: !toggles[chip.key] })}
+          >{chip.label}</button>
+        {/each}
         <button
-          class="px-2.5 py-1 rounded-md text-[11px] font-medium border {toggles[chip.key] ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'}"
-          onclick={() => (toggles = { ...toggles, [chip.key]: !toggles[chip.key] })}
-        >{chip.label}</button>
-      {/each}
+          class="p-1.5 rounded-md border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+          title="Overlay settings"
+          onclick={() => (showOverlayConfig = true)}
+        ><SlidersHorizontal size={14} /></button>
+      </div>
+      {#if hasVideo}
+        <button
+          class="p-1.5 rounded-md border {showVideo ? 'border-zinc-800 text-zinc-400' : 'bg-green-500/10 border-green-500/30 text-green-400'} hover:text-zinc-200 hover:border-zinc-700"
+          title={showVideo ? 'Hide video (overlays only)' : 'Show video'}
+          onclick={() => (showVideo = !showVideo)}
+        >{#if showVideo}<Eye size={14} />{:else}<EyeOff size={14} />{/if}</button>
+      {/if}
+      <button
+        class="p-1.5 rounded-md border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+        title={rightCollapsed ? 'Show right sidebar' : 'Hide right sidebar'}
+        onclick={() => (rightCollapsed = !rightCollapsed)}
+      ><PanelRight size={14} /></button>
     </div>
     <ScrubBar
       {currentFrame}
@@ -400,24 +458,37 @@
     />
   </div>
 
-  <ViewerInspector
-    {currentFrame}
-    {totalFrames}
-    fps={FPS}
-    faceCount={facesForCurrentFrame.length}
-    {identities}
-    {assignments}
-    {selectedIdentityIds}
-    onSelectIdentity={(iid) => {
-      if (!selectedIdentityIds.includes(iid)) selectedIdentityIds = [iid, ...selectedIdentityIds];
-    }}
-    {currentFrameValues}
-    sessionId={currentSessionId}
-    {similarity}
-    {onClusterChange}
-    {onMerge}
-  />
+  {#if !rightCollapsed}
+    <ViewerInspector
+      {currentFrame}
+      {totalFrames}
+      fps={FPS}
+      faceCount={facesForCurrentFrame.length}
+      {identities}
+      {assignments}
+      {selectedIdentityIds}
+      onSelectIdentity={(iid) => {
+        if (!selectedIdentityIds.includes(iid)) selectedIdentityIds = [iid, ...selectedIdentityIds];
+      }}
+      {currentFrameValues}
+      sessionId={currentSessionId}
+      {similarity}
+      {onClusterChange}
+      {onMerge}
+    />
+  {/if}
 </div>
+
+{#if showOverlayConfig}
+  <OverlayConfigModal
+    style={overlayStyle}
+    {toggles}
+    onStyleChange={(s) => (overlayStyle = s)}
+    onToggle={(key) => (toggles = { ...toggles, [key]: !toggles[key] })}
+    onReset={() => (overlayStyle = defaultOverlayStyle())}
+    onClose={() => (showOverlayConfig = false)}
+  />
+{/if}
 
 {#if popover}
   <AnnotationPopover

@@ -1,9 +1,8 @@
 <script lang="ts">
-  import type { Face, OverlayToggles } from '../overlay/types';
+  import type { Face, OverlayToggles, OverlayStyleConfig, LandmarkStyle } from '../overlay/types';
   import type { AuTable } from '../api';
+  import { colormapLut } from '../overlay/colormaps';
   import * as O from '../overlay/primitives';
-
-  type LandmarkStyle = 'points' | 'lines' | 'mesh';
 
   type Props = {
     faces: Face[];
@@ -15,12 +14,20 @@
     edges?: number[][];     // landmark edges (mesh/lines), ignored for points
     auTable?: AuTable | null;
     mpToDlib68?: number[] | null;
+    // Per-overlay visual style. Optional: when omitted (Live page), the
+    // primitives fall back to their built-in defaults. The Viewer passes a
+    // user-configured style from its overlay-settings modal.
+    style?: OverlayStyleConfig | null;
   };
   let {
     faces, mpLandmarks, width, height, toggles,
     landmarkStyle = 'mesh', edges,
-    auTable = null, mpToDlib68 = null,
+    auTable = null, mpToDlib68 = null, style = null,
   }: Props = $props();
+
+  // Style takes precedence over the landmarkStyle prop when provided.
+  const lmStyle = $derived(style?.landmarks.style ?? landmarkStyle);
+  const auLut = $derived(style ? colormapLut(style.aus.colormap) : null);
 
   let canvas: HTMLCanvasElement | null = $state(null);
 
@@ -38,15 +45,18 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
     for (const face of faces) {
-      if (toggles.rects) O.drawRect(ctx, face.rect);
+      if (toggles.rects) O.drawRect(ctx, face.rect, style?.faceboxes);
       if (toggles.landmarks) {
-        const useEdges = landmarkStyle === 'points' ? undefined : edges;
-        O.drawLandmarks(ctx, face.lm, landmarkStyle, useEdges);
+        const useEdges = lmStyle === 'points' ? undefined : edges;
+        O.drawLandmarks(ctx, face.lm, lmStyle, useEdges, style?.landmarks);
       }
-      if (toggles.poses) O.drawPose(ctx, face.rect, face.pose);
-      if (toggles.gaze) O.drawGaze(ctx, face, mpLandmarks, width, height);
-      if (toggles.aus) O.drawAuHeatmap(ctx, face, auTable ?? null, mpLandmarks, mpToDlib68 ?? null);
-      if (toggles.emotions) O.drawEmotions(ctx, face.rect, face.emotions);
+      if (toggles.poses) O.drawPose(ctx, face.rect, face.pose, style?.pose);
+      if (toggles.gaze) O.drawGaze(ctx, face, mpLandmarks, width, height, style?.gaze);
+      if (toggles.aus) {
+        O.drawAuHeatmap(ctx, face, auTable ?? null, mpLandmarks, mpToDlib68 ?? null,
+          style ? { lut: auLut ?? undefined, opacity: style.aus.opacity } : undefined);
+      }
+      if (toggles.emotions) O.drawEmotions(ctx, face.rect, face.emotions, style?.emotions);
     }
   });
 </script>

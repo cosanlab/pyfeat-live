@@ -4,18 +4,20 @@
 
 import type { Face } from './types';
 import type { AuTable } from '../api';
+import type { Lut } from './colormaps';
 
 const LIVE_GREEN = '#22c55e';
 
 export function drawRect(
   ctx: CanvasRenderingContext2D,
   rect: Face['rect'] | undefined,
+  style?: { color?: string; lineWidth?: number },
 ): void {
   if (!rect) return;
   const [x, y, w, h] = rect;
   if (x == null || y == null || w == null || h == null) return;
-  ctx.strokeStyle = LIVE_GREEN;
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = style?.color ?? LIVE_GREEN;
+  ctx.lineWidth = style?.lineWidth ?? 2;
   ctx.strokeRect(x, y, w, h);
 }
 
@@ -24,11 +26,16 @@ export function drawLandmarks(
   lm: Face['lm'] | undefined,
   style: 'points' | 'lines' | 'mesh' = 'mesh',
   edges?: number[][],
+  opts?: { color?: string; opacity?: number; size?: number },
 ): void {
   if (!lm) return;
-  ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = LIVE_GREEN;
-  ctx.lineWidth = 1;
+  const color = opts?.color ?? LIVE_GREEN;
+  const size = opts?.size ?? 1.2;
+  ctx.save();
+  ctx.globalAlpha = opts?.opacity ?? 1;
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(0.5, size * 0.85);
 
   if (style === 'points' || !edges) {
     for (let i = 0; i < lm.length; i += 2) {
@@ -36,9 +43,10 @@ export function drawLandmarks(
       const y = lm[i + 1];
       if (x == null || y == null) continue;
       ctx.beginPath();
-      ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+      ctx.arc(x, y, size, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
     return;
   }
 
@@ -52,6 +60,7 @@ export function drawLandmarks(
     ctx.lineTo(bx, by);
     ctx.stroke();
   }
+  ctx.restore();
 }
 
 export function gazeOrigin(
@@ -89,6 +98,7 @@ export function gazeOrigin(
 export function drawGaze(
   ctx: CanvasRenderingContext2D,
   face: Face, mpLandmarks: boolean, canvasW: number, canvasH: number,
+  opts?: { color?: string; lineWidth?: number },
 ): void {
   if (!face.gaze) return;
   const [pitch, yaw] = face.gaze;
@@ -96,26 +106,29 @@ export function drawGaze(
   const origin = gazeOrigin(face, mpLandmarks, canvasW, canvasH);
   if (!origin) return;
   const [ox, oy] = origin;
+  const color = opts?.color ?? LIVE_GREEN;
+  const lw = opts?.lineWidth ?? 2;
   // Map degrees to pixel delta. 30deg ~ 100px at default canvas size.
   const scale = Math.max(canvasW, canvasH) / 18;
   const dx = Math.sin((yaw * Math.PI) / 180) * scale;
   const dy = -Math.sin((pitch * Math.PI) / 180) * scale;
-  ctx.strokeStyle = '#22c55e';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lw;
   ctx.beginPath();
   ctx.moveTo(ox, oy);
   ctx.lineTo(ox + dx, oy + dy);
   ctx.stroke();
   // Origin disc
-  ctx.fillStyle = '#22c55e';
+  ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.arc(ox, oy, 3, 0, Math.PI * 2);
+  ctx.arc(ox, oy, Math.max(2, lw + 1), 0, Math.PI * 2);
   ctx.fill();
 }
 
 export function drawPose(
   ctx: CanvasRenderingContext2D,
   rect: Face['rect'] | undefined, pose: Face['pose'] | undefined,
+  opts?: { sizeScale?: number },
 ): void {
   // Three orthogonal axes drawn from the face center, oriented by the
   // full 3D Euler rotation (pitch / roll / yaw combined). Each axis's
@@ -132,7 +145,7 @@ export function drawPose(
 
   const cx = x + w / 2;
   const cy = y + h / 2;
-  const size = Math.min(w, h) / 2;
+  const size = Math.min(w, h) * (opts?.sizeScale ?? 0.5);
   const p = (pitch * Math.PI) / 180;
   const r = (roll * Math.PI) / 180;
   const yw = (-yaw * Math.PI) / 180;
@@ -188,6 +201,7 @@ export function drawEmotions(
   ctx: CanvasRenderingContext2D,
   rect: Face['rect'] | undefined,
   emotions: Face['emotions'] | undefined,
+  opts?: { color?: string; fontSize?: number },
 ): void {
   if (!rect || !emotions) return;
   const [x, y, w, h] = rect;
@@ -200,11 +214,9 @@ export function drawEmotions(
     .slice(0, 3);
   if (sorted.length === 0) return;
 
-  // Scale the panel + font to the face dimensions instead of fixed
-  // pixel sizes so the text stays proportional whether the face fills
-  // the frame or is a tiny crop in the corner. ~5% of face height per
-  // text line, panel width matches the face rect.
-  const fontPx = Math.max(8, Math.min(18, Math.round(h * 0.05)));
+  // Use the configured font size when supplied; otherwise scale to the
+  // face height so text stays proportional on tiny vs large faces.
+  const fontPx = opts?.fontSize ?? Math.max(8, Math.min(18, Math.round(h * 0.05)));
   const lineH = Math.round(fontPx * 1.35);
   const panelW = w;
   const panelH = sorted.length * lineH + 6;
@@ -217,7 +229,7 @@ export function drawEmotions(
   ctx.fillRect(x, py, panelW, panelH);
   ctx.font = `${fontPx}px ui-monospace, monospace`;
   ctx.textBaseline = 'top';
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = opts?.color ?? '#ffffff';
   sorted.forEach(([k, v], i) => {
     ctx.fillText(`${k}: ${(v as number).toFixed(2)}`, x + 6, py + 3 + i * lineH);
   });
@@ -349,12 +361,16 @@ export function drawAuHeatmap(
   auTable: AuTable | null,
   mpLandmarks: boolean,
   mpToDlib68: number[] | null,
+  opts?: { lut?: Lut; opacity?: number },
 ): void {
   if (!auTable || !face.aus) return;
   const lm68 = dlib68View(face, mpLandmarks, mpToDlib68);
   if (!lm68) return;
 
-  const { polygons, muscleAu, lut } = auTable;
+  const { polygons, muscleAu } = auTable;
+  const lut = opts?.lut ?? auTable.lut;
+  const fillA = opts?.opacity ?? 0.55;
+  const strokeA = Math.min(1, fillA + 0.31);
   for (const muscleName of Object.keys(polygons)) {
     const auCol = muscleAu[muscleName];
     if (!auCol) continue;
@@ -363,9 +379,8 @@ export function drawAuHeatmap(
     const pts = evalMusclePolygon(polygons[muscleName]!, lm68);
     if (!pts) continue;
     const rgb = colorForAu(value as number, lut);
-    // ~55 % alpha fill + ~86 % alpha outline matches the Python overlay.
-    ctx.fillStyle = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.55)`;
-    ctx.strokeStyle = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.86)`;
+    ctx.fillStyle = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${fillA})`;
+    ctx.strokeStyle = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${strokeA})`;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(pts[0]![0], pts[0]![1]);
