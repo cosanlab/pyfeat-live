@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { sessionsApi, identitiesApi, annotationsApi } from '../lib/api';
+  import { sessionsApi, identitiesApi, annotationsApi, systemApi } from '../lib/api';
+  import type { AuTable, OverlayEdgeSets } from '../lib/api';
   import type {
     SessionSummary, SessionDetail, Identity, IdentityAssignment, Annotation, AnnotationKind,
   } from '../lib/types';
@@ -58,8 +59,32 @@
   // Identity assign dialog
   let assignDialog: { frame: number; faceIdx: number } | null = $state(null);
 
-  const VIDEO_W = 640, VIDEO_H = 360;
-  const FPS = 30;  // Default; could derive from metadata later.
+  // Video dimensions + fps come from the session metadata so the overlay
+  // canvas matches the recorded video exactly. Detection coords (FaceRect,
+  // landmarks) are in the recorded video's pixel space, so a mismatched
+  // canvas size would offset every overlay. Analyze sessions keep the
+  // source resolution (often portrait), which is rarely 640×360 — the old
+  // hardcoded constants distorted them. Fall back to 640×360/30 for legacy
+  // sessions whose metadata predates the width/height keys.
+  const metaNum = (k: string, fallback: number): number => {
+    const v = (currentSession as SessionDetail | null)?.metadata?.[k];
+    return typeof v === 'number' && v > 0 ? v : fallback;
+  };
+  const VIDEO_W = $derived(metaNum('width', 640));
+  const VIDEO_H = $derived(metaNum('height', 360));
+  const FPS = $derived(metaNum('fps', 30));
+
+  // Static overlay-render tables fetched once. `auTable` drives the AU
+  // muscle-polygon heatmap; `edges` provides landmark mesh/contour line
+  // sets; `mpToDlib68` maps the 478-pt MP mesh back to dlib-68 indices
+  // so the heatmap can find muscle vertices on MP sessions.
+  let auTable: AuTable | null = $state(null);
+  let edges: OverlayEdgeSets | null = $state(null);
+  // Pick the mesh edge set that matches the active landmark model.
+  const overlayEdges = $derived.by(() => {
+    if (!edges) return undefined;
+    return mpLandmarks ? edges.mp_tess : edges.dlib_mesh;
+  });
 
   const totalFrames = $derived((currentSession as SessionDetail | null)?.frames ?? 0);
 
@@ -80,6 +105,20 @@
         lm.push(typeof x === 'number' ? x : null);
         lm.push(typeof y === 'number' ? y : null);
       }
+      const num = (k: string): number | null =>
+        typeof r[k] === 'number' ? (r[k] as number) : null;
+      // Pull AU + emotion columns so the overlay can draw the heatmap
+      // and emotion labels. Without these the Pose/Gaze/AUs/Emotions
+      // toggles had nothing to render.
+      const aus: Record<string, number | null> = {};
+      const emotions: Record<string, number | null> = {};
+      const EMO = ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'surprise', 'neutral'];
+      for (const k of Object.keys(r)) {
+        if (/^AU\d/.test(k)) aus[k] = num(k);
+      }
+      for (const k of EMO) {
+        if (k in r) emotions[k] = num(k);
+      }
       return {
         face_idx: Number(r.face_idx ?? 0),
         rect: [
@@ -89,6 +128,10 @@
           typeof r.FaceRectHeight === 'number' ? r.FaceRectHeight : null,
         ],
         lm,
+        pose: [num('Pitch'), num('Roll'), num('Yaw')],
+        gaze: [num('gaze_pitch'), num('gaze_yaw')],
+        emotions,
+        aus,
       };
     });
   });
@@ -112,7 +155,12 @@
   });
 
   onMount(async () => {
-    sessions = await sessionsApi.list();
+    // Overlay tables are static; fetch them once alongside the session list.
+    [sessions, auTable, edges] = await Promise.all([
+      sessionsApi.list(),
+      systemApi.auTable().catch(() => null),
+      systemApi.overlayEdges().catch(() => null),
+    ]);
     if (sessions.length > 0) {
       await selectSession(sessions[0].name);
     }
@@ -297,6 +345,9 @@
       faces={facesForCurrentFrame}
       {toggles}
       {mpLandmarks}
+      edges={overlayEdges}
+      {auTable}
+      mpToDlib68={auTable?.mpToDlib68 ?? null}
       {identities}
       {assignments}
       {onFaceClick}

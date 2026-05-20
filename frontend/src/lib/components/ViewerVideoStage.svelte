@@ -2,6 +2,7 @@
   import OverlayCanvas from './OverlayCanvas.svelte';
   import type { Face, OverlayToggles } from '../overlay/types';
   import type { Identity, IdentityAssignment } from '../types';
+  import type { AuTable } from '../api';
 
   type Props = {
     videoUrl: string | null;
@@ -14,6 +15,8 @@
     toggles: OverlayToggles;
     mpLandmarks: boolean;
     edges?: number[][];
+    auTable?: AuTable | null;
+    mpToDlib68?: number[] | null;
     identities: Identity[];
     assignments: IdentityAssignment[];
     onFaceClick: (frame: number, faceIdx: number) => void;
@@ -23,7 +26,7 @@
   let {
     videoUrl, width, height, currentFrame, fps, isPlaying,
     faces, toggles, mpLandmarks,
-    edges, identities, assignments,
+    edges, auTable = null, mpToDlib68 = null, identities, assignments,
     onFaceClick, onFrameAdvance, onPlaybackEnd,
   }: Props = $props();
 
@@ -128,7 +131,7 @@
         ontimeupdate={onTimeUpdate}
         onended={onEnded}
       ></video>
-      <OverlayCanvas {faces} {mpLandmarks} {width} {height} {toggles} {edges} />
+      <OverlayCanvas {faces} {mpLandmarks} {width} {height} {toggles} {edges} {auTable} {mpToDlib68} />
 
       <!-- Identity badges, positioned over each face box -->
       {#each faces as face (face.face_idx)}

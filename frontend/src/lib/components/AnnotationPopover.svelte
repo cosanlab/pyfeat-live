@@ -30,7 +30,17 @@
 
   const duration = $derived(endFrame - startFrame);
   const seconds = $derived(duration / fps);
+
+  // Esc closes the modal from anywhere (matches the X button + backdrop click).
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onCancel();
+    }
+  }
 </script>
+
+<svelte:window onkeydown={onWindowKeydown} />
 
 <div class="fixed inset-0 flex items-start justify-center pt-24 z-50 bg-black/40 backdrop-blur-sm" role="presentation" onclick={onCancel}>
   <div class="w-[320px] bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl p-3.5" role="dialog" onclick={(e) => e.stopPropagation()}>
