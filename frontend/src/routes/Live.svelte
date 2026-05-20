@@ -84,6 +84,32 @@
     (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
   }
 
+  // Capture the currently displayed frame (backend-baked frame + overlays)
+  // and download it as a PNG. Mirrored to match the on-screen selfie view.
+  // The button is only enabled while streaming.
+  function captureFrame() {
+    if (!displayCanvas || !isStreaming) return;
+    const w = displayCanvas.width, h = displayCanvas.height;
+    if (!w || !h) return;
+    const tmp = document.createElement('canvas');
+    tmp.width = w; tmp.height = h;
+    const ctx = tmp.getContext('2d');
+    if (!ctx) return;
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(displayCanvas, 0, 0);
+    tmp.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      a.href = url;
+      a.download = `pyfeat-live_${ts}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  }
+
   // Hidden <video> element — holds the camera MediaStream. We never
   // display it directly; the visible frame is whatever the backend
   // returns from /api/live/frame (so frame + overlay are temporally
@@ -555,7 +581,7 @@
       onStopStream={stopStream}
       onRecord={record}
       onStopRecord={stop}
-      onCapture={() => {}}
+      onCapture={captureFrame}
     />
   </div>
 </div>
