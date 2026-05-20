@@ -162,10 +162,33 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
 
     let python_path = venv_python(&venv_dir);
 
-    // First-run bootstrap. Skip in dev mode (we use the repo's .venv);
-    // skip in prod if the venv is already populated.
-    if !cfg!(debug_assertions) && !python_path.exists() {
-        run_bootstrap(app, &runtime_dir, &venv_dir).await?;
+    // (Re)install the Python runtime when needed. Skip entirely in dev (we
+    // use the repo's .venv). In prod we install on first run AND whenever
+    // the bundled requirements.txt differs from what's currently installed
+    // — a stamp file records the requirements we last installed. Without
+    // this, upgrading the app reused a stale venv: a pre-FastAPI install
+    // was missing `fastapi`, so the sidecar crashed on import and the
+    // backend never came up.
+    if !cfg!(debug_assertions) {
+        let resource_dir = app
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("could not resolve resource dir: {e}"))?;
+        let requirements = resource_dir.join("runtime/requirements.txt");
+        if needs_install(&python_path, &runtime_dir, &requirements) {
+            // Remove a stale venv so a dependency change yields a clean
+            // tree (drops removed packages, e.g. the old Streamlit deps).
+            if venv_dir.exists() {
+                emit_log(app, "stdout", "Dependencies changed — rebuilding the Python runtime…");
+                std::fs::remove_dir_all(&venv_dir)
+                    .map_err(|e| format!("could not remove stale venv: {e}"))?;
+            }
+            run_bootstrap(app, &runtime_dir, &venv_dir).await?;
+            // Record what we just installed so future changes are detected.
+            if let Ok(bytes) = std::fs::read(&requirements) {
+                let _ = std::fs::write(requirements_stamp_path(&runtime_dir), bytes);
+            }
+        }
     }
 
     // Resolve which Python to spawn:
@@ -229,6 +252,29 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| format!("could not emit bootstrap-done: {e}"))?;
 
     Ok(())
+}
+
+/// Path of the stamp file recording the requirements.txt we last installed.
+fn requirements_stamp_path(runtime_dir: &Path) -> PathBuf {
+    runtime_dir.join(".requirements-stamp")
+}
+
+/// Whether the Python runtime needs (re)installing: when the venv's python
+/// is missing, when no stamp exists (older install), or when the bundled
+/// requirements.txt differs from the stamped one. The stamp stores the
+/// exact requirements.txt bytes so any change forces a clean reinstall.
+fn needs_install(python_path: &Path, runtime_dir: &Path, requirements: &Path) -> bool {
+    if !python_path.exists() {
+        return true;
+    }
+    match (
+        std::fs::read(requirements),
+        std::fs::read(requirements_stamp_path(runtime_dir)),
+    ) {
+        (Ok(want), Ok(have)) => want != have,
+        // Missing stamp or unreadable requirements → reinstall to be safe.
+        _ => true,
+    }
 }
 
 async fn run_bootstrap(
