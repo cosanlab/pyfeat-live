@@ -66,6 +66,14 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # pnpm is needed by the frontend build (beforeBuildCommand runs
+      # `pnpm install && pnpm build` in frontend/). It isn't on the runner
+      # PATH by default, so install it before the Tauri build.
+      - name: install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
