@@ -159,8 +159,12 @@ def _live_meta_header(fex, frame_dims=None) -> Optional[str]:
         try:
             p, y, r = float(row["Pitch"]), float(row["Yaw"]), float(row["Roll"])
             if not any(pd.isna(v) for v in (p, y, r)):
+                # Pitch/Yaw/Roll are in RADIANS; the frontend readout labels
+                # them "°", so convert to degrees here.
                 meta["pose"] = {
-                    "p": round(p, 1), "y": round(y, 1), "r": round(r, 1),
+                    "p": round(float(np.degrees(p)), 1),
+                    "y": round(float(np.degrees(y)), 1),
+                    "r": round(float(np.degrees(r)), 1),
                 }
         except (TypeError, ValueError):
             pass
