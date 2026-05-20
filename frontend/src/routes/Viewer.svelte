@@ -109,10 +109,16 @@
   // so the heatmap can find muscle vertices on MP sessions.
   let auTable: AuTable | null = $state(null);
   let edges: OverlayEdgeSets | null = $state(null);
-  // Pick the mesh edge set that matches the active landmark model.
+  // Pick the edge set that matches the active landmark model AND the chosen
+  // landmark style: 'mesh' uses the full tessellation, 'lines' the feature
+  // contours, 'points' needs no edges. Without keying on the style, picking
+  // "lines" still drew the mesh (the style looked stuck on mesh).
   const overlayEdges = $derived.by(() => {
     if (!edges) return undefined;
-    return mpLandmarks ? edges.mp_tess : edges.dlib_mesh;
+    if (overlayStyle.landmarks.style === 'points') return undefined;
+    const lines = overlayStyle.landmarks.style === 'lines';
+    if (mpLandmarks) return lines ? edges.mp_contours : edges.mp_tess;
+    return lines ? edges.dlib_parts : edges.dlib_mesh;
   });
 
   const totalFrames = $derived((currentSession as SessionDetail | null)?.frames ?? 0);
