@@ -99,9 +99,15 @@ jobs:
           url="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${asset}"
           echo "downloading $url"
           if [[ "$asset" == *.tar.gz ]]; then
-            curl -L "$url" | tar -xz -C vendor/uv/
-            mv "vendor/uv/uv-${target}/uv" "vendor/uv/uv-${target}"
-            rmdir "vendor/uv/uv-${target}" 2>/dev/null || true
+            # The tarball extracts to a directory `uv-<target>/` containing
+            # the `uv` binary. Extract to a temp dir and move the binary out
+            # to the flat `vendor/uv/uv-<target>` path. (Extracting straight
+            # into vendor/uv and then `mv`ing the binary onto the same-named
+            # directory collides — "are identical" — and fails the build.)
+            tmp="$(mktemp -d)"
+            curl -L "$url" | tar -xz -C "$tmp"
+            mv "$tmp/uv-${target}/uv" "vendor/uv/uv-${target}"
+            rm -rf "$tmp"
           else
             curl -L -o vendor/uv/uv.zip "$url"
             unzip -j vendor/uv/uv.zip uv.exe -d vendor/uv/
