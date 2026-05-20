@@ -15,8 +15,8 @@
   import AnnotationPopover from '../lib/components/AnnotationPopover.svelte';
   import IdentityAssignDialog from '../lib/components/IdentityAssignDialog.svelte';
   import OverlayConfigModal from '../lib/components/OverlayConfigModal.svelte';
-  import PanelLeft from '@lucide/svelte/icons/panel-left';
-  import PanelRight from '@lucide/svelte/icons/panel-right';
+  import ChevronLeft from '@lucide/svelte/icons/chevron-left';
+  import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import Eye from '@lucide/svelte/icons/eye';
   import EyeOff from '@lucide/svelte/icons/eye-off';
   import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
@@ -348,21 +348,36 @@
 
 <div class="flex flex-1 overflow-hidden">
   {#if !leftCollapsed}
-    <ViewerLeftPane
-      activeTab={leftTab}
-      onTabChange={(t) => leftTab = t}
-      {sessions}
-      {currentSessionId}
-      {sessionFilter}
-      onSelectSession={selectSession}
-      onSessionFilterChange={(v) => sessionFilter = v}
-      {annotations}
-      {currentAnnotationId}
-      annotationFilter={annotationFilter}
-      onSelectAnnotation={(a) => { currentAnnotationId = a.annotation_id; onSeek(a.start_frame); }}
-      onAnnotationFilterChange={(f) => annotationFilter = f}
-      {onAddAnnotationAtCurrentTime}
-    />
+    <div class="relative">
+      <ViewerLeftPane
+        activeTab={leftTab}
+        onTabChange={(t) => leftTab = t}
+        {sessions}
+        {currentSessionId}
+        {sessionFilter}
+        onSelectSession={selectSession}
+        onSessionFilterChange={(v) => sessionFilter = v}
+        {annotations}
+        {currentAnnotationId}
+        annotationFilter={annotationFilter}
+        onSelectAnnotation={(a) => { currentAnnotationId = a.annotation_id; onSeek(a.start_frame); }}
+        onAnnotationFilterChange={(f) => annotationFilter = f}
+        {onAddAnnotationAtCurrentTime}
+      />
+      <button
+        class="absolute top-4 -right-3 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-50 inline-flex items-center justify-center z-10"
+        onclick={() => (leftCollapsed = true)}
+        aria-label="Collapse sidebar"
+        title="Collapse sidebar"
+      ><ChevronLeft size={12} /></button>
+    </div>
+  {:else}
+    <button
+      class="self-start mt-4 ml-2 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-50 inline-flex items-center justify-center"
+      onclick={() => (leftCollapsed = false)}
+      aria-label="Expand sidebar"
+      title="Expand sidebar"
+    ><ChevronRight size={12} /></button>
   {/if}
 
   <div class="flex-1 flex flex-col min-w-0">
@@ -388,12 +403,6 @@
       onPlaybackEnd={() => (isPlaying = false)}
     />
     <div class="flex items-center gap-1.5 px-3.5 py-2 bg-zinc-950 border-t border-zinc-900">
-      <button
-        class="p-1.5 rounded-md border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
-        title={leftCollapsed ? 'Show left sidebar' : 'Hide left sidebar'}
-        onclick={() => (leftCollapsed = !leftCollapsed)}
-      ><PanelLeft size={14} /></button>
-      <div class="w-px h-4 bg-zinc-800 mx-0.5"></div>
       <div class="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
         {#each OVERLAY_CHIPS as chip}
           <button
@@ -414,11 +423,6 @@
           onclick={() => (showVideo = !showVideo)}
         >{#if showVideo}<Eye size={14} />{:else}<EyeOff size={14} />{/if}</button>
       {/if}
-      <button
-        class="p-1.5 rounded-md border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
-        title={rightCollapsed ? 'Show right sidebar' : 'Hide right sidebar'}
-        onclick={() => (rightCollapsed = !rightCollapsed)}
-      ><PanelRight size={14} /></button>
     </div>
     <ScrubBar
       {currentFrame}
@@ -459,23 +463,38 @@
   </div>
 
   {#if !rightCollapsed}
-    <ViewerInspector
-      {currentFrame}
-      {totalFrames}
-      fps={FPS}
-      faceCount={facesForCurrentFrame.length}
-      {identities}
-      {assignments}
-      {selectedIdentityIds}
-      onSelectIdentity={(iid) => {
-        if (!selectedIdentityIds.includes(iid)) selectedIdentityIds = [iid, ...selectedIdentityIds];
-      }}
-      {currentFrameValues}
-      sessionId={currentSessionId}
-      {similarity}
-      {onClusterChange}
-      {onMerge}
-    />
+    <div class="relative">
+      <ViewerInspector
+        {currentFrame}
+        {totalFrames}
+        fps={FPS}
+        faceCount={facesForCurrentFrame.length}
+        {identities}
+        {assignments}
+        {selectedIdentityIds}
+        onSelectIdentity={(iid) => {
+          if (!selectedIdentityIds.includes(iid)) selectedIdentityIds = [iid, ...selectedIdentityIds];
+        }}
+        {currentFrameValues}
+        sessionId={currentSessionId}
+        {similarity}
+        {onClusterChange}
+        {onMerge}
+      />
+      <button
+        class="absolute top-4 -left-3 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-50 inline-flex items-center justify-center z-10"
+        onclick={() => (rightCollapsed = true)}
+        aria-label="Collapse panel"
+        title="Collapse panel"
+      ><ChevronRight size={12} /></button>
+    </div>
+  {:else}
+    <button
+      class="self-start mt-4 mr-2 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-50 inline-flex items-center justify-center"
+      onclick={() => (rightCollapsed = false)}
+      aria-label="Expand panel"
+      title="Expand panel"
+    ><ChevronLeft size={12} /></button>
   {/if}
 </div>
 
