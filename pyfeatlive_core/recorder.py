@@ -79,6 +79,12 @@ class RecorderConfig:
     bit_rate: int = 1_500_000
     queue_size: int = 60          # ~2 seconds of buffering at 30 fps
     detector_info: dict = field(default_factory=dict)
+    # When True, keep the ``frame`` column already present in the offered
+    # fex instead of overwriting it with the recorder's offer counter.
+    # Live mode runs one detector call per frame (frame is always 0, so we
+    # stamp the counter); the analyze path detects whole videos and the
+    # fex already carries real source-frame indices that must be preserved.
+    trust_fex_frame: bool = False
 
 
 class SessionRecorder:
@@ -181,8 +187,12 @@ class SessionRecorder:
             # backwards-compat with already-recorded sessions.
             "fps": self.config.fps,
             "fps_target": self.config.fps,
-            "width": self.config.width,
-            "height": self.config.height,
+            # Report the resolution actually encoded into video.mp4. When
+            # config.width is 0 (analyze: keep source resolution) the real
+            # dimensions are only known after the first frame, so prefer the
+            # encoder's resolved size and fall back to the config.
+            "width": getattr(self, "_enc_w", None) or self.config.width,
+            "height": getattr(self, "_enc_h", None) or self.config.height,
             "frames_offered": self.frame_index,
             "frames_written": self.frames_written,
             "frames_dropped": self.dropped_frames,
@@ -316,16 +326,18 @@ class SessionRecorder:
 
     def _write_fex(self, fex: pd.DataFrame, frame_idx: int) -> None:
         try:
-            # Stamp the canonical recorder frame index over whatever
-            # detect_pil_images put in fex.frame (always 0 in live mode
-            # because each detector call runs on a single frame with
-            # default frame_offset). Also add a face_idx column —
-            # py-feat's forward() doesn't emit one, but the Viewer +
-            # downstream analysis need (frame, face_idx) as the natural
-            # primary key for each row.
+            # Live mode runs one detector call per frame, so fex.frame is
+            # always 0 — stamp the recorder's monotonic frame index instead.
+            # Analyze mode (trust_fex_frame) carries real source-frame
+            # indices and must keep them. Either way, derive face_idx as the
+            # position WITHIN each frame (groupby cumcount), not a global
+            # range — the Viewer + downstream analysis use (frame, face_idx)
+            # as the natural primary key, so two faces in frame 7 must be
+            # (7,0) and (7,1), never (7,0)/(8,1).
             fex = fex.copy()
-            fex["frame"] = int(frame_idx)
-            fex["face_idx"] = list(range(len(fex)))
+            if not (self.config.trust_fex_frame and "frame" in fex.columns):
+                fex["frame"] = int(frame_idx)
+            fex["face_idx"] = fex.groupby("frame").cumcount().to_numpy()
             self._ensure_csv(fex.columns)
             for row in fex.to_dict(orient="records"):
                 self._csv_writer.writerow(row)

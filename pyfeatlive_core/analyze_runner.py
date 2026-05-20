@@ -7,6 +7,7 @@ relays events to WS subscribers.
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Generator, Iterator
@@ -32,7 +33,8 @@ def _iter_video_frames(
 
     Honors clip_start / clip_end (in seconds) and skip_frames (every Nth
     frame). frame_index is the source index in the original stream, not
-    the post-skip count — so downstream Fex rows reference real positions.
+    the post-skip count — so downstream Fex rows reference real positions
+    and stay aligned with the full source video copied into the session.
     """
     container = av.open(str(path))
     try:
@@ -51,6 +53,71 @@ def _iter_video_frames(
             yield i, frame.to_image()
     finally:
         container.close()
+
+
+def _probe_video(path: Path) -> tuple[int, int, float, str | None]:
+    """Return (width, height, fps, codec_name) for the first video stream."""
+    container = av.open(str(path))
+    try:
+        s = container.streams.video[0]
+        w = int(s.codec_context.width or 0)
+        h = int(s.codec_context.height or 0)
+        fps = float(s.average_rate or 30)
+        codec = s.codec_context.name
+        return w, h, fps, codec
+    finally:
+        container.close()
+
+
+def _materialize_session_video(src: Path, session_dir: Path) -> None:
+    """Put a browser-playable ``video.mp4`` in the session dir.
+
+    The Viewer's <video> needs h264/mp4. When the source already is that,
+    we just copy it — no re-encode, no quality loss. Only when it isn't
+    (e.g. .avi, HEVC, VP9) do we transcode the full stream to h264.
+
+    The full source is preserved (not just the analyzed frames) so frame
+    indices in fex.csv — which are source-stream indices — line up with
+    the video for scrubbing and identity-thumbnail cropping.
+    """
+    import shutil
+
+    dst = session_dir / "video.mp4"
+    try:
+        _, _, _, codec = _probe_video(src)
+    except Exception:
+        codec = None
+    web_safe = src.suffix.lower() in {".mp4", ".m4v", ".mov"} and codec == "h264"
+    if web_safe:
+        shutil.copy2(src, dst)
+        return
+    _transcode_to_h264(src, dst)
+
+
+def _transcode_to_h264(src: Path, dst: Path) -> None:
+    """Stream-decode ``src`` and re-encode every frame to h264/mp4 at the
+    source resolution. Used only when the source isn't already a
+    browser-playable h264 mp4."""
+    inp = av.open(str(src))
+    out = av.open(str(dst), mode="w", format="mp4")
+    try:
+        istream = inp.streams.video[0]
+        fps = istream.average_rate or 30
+        ostream = out.add_stream("libx264", rate=fps)
+        w = int(istream.codec_context.width or 0)
+        h = int(istream.codec_context.height or 0)
+        ostream.width = w - (w % 2)
+        ostream.height = h - (h % 2)
+        ostream.pix_fmt = "yuv420p"
+        for frame in inp.decode(istream):
+            frame.pts = None
+            for packet in ostream.encode(frame):
+                out.mux(packet)
+        for packet in ostream.encode():
+            out.mux(packet)
+    finally:
+        inp.close()
+        out.close()
 
 
 def _count_video_frames(path: Path) -> int:
@@ -98,18 +165,33 @@ def run_item(
     try:
         if is_video:
             total = _count_video_frames(src)
+            vid_w, vid_h, vid_fps, _ = _probe_video(src)
         else:
             total = 1
+            with Image.open(src) as im:
+                vid_w, vid_h = im.size
+            vid_fps = 1.0
         item.total_frames = total
         yield {"type": "started", "item_id": item.id, "total_frames": total}
 
         recorder = SessionRecorder(
             sessions_root,
             RecorderConfig(
-                record_video=False,        # source video already exists on disk
+                # The recorder only writes fex.csv + metadata here; the
+                # session video is materialized separately from the source
+                # file (copy when web-playable, transcode otherwise) so we
+                # preserve the original quality and full frame range rather
+                # than re-encoding only the analyzed frames.
+                record_video=False,
                 record_fex=True,
-                width=0, height=0,         # not used when record_video=False
-                fps=30,
+                # Real source dimensions/fps so the Viewer sizes its overlay
+                # canvas to match the video (detection coords are in source
+                # pixels) and seeks by the correct frame rate.
+                width=vid_w, height=vid_h,
+                fps=int(round(vid_fps)) or 30,
+                # fex rows carry true source frame indices (see _drain_batch);
+                # keep them instead of stamping the recorder's offer counter.
+                trust_fex_frame=True,
                 detector_info={
                     "detector_type": item.pipeline.detector_type,
                     "face_model": item.pipeline.face_model,
@@ -125,11 +207,27 @@ def run_item(
             ),
         )
 
-        def _drain_batch(batch: list[Image.Image], frame_offsets: list[int]) -> None:
-            fex = detect_pil_images(detector, batch, frame_offset=frame_offsets[0])
-            # Always offer the frame so the recorder's frame_index advances
-            # and the session dir is preserved even when no faces are detected.
-            recorder.offer_frame(None, fex)
+        def _drain_batch(images: list[Image.Image], frame_offsets: list[int]) -> None:
+            # Detect the whole batch (efficient), then offer each frame's
+            # rows to the recorder INDIVIDUALLY. Offering a multi-frame
+            # batch as one unit collapsed every frame into a single frame
+            # with N "faces" — that's what made a single-face video cluster
+            # into ~batch_size identities. detect_pil_images stamps
+            # frame = frame_offset + batch_pos; we remap that to the true
+            # source index (frame_offsets[batch_pos]) so rows stay aligned
+            # with the full source video copied into the session.
+            fex = detect_pil_images(detector, images, frame_offset=frame_offsets[0])
+            for local_i in range(len(images)):
+                detect_frame = frame_offsets[0] + local_i
+                rows = fex[fex["frame"] == detect_frame] if len(fex) else fex
+                if len(rows):
+                    rows = rows.copy()
+                    rows["frame"] = int(frame_offsets[local_i])
+                # Offer even empty rows? No — skip empties; the recorder
+                # advances frame_index only for fex it writes. Frame
+                # indices come from the source, not the recorder counter.
+                if len(rows):
+                    recorder.offer_frame(None, rows)
 
         batch: list[Image.Image] = []
         offsets: list[int] = []
@@ -164,6 +262,17 @@ def run_item(
             }
 
         recorder.close()
+        # Put a playable video.mp4 in the session: copy the source when it's
+        # already h264/mp4, transcode otherwise. Images get no video. This
+        # is best-effort — a failure here shouldn't fail the whole job since
+        # fex.csv is the primary artifact.
+        if is_video:
+            try:
+                _materialize_session_video(src, recorder.dir)
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "session video materialization failed: %s", exc,
+                )
         item.status = QueueStatus.DONE
         item.session_dir = str(recorder.dir)
         item.finished_at = time.time()
