@@ -335,20 +335,28 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
     cfg = DetectorConfig(**{k: v for k, v in req.model_dump().items()
                             if k in detector_fields})
     loop = asyncio.get_running_loop()
+    # Build the new detector OUTSIDE the lock (model load is multi-second;
+    # holding the lock that long would needlessly stall in-flight detection).
     detector = await loop.run_in_executor(None, build_detector, cfg)
 
     live = request.app.state.live
-    live.detector = detector
-    live.mp_landmarks = (req.detector_type == "MPDetector")
-    if req.toggles is not None:
-        live.toggles = req.toggles
-    if req.landmark_style is not None:
-        live.landmark_style = req.landmark_style
-    if req.detection_res is not None:
-        live.detection_size = (
-            int(req.detection_res["w"]), int(req.detection_res["h"]),
-        )
-    live.reset()
+    # Swap the detector + render config UNDER the lock so we never replace
+    # the detector (or reset the in-flight flag) while _run_detection's
+    # worker is mid-pipeline using the old one. _run_detection holds this
+    # same lock across its whole detect+bake call, so this waits for any
+    # in-flight detection to finish before swapping.
+    async with live.detector_lock:
+        live.detector = detector
+        live.mp_landmarks = (req.detector_type == "MPDetector")
+        if req.toggles is not None:
+            live.toggles = req.toggles
+        if req.landmark_style is not None:
+            live.landmark_style = req.landmark_style
+        if req.detection_res is not None:
+            live.detection_size = (
+                int(req.detection_res["w"]), int(req.detection_res["h"]),
+            )
+        live.reset()
     return req.model_dump()
 
 
