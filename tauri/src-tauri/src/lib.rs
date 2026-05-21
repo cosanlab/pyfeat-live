@@ -70,6 +70,11 @@ pub fn run() {
             .inner_size(1280.0, 800.0)
             .min_inner_size(900.0, 600.0)
             .resizable(true)
+            // Tauri intercepts OS file drops by default, which swallows the
+            // webview's HTML5 drag-and-drop events — the Extract dropzone
+            // never received them. Disable the native handler so the page's
+            // ondrop/ondragover fire normally.
+            .disable_drag_drop_handler()
             .build()?;
 
             // macOS only: install our WKUIDelegate that auto-grants

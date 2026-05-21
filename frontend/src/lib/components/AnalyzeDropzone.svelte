@@ -18,14 +18,20 @@
   }
 
   function handleBrowse() {
+    // The input must be attached to the DOM for the file picker to open
+    // in WKWebView (a detached element's .click() is a no-op there).
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
     input.accept = '.mp4,.mov,.jpg,.jpeg,.png';
+    input.style.position = 'fixed';
+    input.style.left = '-9999px';
+    document.body.appendChild(input);
     input.onchange = () => {
       if (input.files && input.files.length > 0) {
         onFiles(Array.from(input.files));
       }
+      input.remove();
     };
     input.click();
   }
