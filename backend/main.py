@@ -46,11 +46,18 @@ def create_app() -> FastAPI:
     #    Once redirected, the SPA is same-origin so CORS no longer applies.
     app.add_middleware(
         CORSMiddleware,
-        # Matches the Vite dev server, localhost/127.0.0.1 on any port, and
-        # the Tauri webview's custom scheme (tauri://localhost on macOS/Linux,
-        # http(s)://tauri.localhost on Windows) — whatever exact Origin the
-        # splash poll carries.
-        allow_origin_regex=r"(tauri://.*|https?://(localhost|127\.0\.0\.1|tauri\.localhost)(:\d+)?)",
+        # Exact, known origins only (this backend binds 127.0.0.1 and is
+        # reached by two things: the Vite dev server in browser dev, and the
+        # Tauri webview's splash poll). The webview's custom scheme is
+        # tauri://localhost on macOS/Linux and http(s)://tauri.localhost on
+        # Windows. No wildcards.
+        allow_origins=[
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
