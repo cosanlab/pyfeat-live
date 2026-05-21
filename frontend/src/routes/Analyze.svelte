@@ -56,7 +56,10 @@
       [presets, items, compute] = await Promise.all([
         presetsApi.list(), analyzeApi.list(), systemApi.compute(),
       ]);
-      if (presets.length > 0) activePreset = presets[0] ?? null;
+      // Default to the classic retinaface preset when present; fall back
+      // to the first preset otherwise.
+      activePreset = presets.find(p => p.id === 'classic-retinaface')
+        ?? presets[0] ?? null;
       if (compute.mps.available) computeDevice = 'mps';
       else if (compute.cuda.available) computeDevice = 'cuda';
       ws = analyzeApi.openWebSocket(handleEvent);
