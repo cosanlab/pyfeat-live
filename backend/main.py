@@ -36,11 +36,25 @@ def create_app() -> FastAPI:
         openapi_url="/api/openapi.json",
     )
 
-    # Vite dev server origins; in production (Tauri webview) the
-    # frontend is served from the same origin so CORS is moot.
+    # CORS origins:
+    #  - Vite dev server (browser dev).
+    #  - The Tauri webview's own scheme: the splash (setup.html, loaded as
+    #    tauri://localhost) polls http://127.0.0.1:<port>/api/system/health
+    #    cross-origin to know when to redirect into the app. Without the
+    #    tauri origin allowed, that poll is CORS-blocked and the splash
+    #    hangs on "waiting for the runtime" even though the backend is up.
+    #    Once redirected, the SPA is same-origin so CORS no longer applies.
     app.add_middleware(
         CORSMiddleware,
+        # Exact, known origins only (this backend binds 127.0.0.1 and is
+        # reached by two things: the Vite dev server in browser dev, and the
+        # Tauri webview's splash poll). The webview's custom scheme is
+        # tauri://localhost on macOS/Linux and http(s)://tauri.localhost on
+        # Windows. No wildcards.
         allow_origins=[
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
             "http://localhost:5173",
             "http://127.0.0.1:5173",
         ],
