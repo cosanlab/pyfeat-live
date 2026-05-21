@@ -10,7 +10,7 @@
 # sidecar/runtime/requirements.in --output-file sidecar/runtime/
 # requirements.txt --generate-hashes` once we add a .in input. For now
 # this file is the source of truth.
-py-feat @ git+https://github.com/cosanlab/py-feat@437b651
+py-feat @ git+https://github.com/cosanlab/py-feat@63a98666e96b94084f50e379967e3ae7d3337a42
 fastapi>=0.115
 uvicorn[standard]>=0.34
 python-multipart>=0.0.18
