@@ -246,12 +246,74 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
     // Stash the handle so RunEvent::ExitRequested can kill it.
     *app.state::<SidecarState>().0.lock().unwrap() = Some(child);
 
-    // Tell the splash the runtime is up; the page will start polling
-    // /_stcore/health and redirect when streamlit is serving.
+    // Tell the splash the runtime install finished. setup.html streams the
+    // bootstrap logs and, as a *fallback*, polls /api/system/health to
+    // redirect itself.
     app.emit(EVENT_BOOTSTRAP_DONE, SIDECAR_PORT)
         .map_err(|e| format!("could not emit bootstrap-done: {e}"))?;
 
+    // Primary handoff: poll the backend natively (no webview / CORS
+    // involvement) and navigate the window to it once it serves. This is
+    // the robust path — it doesn't depend on WebKit's cross-origin fetch
+    // behavior the way the splash's own poll does.
+    let nav_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if wait_for_backend(SIDECAR_PORT, std::time::Duration::from_secs(600)).await {
+            if let Some(window) = nav_handle.get_webview_window("main") {
+                match tauri::Url::parse(&format!("http://127.0.0.1:{SIDECAR_PORT}/")) {
+                    Ok(url) => {
+                        if let Err(e) = window.navigate(url) {
+                            log::error!("navigate to backend failed: {e}");
+                        }
+                    }
+                    Err(e) => log::error!("bad backend url: {e}"),
+                }
+            }
+        } else {
+            log::error!("backend did not become healthy within timeout");
+        }
+    });
+
     Ok(())
+}
+
+/// Poll the backend's health endpoint until it responds 200 or `timeout`
+/// elapses. Runs natively in the Rust shell — no webview, no CORS.
+async fn wait_for_backend(port: u16, timeout: std::time::Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if backend_healthy(port).await {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+}
+
+/// One health probe: open a TCP connection and issue a minimal HTTP/1.0 GET
+/// against /api/system/health, returning true on a "200" status line. Kept
+/// dependency-free (no HTTP client crate) since the check is trivial.
+async fn backend_healthy(port: u16) -> bool {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let Ok(mut stream) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await else {
+        return false;
+    };
+    let req = format!(
+        "GET /api/system/health HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(req.as_bytes()).await.is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 128];
+    match stream.read(&mut buf).await {
+        Ok(n) if n > 0 => {
+            let head = String::from_utf8_lossy(&buf[..n]);
+            head.starts_with("HTTP/1.") && head.contains(" 200 ")
+        }
+        _ => false,
+    }
 }
 
 /// Path of the stamp file recording the requirements.txt we last installed.
