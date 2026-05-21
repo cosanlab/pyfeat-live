@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, Optional
 
 import av
@@ -25,6 +26,17 @@ from pyfeatlive_core.recorder import (
 
 
 router = APIRouter(prefix="/api/live", tags=["live"])
+
+# Live detection + overlay-bake + PNG-encode all run here, OFF the event
+# loop, so the loop stays free to accept uploads and feed the recorder.
+# Single worker: only one detection is ever in flight (gated by
+# _detection_in_flight), and a single thread avoids oversubscribing torch's
+# own intra-op thread pool. The heavy work (torch, draw, zlib) releases the
+# GIL, so this thread genuinely runs in parallel with the loop and the
+# recorder's encoder thread.
+_DETECTION_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="live-detect",
+)
 
 
 @router.post("/frame")
@@ -185,58 +197,68 @@ async def _run_detection(live, img: Image.Image) -> None:
     """
     loop = asyncio.get_running_loop()
     try:
-        # Decide detection-input resolution.
-        det_img, scale_x, scale_y = _detection_input(img, live.detection_size)
-
+        # Snapshot the render config on the loop (under the detector lock,
+        # which also guards against a /configure rebuild mid-detection), then
+        # run the entire detect → bake → PNG-encode pipeline in the dedicated
+        # worker thread. Keeping ALL of it off the loop (not just detect) is
+        # the point: draw_overlays + encode_png are CPU-heavy and previously
+        # ran on the loop, blocking uploads + the recorder feed.
         async with live.detector_lock:
+            detector = live.detector
+            detection_size = live.detection_size
+            toggles = live.toggles or {}
+            mp_landmarks = live.mp_landmarks
+            landmark_style = live.landmark_style or "mesh"
             t0 = time.perf_counter()
-            fex = await loop.run_in_executor(
-                None, detect_pil_images, live.detector, [det_img],
+            png, fex, dims = await loop.run_in_executor(
+                _DETECTION_EXECUTOR,
+                _detect_and_bake,
+                detector, img, detection_size,
+                toggles, mp_landmarks, landmark_style,
             )
             dur = time.perf_counter() - t0
-        # One-line trace so we can see the per-detection cost +
-        # actual input size from the backend log without enabling
-        # full PYFEAT_LIVE_PROFILE instrumentation.
-        print(
-            f"detect: input={det_img.size[0]}x{det_img.size[1]} "
-            f"dur={dur*1000:.0f}ms"
-        )
+        print(f"detect+bake: {dims[0]}x{dims[1]} dur={dur*1000:.0f}ms")
 
-        # Scale detector pixel coords back to the source frame's space
-        # before drawing. No-op when det == source.
-        if fex is not None and len(fex) > 0 and (scale_x != 1.0 or scale_y != 1.0):
-            fex = _scale_fex_coords(fex, scale_x, scale_y)
-
-        # Bake overlay onto a copy of the source-resolution image.
-        frame_arr = np.asarray(img).copy()
-        if fex is not None and len(fex) > 0:
-            draw_overlays(
-                frame_arr,
-                fex,
-                live.toggles or {},
-                mp_landmarks=live.mp_landmarks,
-                landmark_style=live.landmark_style or "mesh",
-            )
-
-        # PNG (lossless) — overlay edges and 1-pixel landmark dots
-        # survive intact, no DCT quantization "+" artifacts.
-        live._cached_baked_jpeg = encode_png(frame_arr)
+        live._cached_baked_jpeg = png
         live._cached_fex = fex
-        # Record the TRUE bake resolution (source upload size). This is
-        # what the overlay coords are in — NOT the detection input size.
-        # frame_arr is HxWx3, so shape[1]=width, shape[0]=height.
-        live._cached_frame_dims = (frame_arr.shape[1], frame_arr.shape[0])
+        # dims = the TRUE bake resolution (source upload size) — what the
+        # overlay coords are in, NOT the detection input size.
+        live._cached_frame_dims = dims
         live._detection_generation += 1
-        # No cooldown — _detection_in_flight alone is enough to
-        # prevent queueing. Adding a `dur` cooldown after each
-        # detection doubled the cycle time (100ms detect + 100ms
-        # idle = 5 fps instead of 10). Detections now run back-to-
-        # back as soon as the previous one releases the flag.
+        # No cooldown — _detection_in_flight alone prevents queueing.
         live._next_detection_at = 0.0
     except Exception:
         pass
     finally:
         live._detection_in_flight = False
+
+
+def _detect_and_bake(
+    detector, img: Image.Image, detection_size,
+    toggles: dict, mp_landmarks: bool, landmark_style: str,
+):
+    """Full per-frame pipeline, run in the detection worker thread:
+    detect → scale coords to source space → bake overlay → PNG-encode.
+
+    Returns ``(png_bytes, fex, (width, height))``. Pure function over its
+    arguments (no shared ``live`` state), so it's safe off the loop; the
+    caller assigns the results back on the loop.
+    """
+    det_img, scale_x, scale_y = _detection_input(img, detection_size)
+    fex = detect_pil_images(detector, [det_img])
+    # Scale detector pixel coords back to source space (no-op when equal).
+    if fex is not None and len(fex) > 0 and (scale_x != 1.0 or scale_y != 1.0):
+        fex = _scale_fex_coords(fex, scale_x, scale_y)
+    # Bake overlay onto a copy of the source-resolution frame.
+    frame_arr = np.asarray(img).copy()
+    if fex is not None and len(fex) > 0:
+        draw_overlays(
+            frame_arr, fex, toggles,
+            mp_landmarks=mp_landmarks, landmark_style=landmark_style,
+        )
+    # PNG (lossless) so overlay edges + 1px landmark dots survive intact.
+    png = encode_png(frame_arr)
+    return png, fex, (frame_arr.shape[1], frame_arr.shape[0])
 
 
 def _detection_input(
