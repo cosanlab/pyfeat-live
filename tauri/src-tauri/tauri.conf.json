@@ -36,7 +36,8 @@
       "../../sidecar/sidecar.py": "runtime/sidecar.py",
       "../../sidecar/runtime/requirements.txt": "runtime/requirements.txt",
       "../../backend": "backend",
-      "../../pyfeatlive_core": "pyfeatlive_core"
+      "../../pyfeatlive_core": "pyfeatlive_core",
+      "../dist": "dist"
     },
     "macOS": {
       "frameworks": [],
