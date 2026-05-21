@@ -280,26 +280,17 @@ class SessionRecorder:
         self._ensure_video(frame)
         if self._video_stream is None:
             return
-        # Restamp PTS using a contiguous "frames-actually-written"
-        # counter, NOT the offer-time idx. Dropped frames create gaps
-        # in `idx`, and h264 + the mp4 muxer get unhappy with sparse
-        # PTS sequences. Contiguous PTS at the stream's nominal fps
-        # gives a clean MP4 even under heavy drop pressure (the video
-        # will be slightly compressed in real time vs wall-clock,
-        # which is the right trade-off — the alternative is a
-        # warning-spammy or invalid file).
-        arr = frame.to_ndarray(format="rgb24")
-        # Downscale to the encode resolution if the source is larger.
-        if arr.shape[1] != self._enc_w or arr.shape[0] != self._enc_h:
-            from PIL import Image
-            arr = np.asarray(
-                Image.fromarray(arr, "RGB").resize(
-                    (self._enc_w, self._enc_h), Image.BILINEAR,
-                )
-            )
-        new_frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
+        # Downscale + convert to the encoder's pixel format in a single
+        # libav swscale pass via reformat(). This RELEASES the GIL during
+        # the conversion, unlike the previous to_ndarray() + PIL resize() +
+        # from_ndarray() round-trip, which held the GIL on the writer thread
+        # for every frame. At live upload rates that GIL contention starved
+        # the async detection loop down to ~1 fps while recording.
         try:
-            for packet in self._video_stream.encode(new_frame):
+            out = frame.reformat(
+                width=self._enc_w, height=self._enc_h, format="yuv420p",
+            )
+            for packet in self._video_stream.encode(out):
                 self._video_container.mux(packet)
         except Exception as e:
             logger.warning("Encode failed at frame %d: %s", idx, e)
