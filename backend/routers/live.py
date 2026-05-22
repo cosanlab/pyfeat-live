@@ -78,32 +78,11 @@ async def upload_frame(request: Request) -> Response:
         loop = asyncio.get_running_loop()
         loop.create_task(_run_detection(live, img))
 
-    # Snapshot the cached fex once so both the recorder feed and the
-    # response-header meta dump see consistent data.
+    # Snapshot the cached fex once for the response-header meta dump.
+    # NOTE: the recorder is fed from _run_detection (at detection rate),
+    # NOT here per-upload — feeding every uploaded frame saturated the
+    # event loop and starved detection to ~1 fps while recording.
     cached_fex = live._cached_fex
-
-    # --- feed recorder (uses LIVE upload-rate frames, not display) -
-    # Recording wants smooth video at upload cadence regardless of
-    # the detection-locked display. For overlay mode we bake on a
-    # copy of the source using cached fex (drift OK for the file).
-    if live.recorder is not None:
-        if live.recorder.config.video_mode == "overlay":
-            feed_arr = np.asarray(img).copy()
-            if cached_fex is not None and len(cached_fex) > 0:
-                draw_overlays(
-                    feed_arr,
-                    cached_fex,
-                    live.toggles or {},
-                    mp_landmarks=live.mp_landmarks,
-                    landmark_style=live.landmark_style or "mesh",
-                )
-        else:
-            feed_arr = np.asarray(img)
-        av_frame = av.VideoFrame.from_ndarray(feed_arr, format="rgb24")
-        live.recorder.offer_frame(
-            av_frame,
-            cached_fex if cached_fex is not None and len(cached_fex) else None,
-        )
 
     # --- return cached locked frame (or echo source on first call) -
     headers = {"X-Detection-Generation": str(live._detection_generation)}
@@ -210,7 +189,7 @@ async def _run_detection(live, img: Image.Image) -> None:
             mp_landmarks = live.mp_landmarks
             landmark_style = live.landmark_style or "mesh"
             t0 = time.perf_counter()
-            png, fex, dims = await loop.run_in_executor(
+            png, fex, dims, baked_arr = await loop.run_in_executor(
                 _DETECTION_EXECUTOR,
                 _detect_and_bake,
                 detector, img, detection_size,
@@ -227,6 +206,26 @@ async def _run_detection(live, img: Image.Image) -> None:
         live._detection_generation += 1
         # No cooldown — _detection_in_flight alone prevents queueing.
         live._next_detection_at = 0.0
+
+        # Feed the recorder HERE — at the detection rate — instead of on
+        # every uploaded frame. The per-upload feed (np.asarray +
+        # VideoFrame.from_ndarray on the event loop) saturated the loop when
+        # the client posted fast and starved detection to ~1 fps while
+        # recording. Recording at detection rate makes recording cost
+        # independent of upload rate, and the recorder's wall-clock PTS keeps
+        # playback real-time despite the variable interval.
+        rec = live.recorder
+        if rec is not None:
+            try:
+                src = baked_arr if rec.config.video_mode == "overlay" \
+                    else np.ascontiguousarray(np.asarray(img))
+                av_frame = av.VideoFrame.from_ndarray(src, format="rgb24")
+                rec.offer_frame(
+                    av_frame,
+                    fex if fex is not None and len(fex) else None,
+                )
+            except Exception:
+                pass
     except Exception:
         pass
     finally:
@@ -258,7 +257,7 @@ def _detect_and_bake(
         )
     # PNG (lossless) so overlay edges + 1px landmark dots survive intact.
     png = encode_png(frame_arr)
-    return png, fex, (frame_arr.shape[1], frame_arr.shape[0])
+    return png, fex, (frame_arr.shape[1], frame_arr.shape[0]), frame_arr
 
 
 def _detection_input(
