@@ -95,6 +95,40 @@ async def add_to_queue(
     return _item_to_dict(item)
 
 
+class AddByPathRequest(BaseModel):
+    path: str
+    pipeline: dict
+    video: dict
+
+
+@router.post("/queue/by-path", status_code=201)
+def add_by_path(req: AddByPathRequest, request: Request) -> dict:
+    """Add a queue item by absolute path on the user's disk.
+
+    Used by the Tauri native file picker — the desktop shell hands us
+    an OS path the user picked, and the sidecar reads it directly. Skips
+    the multipart upload roundtrip that the browser flow needs.
+
+    The file is borrowed, not owned: removing the queue row never
+    deletes the user's source video.
+    """
+    p = Path(req.path)
+    if not p.exists():
+        raise HTTPException(404, f"file not found: {req.path}")
+    if not p.is_file():
+        raise HTTPException(400, f"not a regular file: {req.path}")
+    item = AnalyzeQueueItem(
+        id="auto",
+        filename=p.name,
+        file_path=p,
+        pipeline=PipelineConfig(**req.pipeline),
+        video=VideoParams(**req.video),
+        owns_file=False,
+    )
+    request.app.state.analyze_queue.add(item)
+    return _item_to_dict(item)
+
+
 class PatchItemRequest(BaseModel):
     pipeline: Optional[dict] = None
     video: Optional[dict] = None
@@ -142,12 +176,15 @@ async def delete_item(item_id: str, request: Request) -> None:
                 )
         else:
             raise HTTPException(409, "this item is not the active runner")
-    # Clean up the uploaded file
-    try:
-        if item.file_path.exists():
-            item.file_path.unlink()
-    except OSError:
-        pass
+    # Clean up the uploaded file — but ONLY if we own it. Items added
+    # via the native picker hand us a borrowed path under the user's
+    # home; we must never delete those.
+    if item.owns_file:
+        try:
+            if item.file_path.exists():
+                item.file_path.unlink()
+        except OSError:
+            pass
     q.remove(item_id)
     return None
 

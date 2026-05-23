@@ -110,3 +110,43 @@ def test_run_processes_one_item(client, analyze_upload):
     items = client.get("/api/analyze/queue").json()
     assert items[0]["status"] == "done", items[0]
     assert items[0]["session_dir"] is not None
+
+
+def test_add_by_path(client, analyze_upload, tmp_path):
+    """Tauri native picker flow: enqueue by absolute path, never copy."""
+    src = tmp_path / "vid.mov"
+    src.write_bytes(Path("tests/core/fixtures/sample_image.jpg").read_bytes())
+    payload = {
+        "path": str(src),
+        "pipeline": {
+            "detector_type": "MPDetector", "face_model": "retinaface",
+            "landmark_model": "mp_facemesh_v2", "au_model": "mp_blendshapes",
+            "emotion_model": None, "identity_model": None,
+            "preset_id": None, "preset_name": None,
+        },
+        "video": {"skip_frames": 1, "clip_start": None,
+                  "clip_end": None, "track_identities": False},
+    }
+    r = client.post("/api/analyze/queue/by-path", json=payload)
+    assert r.status_code == 201, r.text
+    item = r.json()
+    assert item["filename"] == "vid.mov"
+    # Delete should NOT remove the user's file (we don't own it).
+    r = client.delete(f"/api/analyze/queue/{item['id']}")
+    assert r.status_code == 204
+    assert src.exists(), "by-path item must not delete the user's source file on removal"
+
+
+def test_add_by_path_404_missing(client, analyze_upload):
+    r = client.post("/api/analyze/queue/by-path", json={
+        "path": "/nonexistent/file.mp4",
+        "pipeline": {
+            "detector_type": "MPDetector", "face_model": "retinaface",
+            "landmark_model": "mp_facemesh_v2", "au_model": "mp_blendshapes",
+            "emotion_model": None, "identity_model": None,
+            "preset_id": None, "preset_name": None,
+        },
+        "video": {"skip_frames": 1, "clip_start": None,
+                  "clip_end": None, "track_identities": False},
+    })
+    assert r.status_code == 404

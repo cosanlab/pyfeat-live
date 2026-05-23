@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@lucide/svelte": "^1.16.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-process": "^2.0.0",
     "@tauri-apps/plugin-updater": "^2.0.0"
   }

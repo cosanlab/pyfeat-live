@@ -104,6 +104,17 @@
     }
   }
 
+  async function addPaths(paths: string[]) {
+    for (const p of paths) {
+      try {
+        const added = await analyzeApi.addByPath(p, defaultPipeline(), DEFAULT_VIDEO);
+        items = [...items, added];
+      } catch (e: any) {
+        apiError = `Add failed for ${p}: ${e?.message ?? e}`;
+      }
+    }
+  }
+
   async function deleteItem(id: string) {
     try {
       await analyzeApi.delete(id);
@@ -200,7 +211,7 @@
 
   <!-- Body -->
   <div class="flex-1 overflow-auto p-5 space-y-3">
-    <AnalyzeDropzone onFiles={addFiles} activePresetName={activePreset?.name ?? null} />
+    <AnalyzeDropzone onFiles={addFiles} onPaths={addPaths} activePresetName={activePreset?.name ?? null} />
 
     <div class="rounded-lg border border-zinc-900 bg-zinc-950 overflow-hidden">
       <div class="flex items-center gap-3 px-3.5 py-2 border-b border-zinc-900">
