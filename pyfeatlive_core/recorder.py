@@ -34,6 +34,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 from typing import Optional
 
@@ -115,6 +116,11 @@ class SessionRecorder:
         self._video_stream = None
         self._csv_file = None
         self._csv_writer = None
+        # Wall-clock PTS: frames are now offered at the (variable) detection
+        # rate, not a fixed cadence, so we timestamp each by elapsed real
+        # time (ms) to keep playback real-time instead of fixed-fps fast.
+        self._video_t0: Optional[float] = None
+        self._last_pts = -1
 
         self._writer_thread = threading.Thread(
             target=self._writer_loop, name="SessionRecorder", daemon=True
@@ -270,6 +276,9 @@ class SessionRecorder:
             stream.width = target_w
             stream.height = target_h
             stream.pix_fmt = "yuv420p"
+            # Millisecond time base so we can stamp wall-clock PTS (variable
+            # frame intervals at detection rate) and get real-time playback.
+            stream.time_base = Fraction(1, 1000)
             self._video_stream = stream
         except Exception as e:
             logger.exception("Could not open video writer: %s", e)
@@ -290,6 +299,17 @@ class SessionRecorder:
             out = frame.reformat(
                 width=self._enc_w, height=self._enc_h, format="yuv420p",
             )
+            # Stamp wall-clock PTS (ms since first frame) so a variable feed
+            # rate still plays back in real time. Force strictly increasing.
+            now = time.monotonic()
+            if self._video_t0 is None:
+                self._video_t0 = now
+            pts = int((now - self._video_t0) * 1000)
+            if pts <= self._last_pts:
+                pts = self._last_pts + 1
+            self._last_pts = pts
+            out.pts = pts
+            out.time_base = Fraction(1, 1000)
             for packet in self._video_stream.encode(out):
                 self._video_container.mux(packet)
         except Exception as e:
