@@ -55,6 +55,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(SidecarState(Mutex::new(None)))
         .setup(|app| {
             // Window first so the splash is visible while the install runs.

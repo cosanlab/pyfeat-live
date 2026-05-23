@@ -31,6 +31,11 @@ on:
         description: "Tag to build (must already exist)"
         required: true
 
+# Both jobs upload to the same GitHub Release that tauri-action drafts,
+# so we need `contents: write`.
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -245,4 +250,117 @@ jobs:
             Subsequent launches are instant.
           releaseDraft: true
           prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
-          includeUpdaterJson: true
+          # tauri-action's `includeUpdaterJson` silently drops latest.json
+          # in our matrix setup ("Signature not found for the updater JSON.
+          # Skipping upload..." in the run logs for v0.8.0 and v0.8.1).
+          # We assemble it ourselves in the publish job below.
+          includeUpdaterJson: false
+
+      # Upload the per-platform .sig produced by tauri-action to the same
+      # draft release, and save the same metadata as a workflow artifact
+      # so the fan-in publish job can build latest.json from all targets.
+      - name: collect updater .sig (macOS)
+        if: startsWith(matrix.platform, 'macos') && env.TAURI_SIGNING_PRIVATE_KEY != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          repo="${{ github.repository }}"
+          case "${{ matrix.target }}" in
+            aarch64-apple-darwin)  arch=aarch64 ; platform_key=darwin-aarch64 ;;
+            x86_64-apple-darwin)   arch=x64     ; platform_key=darwin-x86_64 ;;
+            *) echo "unknown target ${{ matrix.target }}" >&2 ; exit 1 ;;
+          esac
+          # tauri-action renames "<ProductName> <ver>.app.tar.gz" to
+          # "<ProductName>_<arch>.app.tar.gz" on upload. Mirror that so
+          # the .sig sits next to the .tar.gz it signs.
+          targz_name="Py-feat.Live_${arch}.app.tar.gz"
+          sig_name="${targz_name}.sig"
+          src_sig="$(find tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos \
+                       -name '*.app.tar.gz.sig' -type f | head -n1)"
+          if [ -z "$src_sig" ]; then
+            echo "no .sig produced — TAURI_SIGNING_PRIVATE_KEY may be unset" >&2
+            exit 1
+          fi
+          cp "$src_sig" "$sig_name"
+          # Upload alongside the .tar.gz that tauri-action already pushed.
+          # --clobber is safe: if a previous run uploaded a stale .sig
+          # we want the fresh one to win.
+          gh release upload "$tag" "$sig_name" --repo "$repo" --clobber
+
+          # Stash platform metadata for the publish job. The .sig
+          # contents are inlined into latest.json by the manifest, so
+          # we hand the publish job exactly what it needs as JSON.
+          base_url="https://github.com/${repo}/releases/download/${tag}"
+          mkdir -p platform-sig
+          jq -n \
+            --arg key "$platform_key" \
+            --arg sig "$(cat "$src_sig")" \
+            --arg url "${base_url}/${targz_name}" \
+            '{key: $key, signature: $sig, url: $url}' \
+            > "platform-sig/${platform_key}.json"
+
+      - uses: actions/upload-artifact@v4
+        if: startsWith(matrix.platform, 'macos') && env.TAURI_SIGNING_PRIVATE_KEY != ''
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          name: platform-sig-${{ matrix.target }}
+          path: platform-sig/
+          retention-days: 7
+
+  # Fan-in: read each platform's signature metadata, assemble
+  # latest.json (the manifest Tauri's updater polls), upload it to the
+  # same draft release. This runs only if the build matrix produced sig
+  # files — fork PR builds without the signing secret skip cleanly.
+  publish-updater-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: download platform sig metadata
+        uses: actions/download-artifact@v4
+        with:
+          pattern: platform-sig-*
+          path: platform-sig
+          merge-multiple: true
+
+      - name: assemble + upload latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          repo="${{ github.repository }}"
+          semver="${tag#v}"
+          pub_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          shopt -s nullglob
+          metadata_files=(platform-sig/*.json)
+          if [ ${#metadata_files[@]} -eq 0 ]; then
+            echo "no platform sig metadata — nothing to publish" >&2
+            exit 0
+          fi
+
+          platforms='{}'
+          for f in "${metadata_files[@]}"; do
+            key="$(jq -r .key "$f")"
+            sig="$(jq -r .signature "$f")"
+            url="$(jq -r .url "$f")"
+            platforms="$(echo "$platforms" | jq \
+              --arg k "$key" --arg sig "$sig" --arg url "$url" \
+              '. + {($k): {signature: $sig, url: $url}}')"
+          done
+
+          jq -n \
+            --arg version "$semver" \
+            --arg notes "See https://github.com/${repo}/releases/tag/${tag}" \
+            --arg pub_date "$pub_date" \
+            --argjson platforms "$platforms" \
+            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}' \
+            > latest.json
+          cat latest.json
+          gh release upload "$tag" latest.json --repo "$repo" --clobber
