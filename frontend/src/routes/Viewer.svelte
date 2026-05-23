@@ -17,6 +17,8 @@
   import OverlayConfigModal from '../lib/components/OverlayConfigModal.svelte';
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
+  import ChevronUp from '@lucide/svelte/icons/chevron-up';
+  import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import Eye from '@lucide/svelte/icons/eye';
   import EyeOff from '@lucide/svelte/icons/eye-off';
   import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
@@ -64,6 +66,7 @@
   // --- Layout + overlay-style state -------------------------------------
   let leftCollapsed = $state(false);
   let rightCollapsed = $state(false);
+  let bottomCollapsed = $state(false);
   let showVideo = $state(true);
   let showOverlayConfig = $state(false);
   const hasVideo = $derived((currentSession as SessionDetail | null)?.has_video ?? false);
@@ -444,28 +447,43 @@
       onAnnotationClick={(a) => { currentAnnotationId = a.annotation_id; onSeek(a.start_frame); }}
       onDragRangeComplete={onDragRangeComplete}
     />
-    <TimeseriesPlot
-      {fexRows}
-      {totalFrames}
-      {currentFrame}
-      {identities}
-      {assignments}
-      {annotations}
-      {selectedIdentityIds}
-      {selectedSeries}
-      onToggleIdentity={(iid) => {
-        selectedIdentityIds = selectedIdentityIds.includes(iid)
-          ? selectedIdentityIds.filter(i => i !== iid)
-          : [...selectedIdentityIds, iid];
-      }}
-      onToggleSeries={(s) => {
-        selectedSeries = selectedSeries.includes(s)
-          ? selectedSeries.filter(x => x !== s)
-          : [...selectedSeries, s];
-      }}
-      onSeek={onSeek}
-      onDragRangeComplete={onDragRangeComplete}
-    />
+    <!-- Timeseries: collapsible bottom drawer (mirrors the side panels).
+         Collapsed = just the header strip, giving the video the freed
+         vertical space; expanded = the full plot + legend. -->
+    <div class="border-t border-zinc-900 bg-zinc-950 shrink-0">
+      <button
+        class="w-full flex items-center gap-1.5 px-3.5 py-1.5 text-[10px] uppercase tracking-wider font-semibold text-zinc-500 hover:text-zinc-300"
+        onclick={() => (bottomCollapsed = !bottomCollapsed)}
+        title={bottomCollapsed ? 'Show timeseries' : 'Hide timeseries'}
+      >
+        {#if bottomCollapsed}<ChevronUp size={12} />{:else}<ChevronDown size={12} />{/if}
+        Timeseries
+      </button>
+      {#if !bottomCollapsed}
+        <TimeseriesPlot
+          {fexRows}
+          {totalFrames}
+          {currentFrame}
+          {identities}
+          {assignments}
+          {annotations}
+          {selectedIdentityIds}
+          {selectedSeries}
+          onToggleIdentity={(iid) => {
+            selectedIdentityIds = selectedIdentityIds.includes(iid)
+              ? selectedIdentityIds.filter(i => i !== iid)
+              : [...selectedIdentityIds, iid];
+          }}
+          onToggleSeries={(s) => {
+            selectedSeries = selectedSeries.includes(s)
+              ? selectedSeries.filter(x => x !== s)
+              : [...selectedSeries, s];
+          }}
+          onSeek={onSeek}
+          onDragRangeComplete={onDragRangeComplete}
+        />
+      {/if}
+    </div>
   </div>
 
   {#if !rightCollapsed}

@@ -58,8 +58,8 @@ pub fn run() {
         .manage(SidecarState(Mutex::new(None)))
         .setup(|app| {
             // Window first so the splash is visible while the install runs.
-            // The splash (setup.html) listens for bootstrap:// events and
-            // navigates to the streamlit URL once ready.
+            // The splash (setup.html) polls the backend and redirects once
+            // it's serving (the Rust shell also drives the redirect).
             let port_arg = format!("setup.html#{SIDECAR_PORT}");
             let window = WebviewWindowBuilder::new(
                 app,
@@ -67,9 +67,14 @@ pub fn run() {
                 WebviewUrl::App(port_arg.into()),
             )
             .title("Py-feat Live")
-            .inner_size(1280.0, 800.0)
+            // Conservative default that fits small laptops (a 1280x800 screen
+            // couldn't show the old 1280x800 window once the menu bar/title
+            // bar are accounted for — it opened partly off-screen). Centered
+            // and resizable, so larger displays can grow it.
+            .inner_size(1100.0, 720.0)
             .min_inner_size(900.0, 600.0)
             .resizable(true)
+            .center()
             // Tauri intercepts OS file drops by default, which swallows the
             // webview's HTML5 drag-and-drop events — the Extract dropzone
             // never received them. Disable the native handler so the page's
