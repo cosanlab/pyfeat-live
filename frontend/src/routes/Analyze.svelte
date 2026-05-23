@@ -85,6 +85,9 @@
     } else if (ev.type === 'failed') {
       const i = items.find(x => x.id === ev.item_id);
       if (i) { i.status = 'failed'; i.error = ev.error; items = [...items]; }
+    } else if (ev.type === 'cancelled') {
+      const i = items.find(x => x.id === ev.item_id);
+      if (i) { i.status = 'cancelled'; i.session_dir = ev.session_dir; items = [...items]; }
     } else if (ev.type === 'queue_idle') {
       isRunning = false;
     }

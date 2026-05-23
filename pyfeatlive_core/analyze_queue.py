@@ -21,6 +21,7 @@ class QueueStatus(str, enum.Enum):
     RUNNING = "running"
     DONE = "done"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass
@@ -106,6 +107,8 @@ class AnalyzeQueue:
         before = len(self._items)
         self._items = [
             i for i in self._items
-            if i.status not in (QueueStatus.DONE, QueueStatus.FAILED)
+            if i.status not in (
+                QueueStatus.DONE, QueueStatus.FAILED, QueueStatus.CANCELLED,
+            )
         ]
         return before - len(self._items)

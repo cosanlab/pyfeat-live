@@ -60,7 +60,7 @@ export interface Preset {
 }
 
 // ---------- Analyze ----------
-export type QueueStatus = 'queued' | 'running' | 'done' | 'failed';
+export type QueueStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
 export interface PipelineConfig {
   detector_type: 'Detector' | 'MPDetector';
@@ -100,4 +100,5 @@ export type AnalyzeEvent =
   | { type: 'progress'; item_id: string; frames_done: number; fps: number }
   | { type: 'done'; item_id: string; session_dir: string }
   | { type: 'failed'; item_id: string; error: string }
+  | { type: 'cancelled'; item_id: string; session_dir: string }
   | { type: 'queue_idle' };

@@ -8,9 +8,10 @@ relays events to WS subscribers.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from pathlib import Path
-from typing import Generator, Iterator
+from typing import Generator, Iterator, Optional
 
 import av
 from PIL import Image
@@ -139,6 +140,7 @@ def run_item(
     detector,                                # py-feat Detector | MPDetector
     sessions_root: Path,
     batch_size: int = 8,
+    cancel_event: Optional[threading.Event] = None,
 ) -> Generator[dict, None, None]:
     """Run detection on one queue item. Yields:
 
@@ -146,8 +148,15 @@ def run_item(
       {"type": "progress", "item_id": ..., "frames_done": k, "fps": p}
       {"type": "done", "item_id": ..., "session_dir": "..."}
       {"type": "failed", "item_id": ..., "error": "..."}
+      {"type": "cancelled", "item_id": ..., "session_dir": "..."}
 
     Mutates ``item`` in place: status / progress / session_dir / error.
+
+    Cancellation is cooperative: between batches we check
+    ``cancel_event.is_set()``. We can't interrupt mid-batch because
+    detection runs inside a single GIL-releasing call that doesn't expose
+    a cancellation hook. The session dir holds whatever fex.csv rows were
+    written before the cancel — partial but consistent.
     """
     item.status = QueueStatus.RUNNING
     item.started_at = time.time()
@@ -229,6 +238,9 @@ def run_item(
                 if len(rows):
                     recorder.offer_frame(None, rows)
 
+        def _cancelled() -> bool:
+            return cancel_event is not None and cancel_event.is_set()
+
         batch: list[Image.Image] = []
         offsets: list[int] = []
         frames_done = 0
@@ -237,7 +249,11 @@ def run_item(
             _iter_video_frames(src, item.video) if is_video
             else iter([(0, Image.open(src).convert("RGB"))])
         )
+        was_cancelled = False
         for idx, img in frame_iter:
+            if _cancelled():
+                was_cancelled = True
+                break
             batch.append(img)
             offsets.append(idx)
             if len(batch) >= batch_size:
@@ -251,7 +267,7 @@ def run_item(
                 }
                 batch.clear()
                 offsets.clear()
-        if batch:
+        if not was_cancelled and batch:
             _drain_batch(batch, offsets)
             frames_done += len(batch)
             item.progress_frames = frames_done
@@ -262,6 +278,15 @@ def run_item(
             }
 
         recorder.close()
+        if was_cancelled:
+            item.status = QueueStatus.CANCELLED
+            item.session_dir = str(recorder.dir)
+            item.finished_at = time.time()
+            yield {
+                "type": "cancelled", "item_id": item.id,
+                "session_dir": item.session_dir,
+            }
+            return
         # Put a playable video.mp4 in the session: copy the source when it's
         # already h264/mp4, transcode otherwise. Images get no video. This
         # is best-effort — a failure here shouldn't fail the whole job since

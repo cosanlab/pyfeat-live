@@ -6,6 +6,7 @@ import asyncio
 import json
 import shutil
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Literal, Optional
@@ -114,13 +115,33 @@ def patch_item(item_id: str, req: PatchItemRequest, request: Request) -> dict:
 
 
 @router.delete("/queue/{item_id}", status_code=204)
-def delete_item(item_id: str, request: Request) -> None:
+async def delete_item(item_id: str, request: Request) -> None:
     q = request.app.state.analyze_queue
     item = q.find(item_id)
     if item is None:
         raise HTTPException(404, "item not found")
     if item.status is QueueStatus.RUNNING:
-        raise HTTPException(409, "cannot remove an in-flight item; stop the queue first")
+        # The user clicked X on the in-flight row. Signal the runner's
+        # cancel event, wait briefly for it to exit RUNNING (one batch
+        # of latency), then remove. We only signal when the running item
+        # is this one — guards against a stale RUNNING flag from a race.
+        if request.app.state.analyze_current_item_id == item_id:
+            cancel = request.app.state.analyze_current_cancel
+            if cancel is not None:
+                cancel.set()
+            # Poll briefly: budget = ~one big batch + transcode buffer.
+            # Don't block forever — if the runner is wedged we still want
+            # the API to return so the client can show an error.
+            for _ in range(120):                # ≤12s @ 100ms ticks
+                if item.status is not QueueStatus.RUNNING:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise HTTPException(
+                    504, "cancel timed out; runner still busy",
+                )
+        else:
+            raise HTTPException(409, "this item is not the active runner")
     # Clean up the uploaded file
     try:
         if item.file_path.exists():
@@ -164,11 +185,18 @@ def pause_run(request: Request) -> dict:
 
 @router.post("/stop", status_code=200)
 async def stop_run(request: Request) -> dict:
+    """Hard stop: pause the queue AND interrupt the current item.
+
+    Cancellation is cooperative — the in-flight detect batch finishes,
+    then the runner exits cleanly. Worst case ~one batch of latency.
+    Pause (graceful, lets current item finish to DONE) is /pause instead.
+    """
     request.app.state.analyze_paused = True
+    cancel = request.app.state.analyze_current_cancel
+    if cancel is not None:
+        cancel.set()
     task = request.app.state.analyze_runner_task
     if task and not task.done():
-        # Wait for current item to finish; we don't cancel mid-detect
-        # because py-feat doesn't support clean mid-frame interruption.
         try:
             await asyncio.wait_for(task, timeout=60.0)
         except asyncio.TimeoutError:
@@ -209,18 +237,32 @@ async def _runner_loop(app, req: RunRequest) -> None:
 
         events: asyncio.Queue = asyncio.Queue()
 
+        # Per-item cancel handle. Stashed on app.state so /stop and the
+        # per-row DELETE can signal it. Reset after the item exits so
+        # later signals don't leak into the next run.
+        cancel = threading.Event()
+        app.state.analyze_current_cancel = cancel
+        app.state.analyze_current_item_id = item.id
+
         def _drain() -> None:
-            for ev in run_item(item, detector, default_sessions_root(), req.batch_size):
+            for ev in run_item(
+                item, detector, default_sessions_root(),
+                req.batch_size, cancel_event=cancel,
+            ):
                 loop.call_soon_threadsafe(events.put_nowait, ev)
             loop.call_soon_threadsafe(events.put_nowait, None)  # sentinel
 
         runner_future = loop.run_in_executor(None, _drain)
-        while True:
-            ev = await events.get()
-            if ev is None:
-                break
-            _broadcast(app, ev)
-        await runner_future
+        try:
+            while True:
+                ev = await events.get()
+                if ev is None:
+                    break
+                _broadcast(app, ev)
+            await runner_future
+        finally:
+            app.state.analyze_current_cancel = None
+            app.state.analyze_current_item_id = None
     _broadcast(app, {"type": "queue_idle"})
 
 

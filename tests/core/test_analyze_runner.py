@@ -1,5 +1,6 @@
 """Runner: process a single image, yield one progress event, end DONE."""
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -46,3 +47,35 @@ def test_run_single_image(detector, run_root):
     assert item.session_dir is not None
     assert Path(item.session_dir).exists()
     assert (Path(item.session_dir) / "fex.csv").exists()
+
+
+def test_cancel_before_first_batch(tmp_path):
+    """Pre-set cancel event: runner breaks before the first detect call."""
+    fixture = Path("tests/core/fixtures/sample_image.jpg")
+    item = AnalyzeQueueItem(
+        id="auto",
+        filename=fixture.name,
+        file_path=fixture,
+        pipeline=PipelineConfig(
+            detector_type="Detector",
+            face_model="retinaface", landmark_model="mobilefacenet",
+            au_model="xgb", emotion_model=None, identity_model=None,
+            preset_id=None, preset_name=None,
+        ),
+        video=VideoParams(),
+    )
+    cancel = threading.Event()
+    cancel.set()
+    events = list(run_item(
+        item, detector=None,
+        sessions_root=tmp_path / "sessions",
+        batch_size=8, cancel_event=cancel,
+    ))
+    types = [e["type"] for e in events]
+    assert "cancelled" in types
+    assert "done" not in types
+    assert item.status is QueueStatus.CANCELLED
+    assert item.progress_frames == 0
+    # session_dir is set but the recorder removes empty session folders
+    # (no faces ever offered) — so the dir may not exist on disk. That's
+    # the recorder's "don't litter ~/Documents" rule, not a bug here.
