@@ -38,9 +38,20 @@ def serialize_faces(
         return []
 
     n_landmarks = 478 if mp_landmarks else 68
-    landmark_keys = [(f"x_{i}", f"y_{i}") for i in range(n_landmarks)]
 
     cols = set(fex.columns)
+
+    # For the mesh detectors (mp_landmarks=True) the full 478-point mesh may
+    # live under different columns per detector:
+    #   - MPDetector stores its 478 mesh in x_0..x_477 directly.
+    #   - Detectorv2 stores only the dlib-68 subset in x_0..x_67; its full
+    #     478 mesh lives in mesh_x_<i>/mesh_y_<i>.
+    # Prefer mesh_x_/mesh_y_ when present so Detectorv2 yields a real 478 lm.
+    use_mesh = mp_landmarks and "mesh_x_0" in cols
+    if use_mesh:
+        landmark_keys = [(f"mesh_x_{i}", f"mesh_y_{i}") for i in range(n_landmarks)]
+    else:
+        landmark_keys = [(f"x_{i}", f"y_{i}") for i in range(n_landmarks)]
     has_rect = all(
         c in cols
         for c in ("FaceRectX", "FaceRectY", "FaceRectWidth", "FaceRectHeight")

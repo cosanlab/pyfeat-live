@@ -3,7 +3,7 @@
 // math is unchanged; types and ES module exports are new.
 
 import type { Face } from './types';
-import type { AuTable } from '../api';
+import type { AuTable, AuMeshTable } from '../api';
 import type { Lut } from './colormaps';
 
 const LIVE_GREEN = '#22c55e';
@@ -415,4 +415,52 @@ export function drawAuHeatmap(
     ctx.fill();
     ctx.stroke();
   }
+}
+
+// ---------------------------------------------------------------------------
+// AU 478-mesh vertex heatmap (Detectorv2 / MPDetector).
+//
+// Unlike drawAuHeatmap (which fills dlib-68 muscle polygons), the mesh
+// detectors expose a full 478-point landmark mesh in face.lm, and the
+// au-mesh-table maps each AU to the specific mesh vertices it drives. We
+// colour those vertices by AU intensity.
+//
+// Coordinate handling matches drawAuHeatmap: face.lm is consumed in raw
+// logical (width/height) space with no scaling/offset. The OverlayCanvas
+// context already carries the device-pixel-ratio transform via
+// ctx.setTransform(dpr,...), so drawing in lm coords lands correctly on the
+// CSS-scaled video — same as every other primitive here.
+// ---------------------------------------------------------------------------
+
+/** Colour the 478-mesh vertices driven by each AU by AU intensity.
+ *  Uses face.lm (flat [x0,y0,x1,y1,...], 478 points for mesh detectors)
+ *  and face.aus (AU name → intensity). */
+export function drawAuMeshHeatmap(
+  ctx: CanvasRenderingContext2D,
+  face: Face,
+  table: AuMeshTable,
+  opts?: { radius?: number; opacity?: number },
+): void {
+  const lm = face.lm;
+  const aus = face.aus;
+  if (!lm || !aus) return;
+  const radius = opts?.radius ?? 2;
+  ctx.save();
+  if (opts?.opacity != null) ctx.globalAlpha = opts.opacity;
+  for (const [au, verts] of Object.entries(table.auToVertices)) {
+    const v = aus[au];
+    if (v == null || v <= 0) continue;
+    const rgb = table.lut[Math.min(255, Math.max(0, Math.round(v * 255)))];
+    if (!rgb) continue;
+    ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+    for (const vi of verts) {
+      const x = lm[vi * 2];
+      const y = lm[vi * 2 + 1];
+      if (x == null || y == null) continue;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
 }

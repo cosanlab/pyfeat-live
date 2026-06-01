@@ -58,11 +58,19 @@ export interface AuTable {
   mpToDlib68: number[];
 }
 
+export interface AuMeshTable {
+  /** AU name → list of MP-478 vertex indices it drives */
+  auToVertices: Record<string, number[]>;
+  /** 256-entry Blues colormap as [r, g, b] in 0–255 */
+  lut: [number, number, number][];
+}
+
 export const systemApi = {
   health: () => request<{ status: string; version: string }>('/api/system/health'),
   compute: () => request<ComputeInfo>('/api/system/compute'),
   overlayEdges: () => request<OverlayEdgeSets>('/api/system/overlay-edges'),
   auTable: () => request<AuTable>('/api/system/au-table'),
+  auMeshTable: () => request<AuMeshTable>('/api/system/au-mesh-table'),
 };
 
 // ---------------- live ----------------

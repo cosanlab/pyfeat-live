@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import type { Face, OverlayToggles, OverlayStyleConfig, LandmarkStyle } from '../overlay/types';
-  import type { AuTable } from '../api';
+  import type { AuTable, AuMeshTable } from '../api';
+  import { systemApi } from '../api';
   import { colormapLut } from '../overlay/colormaps';
   import * as O from '../overlay/primitives';
 
@@ -31,6 +33,14 @@
 
   let canvas: HTMLCanvasElement | null = $state(null);
 
+  // Static 478-mesh AU→vertex table, fetched once. Used for the mesh
+  // detectors (Detectorv2, MPDetector) where mpLandmarks is true; the
+  // classic Detector keeps the dlib-68 polygon heatmap below.
+  let auMeshTable: AuMeshTable | null = $state(null);
+  onMount(async () => {
+    auMeshTable = await systemApi.auMeshTable().catch(() => null);
+  });
+
   $effect(() => {
     if (!canvas) return;
     // Render at device-pixel-ratio resolution so canvas text/lines stay
@@ -53,8 +63,15 @@
       if (toggles.poses) O.drawPose(ctx, face.rect, face.pose, { ...style?.pose, yawOffset: mpLandmarks ? 0 : Math.PI });
       if (toggles.gaze) O.drawGaze(ctx, face, mpLandmarks, width, height, style?.gaze);
       if (toggles.aus) {
-        O.drawAuHeatmap(ctx, face, auTable ?? null, mpLandmarks, mpToDlib68 ?? null,
-          style ? { lut: auLut ?? undefined, opacity: style.aus.opacity } : undefined);
+        if (mpLandmarks && auMeshTable) {
+          // Mesh detectors (Detectorv2, MPDetector): colour the 478-mesh
+          // vertices each AU drives, reading from the full mesh in face.lm.
+          O.drawAuMeshHeatmap(ctx, face, auMeshTable,
+            style ? { opacity: style.aus.opacity } : undefined);
+        } else {
+          O.drawAuHeatmap(ctx, face, auTable ?? null, mpLandmarks, mpToDlib68 ?? null,
+            style ? { lut: auLut ?? undefined, opacity: style.aus.opacity } : undefined);
+        }
       }
       if (toggles.emotions) O.drawEmotions(ctx, face.rect, face.emotions, style?.emotions);
     }
