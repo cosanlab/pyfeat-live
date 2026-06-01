@@ -130,3 +130,88 @@ def test_draw_overlays_mesh_au_mpdetector_coords_not_double_scaled():
     assert abs(int(xs.mean()) - cx) <= 6 and abs(int(ys.mean()) - cy) <= 6, (
         f"dots at ~({xs.mean():.0f},{ys.mean():.0f}); expected ~({cx},{cy}) — likely double-scaled"
     )
+
+
+def _detectorv2_row(mesh_cx, mesh_cy, dlib_cx, dlib_cy):
+    """Build a Detectorv2-shaped row: the FULL 478 mesh lives in
+    mesh_x_<i>/mesh_y_<i>, but x_<i>/y_<i> exist ONLY for the dlib-68
+    subset (i=0..67) and sit at a DIFFERENT location. This is exactly
+    the schema that produced the crisscrossing-garbage bug: edge/vertex
+    indices span 0..477 (the mesh), so reading x_<i> mis-located them.
+    """
+    import numpy as np
+
+    row = {
+        "FaceRectX": float(mesh_cx - 60), "FaceRectY": float(mesh_cy - 60),
+        "FaceRectWidth": 120.0, "FaceRectHeight": 120.0,
+        "FaceScore": 0.99,
+        "Pitch": 0.0, "Roll": 0.0, "Yaw": 0.0,
+        "gaze_pitch": 0.2, "gaze_yaw": 0.2,
+        "AU01": 0.8, "AU06": 0.9, "AU12": 1.0,
+    }
+    # 478 mesh vertices clustered near (mesh_cx, mesh_cy).
+    rng = np.random.default_rng(0)
+    for i in range(478):
+        row[f"mesh_x_{i}"] = float(mesh_cx + rng.uniform(-40, 40))
+        row[f"mesh_y_{i}"] = float(mesh_cy + rng.uniform(-40, 40))
+        row[f"mesh_z_{i}"] = 0.0
+    # dlib-68 subset ONLY, parked far away. If the renderer wrongly reads
+    # x_<i>, drawn content lands HERE instead of at the mesh cluster.
+    for i in range(68):
+        row[f"x_{i}"] = float(dlib_cx)
+        row[f"y_{i}"] = float(dlib_cy)
+    return row
+
+
+def test_detectorv2_mesh_landmarks_use_mesh_coords_not_dlib_subset():
+    """Detectorv2 landmark mesh must read mesh_x_/mesh_y_ (478) — NOT the
+    dlib-68 x_/y_ subset. With the mesh cluster and the dlib subset placed
+    in different halves of the frame, the drawn wireframe must concentrate
+    over the mesh cluster, proving indices >67 (and the <=67 ones too) read
+    the mesh columns rather than the unrelated dlib points."""
+    mesh_cx, mesh_cy = 480, 180   # mesh cluster: right side
+    dlib_cx, dlib_cy = 80, 300    # dlib subset: lower-left, far away
+    row = _detectorv2_row(mesh_cx, mesh_cy, dlib_cx, dlib_cy)
+    fex = pd.DataFrame([row])
+    frame = np.zeros((360, 640, 3), dtype=np.uint8)
+    before = frame.copy()
+    draw_overlays(
+        frame, fex, {"landmarks": True},
+        mp_landmarks=True, overlay_kind="mesh478_muscle",
+        landmark_style="mesh",
+    )
+    assert not np.array_equal(frame, before), "nothing drawn"
+    ys, xs = np.where(frame.any(axis=2))
+    mx, my = int(xs.mean()), int(ys.mean())
+    # Content must be near the mesh cluster, NOT near the dlib subset.
+    assert abs(mx - mesh_cx) <= 50 and abs(my - mesh_cy) <= 50, (
+        f"mesh drawn at ~({mx},{my}); expected ~({mesh_cx},{mesh_cy}). "
+        f"Near the dlib subset ({dlib_cx},{dlib_cy}) means x_<i> was read "
+        f"instead of mesh_x_<i> (the crisscross-garbage bug)."
+    )
+    # And essentially nothing should land at the dlib-subset location.
+    near_dlib = ((np.abs(xs - dlib_cx) < 30) & (np.abs(ys - dlib_cy) < 30)).sum()
+    assert near_dlib < xs.size * 0.05, (
+        f"{near_dlib} px near the stray dlib subset — coords leaked to x_<i>"
+    )
+
+
+def test_detectorv2_mesh_au_heatmap_uses_mesh_coords():
+    """The mesh AU heatmap for Detectorv2 must colour vertices at the 478
+    mesh coords, not at the dlib-68 x_/y_ subset."""
+    mesh_cx, mesh_cy = 480, 180
+    dlib_cx, dlib_cy = 80, 300
+    row = _detectorv2_row(mesh_cx, mesh_cy, dlib_cx, dlib_cy)
+    fex = pd.DataFrame([row])
+    frame = np.zeros((360, 640, 3), dtype=np.uint8)
+    draw_overlays(
+        frame, fex, {"aus": True},
+        mp_landmarks=True, overlay_kind="mesh478_muscle",
+        landmark_style="mesh",
+    )
+    ys, xs = np.where(frame.any(axis=2))
+    assert xs.size > 0, "no AU heatmap drawn"
+    assert abs(int(xs.mean()) - mesh_cx) <= 50 and abs(int(ys.mean()) - mesh_cy) <= 50, (
+        f"AU dots at ~({xs.mean():.0f},{ys.mean():.0f}); expected mesh cluster "
+        f"~({mesh_cx},{mesh_cy})"
+    )

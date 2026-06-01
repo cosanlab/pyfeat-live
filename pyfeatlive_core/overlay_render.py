@@ -168,6 +168,38 @@ def _scale_fex_coords_inplace(fex: pd.DataFrame, scale: float) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Shared landmark/mesh coordinate accessor
+# ---------------------------------------------------------------------------
+
+def _lm_xy(row: Any, i: int) -> tuple[float, float] | tuple[None, None]:
+    """Return (x, y) for landmark/mesh vertex ``i``.
+
+    Prefers the full 478-mesh columns (Detectorv2 stores its 478-point
+    Face Mesh in ``mesh_x_<i>``/``mesh_y_<i>``) over the dlib/MP
+    ``x_<i>``/``y_<i>`` columns (MPDetector's 478 mesh + classic
+    Detector's 68 points). Returns (None, None) if the vertex is absent
+    or NaN.
+
+    IMPORTANT: coords are already pre-scaled to the working canvas by
+    ``_scale_fex_coords_inplace`` (which scales BOTH ``mesh_x_/mesh_y_``
+    and ``x_/y_``), so the returned values are canvas-space — callers
+    must NOT multiply by ``scale`` again. This is the single source of
+    truth for vertex lookups so the dlib-68 ``x_<i>`` subset can never be
+    mistaken for mesh vertex ``i`` (they are different point sets).
+    """
+    for xk, yk in ((f"mesh_x_{i}", f"mesh_y_{i}"), (f"x_{i}", f"y_{i}")):
+        if hasattr(row, "get"):
+            x = row.get(xk)
+            y = row.get(yk)
+        else:
+            x = row[xk] if xk in row else None
+            y = row[yk] if yk in row else None
+        if x is not None and y is not None and x == x and y == y:  # not None/NaN
+            return float(x), float(y)
+    return None, None
+
+
+# ---------------------------------------------------------------------------
 # Private primitives — lifted from v1 draw_overlays_pil in utils.py
 # ---------------------------------------------------------------------------
 
@@ -243,16 +275,6 @@ def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1) -> None:
 
     has_index = hasattr(row, "index")
 
-    def _xy(i):
-        for xk, yk in ((f"mesh_x_{i}", f"mesh_y_{i}"), (f"x_{i}", f"y_{i}")):
-            if has_index:
-                if xk in row.index and yk in row.index:
-                    return row[xk], row[yk]
-            else:
-                if xk in row and yk in row:
-                    return row[xk], row[yk]
-        return None
-
     r = max(1, scale)
     for au, verts in amap.items():
         if has_index:
@@ -266,14 +288,13 @@ def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1) -> None:
             continue
         rgb = tuple(int(c) for c in lut[min(255, max(0, int(val * 255)))])
         for vi in verts:
-            xy = _xy(vi)
-            if xy is None:
+            x, y = _lm_xy(row, vi)
+            if x is None:
                 continue
             # Coords are already pre-scaled to the 2x canvas by
             # _scale_fex_coords_inplace (MPDetector x_/y_ and Detectorv2
             # mesh_x_/mesh_y_ alike), so use them directly — ``scale`` now
             # only sizes the dot radius, matching _draw_landmarks.
-            x, y = float(xy[0]), float(xy[1])
             drw.ellipse([x - r, y - r, x + r, y + r], fill=rgb)
 
 
@@ -300,31 +321,35 @@ def _draw_landmarks(
         edges = MP_CONTOUR_EDGES if mp_landmarks else DLIB_PARTS_EDGES
 
     if edges is not None:
-        # Wireframe: draw each edge as a thin white line.
+        # Wireframe: draw each edge as a thin white line. Use the shared
+        # _lm_xy accessor so MP/Detectorv2 edge indices (which span the
+        # full 478 mesh) read the mesh_x_/mesh_y_ columns rather than the
+        # dlib-68 x_/y_ subset — reading x_<i> for i>67 (or even i<=67,
+        # which is a DIFFERENT point on Detectorv2) produced the
+        # crisscrossing garbage lines.
         for a, b in edges:
-            xa = row.get(f"x_{a}") if hasattr(row, "get") else row[f"x_{a}"]
-            ya = row.get(f"y_{a}") if hasattr(row, "get") else row[f"y_{a}"]
-            xb = row.get(f"x_{b}") if hasattr(row, "get") else row[f"x_{b}"]
-            yb = row.get(f"y_{b}") if hasattr(row, "get") else row[f"y_{b}"]
+            xa, ya = _lm_xy(row, a)
+            xb, yb = _lm_xy(row, b)
             if xa is None or xb is None:
-                continue
-            if np.isnan(xa) or np.isnan(xb) or np.isnan(ya) or np.isnan(yb):
                 continue
             drw.line([(xa, ya), (xb, yb)], fill=(255, 255, 255, 200), width=1 * scale)
     else:
-        # 'points': per-landmark dots — cheapest; works for both schemas.
-        has_index = hasattr(row, "index")
+        # 'points': per-landmark dots — cheapest; works for both schemas
+        # via the shared accessor (mesh_x_ preferred, x_ fallback).
         for i in range(n_landmarks):
-            xk, yk = f"x_{i}", f"y_{i}"
-            if has_index:
-                if xk not in row.index or yk not in row.index:
+            px, py = _lm_xy(row, i)
+            if px is None:
+                # Index absent in BOTH schemas — no more vertices to draw.
+                # (Detectorv2 has mesh_x_0..477; classic has x_0..67.)
+                xk, yk = f"x_{i}", f"y_{i}"
+                mk = f"mesh_x_{i}"
+                present = (
+                    (xk in row.index or mk in row.index)
+                    if hasattr(row, "index")
+                    else (xk in row or mk in row)
+                )
+                if not present:
                     break
-            else:
-                if xk not in row or yk not in row:
-                    break
-            px = row[xk]
-            py = row[yk]
-            if np.isnan(px) or np.isnan(py):
                 continue
             r = 1 * scale
             drw.ellipse([px - r, py - r, px + r, py + r],
@@ -488,31 +513,34 @@ def _gaze_origin(row: Any, mp_landmarks: bool) -> tuple[float, float]:
     arrow. Falls through a chain: MP iris → MP eye corners → dlib eyes →
     facebox centre.
     """
-    def _avg_pair(lx_key, ly_key, rx_key, ry_key):
-        lx = row.get(lx_key, np.nan) if hasattr(row, "get") else row[lx_key]
-        ly = row.get(ly_key, np.nan) if hasattr(row, "get") else row[ly_key]
-        rx = row.get(rx_key, np.nan) if hasattr(row, "get") else row[rx_key]
-        ry = row.get(ry_key, np.nan) if hasattr(row, "get") else row[ry_key]
-        if any(np.isnan(v) for v in (lx, ly, rx, ry)):
+    def _avg_pair(li: int, ri: int):
+        # Uses the shared _lm_xy accessor so MP iris/eye-corner indices
+        # (468/473, 33/263) read mesh_x_/mesh_y_ on Detectorv2 — its iris
+        # vertices 468..477 live ONLY in the mesh columns, not x_/y_.
+        lx, ly = _lm_xy(row, li)
+        rx, ry = _lm_xy(row, ri)
+        if lx is None or rx is None:
             return None
         return ((lx + rx) / 2.0, (ly + ry) / 2.0)
 
     if mp_landmarks:
         # 1. iris centers (indices 468 / 473)
-        pt = _avg_pair("x_468", "y_468", "x_473", "y_473")
+        pt = _avg_pair(468, 473)
         if pt is not None:
             return pt
         # 2. outer eye corners (always populated by MP Face Mesh)
-        pt = _avg_pair("x_33", "y_33", "x_263", "y_263")
+        pt = _avg_pair(33, 263)
         if pt is not None:
             return pt
     else:
         # 3. dlib-68 eye region: average all landmarks per side
         try:
-            l_x = float(np.nanmean([row[f"x_{i}"] for i in range(36, 42)]))
-            l_y = float(np.nanmean([row[f"y_{i}"] for i in range(36, 42)]))
-            r_x = float(np.nanmean([row[f"x_{i}"] for i in range(42, 48)]))
-            r_y = float(np.nanmean([row[f"y_{i}"] for i in range(42, 48)]))
+            lpts = [_lm_xy(row, i) for i in range(36, 42)]
+            rpts = [_lm_xy(row, i) for i in range(42, 48)]
+            l_x = float(np.nanmean([p[0] for p in lpts if p[0] is not None]))
+            l_y = float(np.nanmean([p[1] for p in lpts if p[1] is not None]))
+            r_x = float(np.nanmean([p[0] for p in rpts if p[0] is not None]))
+            r_y = float(np.nanmean([p[1] for p in rpts if p[1] is not None]))
             if not any(np.isnan(v) for v in (l_x, l_y, r_x, r_y)):
                 return ((l_x + r_x) / 2.0, (l_y + r_y) / 2.0)
         except (KeyError, ValueError):
