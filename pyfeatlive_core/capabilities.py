@@ -25,6 +25,15 @@ DISPLAY_EMOTIONS = [
     "anger", "disgust", "fear", "happiness", "sadness", "surprise", "neutral",
 ]
 
+# Detectorv2 emits capitalized py-feat-v0.7 emotion labels; map them to the
+# legacy lowercase scheme the rest of the app (live meta, serialization,
+# Viewer) already uses, so emotions render uniformly across all detectors.
+DETECTORV2_EMOTION_RENAME = {
+    "Anger": "anger", "Disgust": "disgust", "Fear": "fear",
+    "Happy": "happiness", "Sad": "sadness", "Surprise": "surprise",
+    "Neutral": "neutral", "Contempt": "contempt",
+}
+
 LandmarkSpace = Literal["dlib68", "mp478"]
 OverlayKind = Literal["dlib68_polygons", "mesh478_muscle"]
 

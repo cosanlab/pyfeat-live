@@ -66,15 +66,17 @@ def test_mpdetector_native_aus_and_pose_on_real_face():
 def test_project_display_columns_drops_v2_extras():
     import pandas as pd
     from pyfeatlive_core.detect import display_view
-    # A v2-shaped frame with extra AUs and the 8th emotion.
+    # A v2-shaped frame with extra AUs and the 8th emotion. Detectorv2's
+    # emotion columns are normalized to lowercase upstream, so the 8th
+    # emotion appears as lowercase 'contempt' here.
     df = pd.DataFrame({
         "AU01": [0.1], "AU16": [0.9], "AU45": [0.2], "AU12": [0.3],
-        "Contempt": [0.5], "anger": [0.1], "valence": [0.4], "arousal": [-0.2],
+        "contempt": [0.5], "anger": [0.1], "valence": [0.4], "arousal": [-0.2],
         "FaceScore": [0.99],
     })
     view = display_view(df)
     assert "AU16" not in view.columns      # dropped extra AU
-    assert "Contempt" not in view.columns  # dropped 8th emotion
+    assert "contempt" not in view.columns  # dropped 8th emotion
     assert "AU12" in view.columns and "AU01" in view.columns
 
 
@@ -113,3 +115,34 @@ def test_detectorv2_native_schema_on_real_face():
     assert x0 == x0 and y0 == y0  # not NaN
     assert 0 <= x0 <= w
     assert 0 <= y0 <= h
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(600)
+def test_detectorv2_emotion_columns_normalized_to_lowercase():
+    """Detectorv2's capitalized py-feat-v0.7 emotion labels are renamed to
+    the legacy lowercase scheme the rest of the app uses, and display_view
+    drops the 8th emotion (contempt) while keeping the 7 display emotions.
+    """
+    from pyfeatlive_core.detect import display_view
+
+    detector = build_detector(
+        DetectorConfig(detector_type="Detectorv2", device="cpu")
+    )
+    img = Image.open(FACE_FIXTURE).convert("RGB")
+    fex = detect_pil_images(detector, [img])
+
+    # Lowercase legacy labels present; capitalized v2 labels gone.
+    assert "happiness" in fex.columns
+    assert "neutral" in fex.columns
+    assert "Happy" not in fex.columns
+    assert "Neutral" not in fex.columns
+    # Fex metadata must agree with the renamed df columns.
+    assert "happiness" in fex.emotion_columns
+    assert "Happy" not in fex.emotion_columns
+
+    # display_view excludes the 8th emotion but keeps the 7 display ones.
+    view = display_view(fex)
+    assert "contempt" not in view.columns
+    assert "happiness" in view.columns
+    assert "neutral" in view.columns

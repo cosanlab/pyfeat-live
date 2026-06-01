@@ -34,6 +34,8 @@ from feat.utils import (
 )
 from feat.utils.image_operations import convert_image_to_tensor
 
+from pyfeatlive_core.capabilities import DETECTORV2_EMOTION_RENAME
+
 if TYPE_CHECKING:
     from PIL import Image
 
@@ -82,7 +84,11 @@ _FEX_KWARGS_MPDETECTOR = dict(
 # produces is schema-identical to detector.detect() output.
 _FEX_KWARGS_DETECTORV2 = dict(
     au_columns=AU_COLUMNS_V2,
-    emotion_columns=EMOTION_COLUMNS_V2,
+    # The df's emotion columns are renamed to the legacy lowercase scheme
+    # (see DETECTORV2_EMOTION_RENAME) right after forward(), so the Fex's
+    # emotion_columns metadata must reference those same lowercase names —
+    # otherwise Fex.emotions would point at columns that no longer exist.
+    emotion_columns=[DETECTORV2_EMOTION_RENAME[c] for c in EMOTION_COLUMNS_V2],
     facebox_columns=FEAT_FACEBOX_COLUMNS,
     landmark_columns=openface_2d_landmark_columns,
     facepose_columns=FEAT_FACEPOSE_COLUMNS_6D,
@@ -241,6 +247,16 @@ def detect_pil_images(
         df["input"] = np.concatenate(file_names) if file_names else []
         df["frame"] = np.concatenate(frame_ids) if frame_ids else []
 
+    # Detectorv2 emits capitalized py-feat-v0.7 emotion labels
+    # (Anger/Happy/Sad/...); rename them to the legacy lowercase scheme
+    # (anger/happiness/sadness/...) the rest of the app already uses, so
+    # emotions render uniformly across all three detectors. Applied to the
+    # df BEFORE it's wrapped, so both the recorded fex and the live
+    # meta/overlay paths see the lowercase names. MPDetector/classic
+    # Detector already emit lowercase resmasknet labels — leave untouched.
+    if isinstance(detector, Detectorv2):
+        df = df.rename(columns=DETECTORV2_EMOTION_RENAME)
+
     # Wrap in a Fex NOW (not just at return) so the MPDetector pose
     # backfill below can call convert_landmarks_3d(fex). In py-feat v0.7
     # convert_landmarks_3d reads ``fex.landmarks`` — a Fex *property*
@@ -314,10 +330,12 @@ def detect_pil_images(
 def display_view(df: "pd.DataFrame") -> "pd.DataFrame":
     """Return a column-projected copy for UI/overlay: only the 20 classic
     AUs and 7 display emotions, dropping Detectorv2's extra AUs (AU16/18/
-    27/45) and its 8th emotion (Contempt). Non-AU/non-emotion columns are
+    27/45) and its 8th emotion (contempt). Non-AU/non-emotion columns are
     preserved. The recorder writes the *full* native frame; only the live
-    overlay + meta use this view."""
+    overlay + meta use this view. Detectorv2's emotion columns are
+    normalized to lowercase upstream (see DETECTORV2_EMOTION_RENAME), so
+    the 8th emotion is dropped here by its lowercase name 'contempt'."""
     extra_aus = {"AU16", "AU18", "AU27", "AU45"}
     drop = [c for c in df.columns if c in extra_aus]
-    drop += [c for c in df.columns if c == "Contempt"]
+    drop += [c for c in df.columns if c == "contempt"]
     return df.drop(columns=drop, errors="ignore")
