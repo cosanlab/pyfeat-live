@@ -84,3 +84,22 @@ def au_table() -> dict:
     if _AU_TABLE_CACHE is None:
         _AU_TABLE_CACHE = build_au_table()
     return _AU_TABLE_CACHE
+
+
+_AU_MESH_TABLE_CACHE: dict | None = None
+
+
+@router.get("/au-mesh-table")
+def au_mesh_table() -> dict:
+    """478-vertex AU muscle map for the mesh detectors (Detectorv2, MPDetector).
+
+    Response keys:
+      auToVertices - {AU: [mp478_vertex_idx, ...]}
+      lut          - [[r, g, b], ...] x 256  (Blues palette)
+    Static; cached after first call.
+    """
+    global _AU_MESH_TABLE_CACHE
+    if _AU_MESH_TABLE_CACHE is None:
+        from pyfeatlive_core.au_mesh import build_au_mesh_table
+        _AU_MESH_TABLE_CACHE = build_au_mesh_table()
+    return _AU_MESH_TABLE_CACHE

@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from PIL import Image
 from pydantic import BaseModel
 
+from pyfeatlive_core.capabilities import capabilities_for
 from pyfeatlive_core.detect import detect_pil_images, display_view
 from pyfeatlive_core.detector import DetectorConfig, build_detector
 from pyfeatlive_core.jpeg import encode_png
@@ -360,7 +361,10 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
     # in-flight detection to finish before swapping.
     async with live.detector_lock:
         live.detector = detector
-        live.mp_landmarks = (req.detector_type == "MPDetector")
+        caps = capabilities_for(req.detector_type)
+        live.mp_landmarks = caps.landmark_space == "mp478"
+        live.overlay_kind = caps.overlay_kind
+        live.has_valence_arousal = caps.has_valence_arousal
         if req.toggles is not None:
             live.toggles = req.toggles
         if req.landmark_style is not None:
