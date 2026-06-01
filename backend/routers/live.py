@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from PIL import Image
 from pydantic import BaseModel
 
-from pyfeatlive_core.detect import detect_pil_images
+from pyfeatlive_core.detect import detect_pil_images, display_view
 from pyfeatlive_core.detector import DetectorConfig, build_detector
 from pyfeatlive_core.jpeg import encode_png
 from pyfeatlive_core.overlay_render import draw_overlays
@@ -188,12 +188,13 @@ async def _run_detection(live, img: Image.Image) -> None:
             toggles = live.toggles or {}
             mp_landmarks = live.mp_landmarks
             landmark_style = live.landmark_style or "mesh"
+            overlay_kind = getattr(live, "overlay_kind", "dlib68_polygons")
             t0 = time.perf_counter()
             png, fex, dims, baked_arr = await loop.run_in_executor(
                 _DETECTION_EXECUTOR,
                 _detect_and_bake,
                 detector, img, detection_size,
-                toggles, mp_landmarks, landmark_style,
+                toggles, mp_landmarks, landmark_style, overlay_kind,
             )
             dur = time.perf_counter() - t0
         print(f"detect+bake: {dims[0]}x{dims[1]} dur={dur*1000:.0f}ms")
@@ -235,6 +236,7 @@ async def _run_detection(live, img: Image.Image) -> None:
 def _detect_and_bake(
     detector, img: Image.Image, detection_size,
     toggles: dict, mp_landmarks: bool, landmark_style: str,
+    overlay_kind: str = "dlib68_polygons",
 ):
     """Full per-frame pipeline, run in the detection worker thread:
     detect → scale coords to source space → bake overlay → PNG-encode.
@@ -242,6 +244,11 @@ def _detect_and_bake(
     Returns ``(png_bytes, fex, (width, height))``. Pure function over its
     arguments (no shared ``live`` state), so it's safe off the loop; the
     caller assigns the results back on the loop.
+
+    NOTE: the ``fex`` RETURNED here is the full native frame (used by the
+    recorder). Only the COPY passed to ``draw_overlays`` is run through
+    ``display_view`` so the live overlay/meta show just the 20 classic AUs
+    and 7 display emotions.
     """
     det_img, scale_x, scale_y = _detection_input(img, detection_size)
     fex = detect_pil_images(detector, [det_img])
@@ -252,8 +259,9 @@ def _detect_and_bake(
     frame_arr = np.asarray(img).copy()
     if fex is not None and len(fex) > 0:
         draw_overlays(
-            frame_arr, fex, toggles,
-            mp_landmarks=mp_landmarks, landmark_style=landmark_style,
+            frame_arr, display_view(fex), toggles,
+            mp_landmarks=mp_landmarks, overlay_kind=overlay_kind,
+            landmark_style=landmark_style,
         )
     # PNG (lossless) so overlay edges + 1px landmark dots survive intact.
     png = encode_png(frame_arr)
@@ -283,6 +291,8 @@ def _scale_fex_coords(fex, sx: float, sy: float):
     py-feat columns we touch:
       * FaceRect{X,Y,Width,Height}
       * x_N / y_N landmark pairs (N = 0..67 dlib, 0..477 MP)
+      * mesh_x_N / mesh_y_N (Detectorv2's 478 Face Mesh; mesh_z_N left
+        alone — it's a relative depth, not a source-pixel coord)
     """
     out = fex.copy()
     for col in ("FaceRectX", "FaceRectWidth"):
@@ -292,7 +302,11 @@ def _scale_fex_coords(fex, sx: float, sy: float):
         if col in out.columns:
             out[col] = out[col] * sy
     for col in out.columns:
-        if col.startswith("x_"):
+        if col.startswith("mesh_x_"):
+            out[col] = out[col] * sx
+        elif col.startswith("mesh_y_"):
+            out[col] = out[col] * sy
+        elif col.startswith("x_"):
             out[col] = out[col] * sx
         elif col.startswith("y_"):
             out[col] = out[col] * sy
