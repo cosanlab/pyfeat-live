@@ -63,6 +63,21 @@ def test_mpdetector_native_aus_and_pose_on_real_face():
         )
 
 
+def test_project_display_columns_drops_v2_extras():
+    import pandas as pd
+    from pyfeatlive_core.detect import display_view
+    # A v2-shaped frame with extra AUs and the 8th emotion.
+    df = pd.DataFrame({
+        "AU01": [0.1], "AU16": [0.9], "AU45": [0.2], "AU12": [0.3],
+        "Contempt": [0.5], "anger": [0.1], "valence": [0.4], "arousal": [-0.2],
+        "FaceScore": [0.99],
+    })
+    view = display_view(df)
+    assert "AU16" not in view.columns      # dropped extra AU
+    assert "Contempt" not in view.columns  # dropped 8th emotion
+    assert "AU12" in view.columns and "AU01" in view.columns
+
+
 @pytest.mark.slow
 @pytest.mark.timeout(600)
 def test_detectorv2_native_schema_on_real_face():

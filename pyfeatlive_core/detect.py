@@ -33,6 +33,7 @@ from feat.utils import (
     openface_2d_landmark_columns,
 )
 from feat.utils.image_operations import convert_image_to_tensor
+from pyfeatlive_core.capabilities import DISPLAY_AUS, DISPLAY_EMOTIONS
 
 if TYPE_CHECKING:
     from PIL import Image
@@ -309,3 +310,15 @@ def detect_pil_images(
     return Fex(
         pd.DataFrame(fex).reset_index(drop=True), **_fex_wrap_kwargs(detector)
     )
+
+
+def display_view(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Return a column-projected copy for UI/overlay: only the 20 classic
+    AUs and 7 display emotions, dropping Detectorv2's extra AUs (AU16/18/
+    27/45) and its 8th emotion (Contempt). Non-AU/non-emotion columns are
+    preserved. The recorder writes the *full* native frame; only the live
+    overlay + meta use this view."""
+    extra_aus = {"AU16", "AU18", "AU27", "AU45"}
+    drop = [c for c in df.columns if c in extra_aus]
+    drop += [c for c in df.columns if c == "Contempt"]
+    return df.drop(columns=drop, errors="ignore")
