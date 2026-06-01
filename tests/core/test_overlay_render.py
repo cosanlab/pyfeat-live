@@ -84,3 +84,17 @@ def test_landmark_style_points_vs_mesh_differ(frame, fex_one_face):
     draw_overlays(f_mesh, fex_one_face, {"landmarks": True},
                   mp_landmarks=False, landmark_style="mesh")
     assert not np.array_equal(f_points, f_mesh)
+
+
+def test_draw_overlays_mesh_au_smoke():
+    from pyfeatlive_core.overlay_render import draw_overlays
+    # Minimal mp478 row: mesh_x_*/mesh_y_* for a few driven vertices + one AU.
+    row = {"FaceScore": 0.99, "AU12": 0.8}
+    for i in range(478):
+        row[f"mesh_x_{i}"] = 100 + (i % 50)
+        row[f"mesh_y_{i}"] = 100 + (i // 50)
+    fex = pd.DataFrame([row])
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    before = frame.copy()
+    draw_overlays(frame, fex, {"aus": True}, overlay_kind="mesh478_muscle")
+    assert not np.array_equal(frame, before)  # something was drawn

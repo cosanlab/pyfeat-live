@@ -72,7 +72,8 @@ def draw_overlays(
     fex: pd.DataFrame | None,
     toggles: dict[str, bool],
     *,
-    mp_landmarks: bool,
+    mp_landmarks: bool | None = None,
+    overlay_kind: str = "dlib68_polygons",
     landmark_style: str = "mesh",
 ) -> None:
     """Draw overlays per the toggles. No-op if fex is None/empty.
@@ -84,8 +85,13 @@ def draw_overlays(
             'aus' / 'emotions' booleans.
         mp_landmarks: True for MPDetector's 478-point Face Mesh;
             affects landmark rendering and gaze-origin fallback.
+            If None, derived from overlay_kind.
+        overlay_kind: 'dlib68_polygons' (classic Detector) or
+            'mesh478_muscle' (Detectorv2 / MPDetector).
         landmark_style: 'mesh' | 'lines' | 'points'
     """
+    if mp_landmarks is None:
+        mp_landmarks = overlay_kind == "mesh478_muscle"
     if fex is None or len(fex) == 0:
         return
     # 2x super-sample for antialiasing. PIL's ImageDraw.line() / .ellipse()
@@ -114,7 +120,10 @@ def draw_overlays(
         if toggles.get("rects"):
             _draw_rect(drw, row, scale=SCALE)
         if toggles.get("aus"):
-            _draw_au_heatmap(drw, row, mp_landmarks=mp_landmarks, scale=SCALE)
+            if overlay_kind == "mesh478_muscle":
+                _draw_au_mesh_heatmap(drw, row, scale=SCALE)
+            else:
+                _draw_au_heatmap(drw, row, mp_landmarks=mp_landmarks, scale=SCALE)
         if toggles.get("landmarks"):
             _draw_landmarks(drw, row, mp_landmarks=mp_landmarks,
                             style=landmark_style, n_landmarks=n_landmarks,
@@ -207,6 +216,56 @@ def _draw_au_heatmap(
         # Missing landmark column — silently skip rather than crashing
         # the live stream.
         pass
+
+
+def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1) -> None:
+    """Colour the MP-478 mesh vertices driven by each AU, by AU intensity.
+
+    Reads mesh_x_<i>/mesh_y_<i> (Detectorv2) or X_<i>/Y_<i> (MPDetector)
+    from the row; uses the AU->vertex map from au_mesh. Draws each driven
+    vertex as a small filled disc whose colour comes from the Blues LUT
+    at the driving AU's intensity. Simple per-vertex stipple — adequate
+    for the prototype; a filled-region pass can come later.
+
+    ``row`` is a pd.Series (from fex.iterrows()); membership is tested via
+    ``in row.index`` and values accessed via ``row[key]``.
+    """
+    from pyfeatlive_core.au_mesh import au_to_vertices
+    from pyfeatlive_core.au_heatmap import au_cmap_lut
+    lut = au_cmap_lut("Blues")
+    amap = au_to_vertices()
+
+    has_index = hasattr(row, "index")
+
+    def _xy(i):
+        for xk, yk in ((f"mesh_x_{i}", f"mesh_y_{i}"), (f"X_{i}", f"Y_{i}"),
+                       (f"x_{i}", f"y_{i}")):
+            if has_index:
+                if xk in row.index and yk in row.index:
+                    return row[xk], row[yk]
+            else:
+                if xk in row and yk in row:
+                    return row[xk], row[yk]
+        return None
+
+    r = max(1, scale)
+    for au, verts in amap.items():
+        if has_index:
+            if au not in row.index:
+                continue
+        else:
+            if au not in row:
+                continue
+        val = float(row[au]) if row[au] == row[au] else 0.0  # NaN guard
+        if val <= 0.0:
+            continue
+        rgb = tuple(int(c) for c in lut[min(255, max(0, int(val * 255)))])
+        for vi in verts:
+            xy = _xy(vi)
+            if xy is None:
+                continue
+            x, y = float(xy[0]) * scale, float(xy[1]) * scale
+            drw.ellipse([x - r, y - r, x + r, y + r], fill=rgb)
 
 
 def _draw_landmarks(
