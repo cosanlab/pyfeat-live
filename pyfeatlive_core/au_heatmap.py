@@ -3,7 +3,6 @@
 Lifted from:
   - pyfeatlive/components/fex_video.py  (_AU_MUSCLE_POLYGONS, _build_au_table)
   - pyfeatlive/utils.py                 (_MUSCLE_AU_NAME, _au_cmap_lut)
-  - pyfeatlive_core/blendshape_to_au.py (DLIB68_FROM_MP478)
 
 The ``build_au_table()`` return value is serialised as-is by
 ``GET /api/system/au-table``; its shape matches what the v1 JS renderer
@@ -12,10 +11,74 @@ The ``build_au_table()`` return value is serialised as-is by
 
 from __future__ import annotations
 
-from pyfeatlive_core.blendshape_to_au import DLIB68_FROM_MP478
+import numpy as np
+
+# ---------------------------------------------------------------------
+# dlib-68 ← MediaPipe-478 landmark correspondence.
+#
+# The AU heatmap muscle polygons are defined in dlib-68 coordinates
+# (x_0..x_67). To draw the same heatmap over MPDetector's 478-landmark
+# output, we resample 68 specific MP indices that anatomically
+# correspond to dlib's 68 points and feed them into the existing
+# polygon code as a "dlib-68 view of the mesh".
+#
+# Index list compiled from the standard MediaPipe Face Mesh →
+# iBUG-300W landmark correspondence. Approximate but consistent — fine
+# for AU heatmap visualization (the polygons are anatomical regions,
+# not pixel-accurate tracking points).
+#
+# (Moved here from the now-deleted pyfeatlive_core/blendshape_to_au.py,
+# whose Ozel blendshape→AU table became dead code once py-feat v0.7's
+# MPDetector emitted FACS AUs natively. These two symbols are the only
+# survivors, kept for the dlib-68 overlay path pending its migration.)
+# ---------------------------------------------------------------------
+DLIB68_FROM_MP478: list[int] = [
+    # Jaw 0–16
+    127, 234, 93, 132, 58, 172, 136, 150, 176, 148, 152, 377, 400, 379, 365, 397, 356,
+    # Left eyebrow 17–21
+    70, 63, 105, 66, 107,
+    # Right eyebrow 22–26
+    336, 296, 334, 293, 300,
+    # Nose 27–30 bridge
+    168, 6, 195, 4,
+    # Nose tip 31–35
+    240, 75, 1, 305, 460,
+    # Left eye 36–41
+    33, 160, 158, 133, 153, 144,
+    # Right eye 42–47
+    362, 385, 387, 263, 373, 380,
+    # Outer lip 48–59
+    61, 39, 37, 0, 267, 269, 291, 405, 314, 17, 84, 181,
+    # Inner lip 60–67
+    78, 82, 13, 312, 308, 317, 14, 87,
+]
+assert len(DLIB68_FROM_MP478) == 68, "expected 68 dlib<-MP indices"
 
 # Convenience alias — 68 MP-478 source indices ordered as dlib-68 slots.
 MP_TO_DLIB68: list[int] = list(DLIB68_FROM_MP478)
+
+
+def mp478_row_to_dlib68_view(row) -> dict:
+    """Build a dict-like with x_0..x_67 / y_0..y_67 keys by sampling
+    the matching MediaPipe-478 landmarks. Lets the existing dlib-68
+    muscle-polygon code render on MPDetector output unchanged.
+
+    Returns a plain dict; pass it to anything that does
+    `row["x_<i>"]` / `row["y_<i>"]` indexing.
+    """
+    view: dict = {}
+    for dlib_idx, mp_idx in enumerate(DLIB68_FROM_MP478):
+        view[f"x_{dlib_idx}"] = row.get(f"x_{mp_idx}", np.nan)
+        view[f"y_{dlib_idx}"] = row.get(f"y_{mp_idx}", np.nan)
+    # Also forward the facebox columns so callers that read both can
+    # use a single object.
+    for k in (
+        "FaceRectX", "FaceRectY", "FaceRectWidth", "FaceRectHeight",
+        "Pitch", "Roll", "Yaw",
+    ):
+        if k in row.index if hasattr(row, "index") else k in row:
+            view[k] = row[k]
+    return view
 
 # ---------------------------------------------------------------------------
 # Polygon DSL for facial muscle regions.

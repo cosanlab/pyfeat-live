@@ -34,8 +34,8 @@ from pyfeatlive_core.au_heatmap import (
     MUSCLE_AU_NAME,
     _AU_MUSCLE_POLYGONS,
     au_cmap_lut,
+    mp478_row_to_dlib68_view,
 )
-from pyfeatlive_core.blendshape_to_au import mp478_row_to_dlib68_view
 
 # ---------------------------------------------------------------------------
 # Brand colours (match the TS port in frontend/src/lib/overlay/primitives.ts)

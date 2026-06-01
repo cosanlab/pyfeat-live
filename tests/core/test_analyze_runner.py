@@ -23,7 +23,12 @@ def run_root(tmp_path):
 
 @pytest.mark.timeout(120)
 def test_run_single_image(detector, run_root):
-    fixture = Path("tests/core/fixtures/sample_image.jpg")
+    # Must be a fixture with a *real* detectable face: the runner only
+    # writes a session when at least one face is detected (an empty Fex
+    # leaves the recorder with nothing to persist, and it then removes
+    # the empty session dir). sample_image.jpg is a 32x32 placeholder
+    # with no face, so it would (correctly) produce no session.
+    fixture = Path("tests/core/fixtures/single_face.jpg")
     item = AnalyzeQueueItem(
         id="auto",
         filename=fixture.name,

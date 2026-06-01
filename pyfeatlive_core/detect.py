@@ -3,7 +3,7 @@
 Provides ``detect_pil_images`` — a single function that takes a list of
 PIL images and a py-feat detector instance, runs the full detection
 pipeline (face detection, landmark/AU/emotion forward pass, MPDetector
-pose backfill, Ozel blendshape→AU mapping), and returns a populated Fex.
+pose backfill), and returns a populated Fex.
 
 This deliberately duplicates the orchestration logic from
 ``pyfeatlive/utils.py:run_pyfeat_detection_batched`` without any
@@ -36,8 +36,6 @@ from feat.utils.image_operations import convert_image_to_tensor
 
 if TYPE_CHECKING:
     from PIL import Image
-
-from pyfeatlive_core.blendshape_to_au import OZEL_BLENDSHAPE_TO_AU
 
 logger = logging.getLogger(__name__)
 
@@ -130,21 +128,24 @@ def detect_pil_images(
     frame_offset: int = 0,
 ) -> Fex:
     """Run py-feat detection on a batch of PIL images, returning a fully
-    populated Fex (including MPDetector pose + Ozel AU mapping).
+    populated Fex (including MPDetector pose backfill).
 
     Bypasses ``detector.detect()`` (which requires file paths) and instead
     calls ``detector.detect_faces()`` + ``detector.forward()`` directly,
-    then applies the MPDetector-specific post-processing steps that
+    then applies the MPDetector-specific post-processing step that
     ``detect()`` would otherwise handle:
 
     - **Pose backfill** (MPDetector only): ``forward()`` leaves
       Pitch/Roll/Yaw + X/Y/Z as NaN because pytorch inference_mode
       forbids the backprop needed for the differentiable PnP solver.
       We call ``estimate_face_pose_from_mesh`` after the fact, exactly
-      as MPDetector.detect() does.
-    - **Ozel AU mapping** (MPDetector only): ``forward()`` emits ARKit
-      blendshape columns. We derive FACS AU01..AU43 via the deterministic
-      Ozel table so the Fex has the same schema as classic Detector output.
+      as MPDetector.detect() does — operating on the assembled Fex (not
+      the raw forward() DataFrame) because v0.7's
+      ``convert_landmarks_3d`` reads ``fex.landmarks``, a Fex property.
+
+    py-feat v0.7's MPDetector now emits the 20 FACS AU columns natively
+    (internal blendshape→AU PLS), so no hand-rolled blendshape→AU mapping
+    is applied here anymore.
 
     Args:
         detector: a ``feat.Detector`` or ``feat.MPDetector`` instance.
@@ -240,26 +241,34 @@ def detect_pil_images(
         df["input"] = np.concatenate(file_names) if file_names else []
         df["frame"] = np.concatenate(frame_ids) if frame_ids else []
 
+    # Wrap in a Fex NOW (not just at return) so the MPDetector pose
+    # backfill below can call convert_landmarks_3d(fex). In py-feat v0.7
+    # convert_landmarks_3d reads ``fex.landmarks`` — a Fex *property*
+    # that slices the landmark columns — so it must receive a Fex, not
+    # the raw forward() DataFrame. py-feat's own MPDetector.detect()
+    # likewise passes the assembled Fex (``batch_output``) into it.
+    fex = Fex(df, **_fex_wrap_kwargs(detector))
+
     # MPDetector pose: forward() leaves Pitch/Roll/Yaw + X/Y/Z as NaN
     # (see MPDetector.forward() comment about pytorch inference_mode
     # not allowing backprop). py-feat's MPDetector.detect() runs
-    # estimate_face_pose_from_mesh on the assembled DataFrame to
-    # backfill them. We mirror that step here so live mode gets real
-    # pose values too. No-op for classic Detector — its forward()
-    # already populates pose from img2pose / DLT-PnP.
-    if isinstance(detector, MPDetector) and len(df) > 0:
+    # estimate_face_pose_from_mesh on the assembled Fex to backfill them.
+    # We mirror that step here so live mode gets real pose values too.
+    # No-op for classic Detector — its forward() already populates pose
+    # from img2pose / DLT-PnP.
+    if isinstance(detector, MPDetector) and len(fex) > 0:
         try:
             from feat.MPDetector import convert_landmarks_3d
             from feat.utils.face_pose import (
                 estimate_face_pose_from_mesh,
                 rotation_matrix_to_euler_angles,
             )
-            landmarks_3d = convert_landmarks_3d(df)
+            landmarks_3d = convert_landmarks_3d(fex)
             R, t = estimate_face_pose_from_mesh(
                 landmarks_3d, return_euler_angles=False
             )
             euler = rotation_matrix_to_euler_angles(R)
-            df.loc[:, FEAT_FACEPOSE_COLUMNS_6D] = (
+            fex.loc[:, FEAT_FACEPOSE_COLUMNS_6D] = (
                 torch.cat((euler, t), dim=1).cpu().numpy()
             )
         except Exception as e:
@@ -275,43 +284,28 @@ def detect_pil_images(
             )
         _tick("pose_backfill")
 
-    # MPDetector AUs: forward() emits ARKit-style blendshape columns
-    # but no FACS AU columns. Apply the deterministic Ozel
-    # blendshape→AU mapping so the same AU01..AU45 schema as classic
-    # Detector is populated. Lets the existing AU heatmap drawing
-    # work for MPDetector and gives researchers comparable AU values
-    # across detector types in their CSVs.
-    if isinstance(detector, MPDetector) and len(df) > 0:
-        au_cols = list(AU_LANDMARK_MAP["Feat"])
-        # Vectorise the mapping over the DataFrame: build a (n_faces,
-        # n_aus) array in one numpy expression rather than calling
-        # blendshapes_to_aus per row. Keeps the per-frame cost
-        # negligible at 30 fps.
-        au_values = np.zeros((len(df), len(au_cols)), dtype=np.float32)
-        for j, au in enumerate(au_cols):
-            contribs = OZEL_BLENDSHAPE_TO_AU.get(au)
-            if not contribs:
-                continue
-            for name, w in contribs:
-                if name in df.columns:
-                    col = df[name].to_numpy(dtype=np.float32, na_value=0.0)
-                    au_values[:, j] += w * col
-        np.clip(au_values, 0.0, 1.0, out=au_values)
-        for j, au in enumerate(au_cols):
-            df[au] = au_values[:, j]
+    # NOTE: py-feat v0.7's MPDetector emits the 20 FACS AU columns
+    # natively (internal blendshape→AU PLS), so the old hand-rolled Ozel
+    # blendshape→AU mapping has been removed. AU01..AU43 are already
+    # present in `fex` straight out of forward().
 
     # Filter out zero-score placeholder rows. py-feat's detector always
     # emits one row per frame even when no face is found (FaceScore == 0.0).
     # Returning those rows would cause downstream code to treat "no face"
     # as "one face with all-NaN features", which breaks AU heatmaps and
     # recording. Callers can check `len(fex) == 0` for the empty case.
-    if "FaceScore" in df.columns and len(df) > 0:
-        df = df[df["FaceScore"] > 0].reset_index(drop=True)
-    _tick("au_map_and_filter")
+    if "FaceScore" in fex.columns and len(fex) > 0:
+        fex = fex[fex["FaceScore"] > 0].reset_index(drop=True)
+    _tick("filter")
 
     if profile:
         total = (time.perf_counter() - _t_start) * 1000.0
         bits = " ".join(f"{k}={v:.1f}" for k, v in _ticks.items())
         logger.info("detect_pil_images total=%.1fms %s", total, bits)
 
-    return Fex(df.reset_index(drop=True), **_fex_wrap_kwargs(detector))
+    # Re-wrap once more: boolean-mask slicing a Fex can return a plain
+    # DataFrame (or drop column metadata), so normalise back to a Fex
+    # with the canonical per-detector schema before handing it back.
+    return Fex(
+        pd.DataFrame(fex).reset_index(drop=True), **_fex_wrap_kwargs(detector)
+    )

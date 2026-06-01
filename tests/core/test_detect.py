@@ -24,6 +24,47 @@ def test_blank_image_returns_empty_fex():
 
 @pytest.mark.slow
 @pytest.mark.timeout(600)
+def test_mpdetector_native_aus_and_pose_on_real_face():
+    """MPDetector on a real face: native FACS AUs + non-NaN 6D pose.
+
+    Guards the py-feat v0.7 regressions fixed in detect.py:
+    - AU columns come straight from forward() now (no Ozel shim), so
+      AU12 must be present and populated.
+    - The pose backfill must run on the assembled *Fex* (v0.7's
+      convert_landmarks_3d reads ``fex.landmarks``), so Pitch/Roll/Yaw
+      must not be all-NaN.
+    """
+    import numpy as np
+
+    detector = build_detector(
+        DetectorConfig(
+            detector_type="MPDetector",
+            emotion_model=None,
+            identity_model=None,
+            device="cpu",
+        )
+    )
+    img = Image.open(FACE_FIXTURE).convert("RGB")
+    fex = detect_pil_images(detector, [img])
+
+    # A guaranteed single face must yield at least one detected row.
+    assert len(fex) >= 1
+    assert (fex["FaceScore"] > 0).all()
+
+    # Native FACS AUs present and populated (no hand-rolled mapping).
+    assert "AU12" in fex.columns
+    assert fex["AU12"].notna().any()
+
+    # Pose backfill ran on the Fex: Pitch/Roll/Yaw not all-NaN.
+    for col in ("Pitch", "Roll", "Yaw"):
+        assert col in fex.columns
+        assert not np.isnan(fex[col].to_numpy(dtype=float)).all(), (
+            f"{col} is all-NaN — pose backfill did not run"
+        )
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(600)
 def test_detectorv2_native_schema_on_real_face():
     """Detectorv2 produces a populated Fex with its native v2 schema.
 
