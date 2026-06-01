@@ -11,11 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from feat import Detector
+from feat import Detector, Detectorv2
 from feat.MPDetector import MPDetector
 
 
-DetectorType = Literal["Detector", "MPDetector"]
+DetectorType = Literal["Detector", "MPDetector", "Detectorv2"]
 Device = Literal["cpu", "mps", "cuda"]
 
 
@@ -29,7 +29,7 @@ class DetectorConfig:
     first-frame time inside the WebSocket handler.
     """
 
-    detector_type: DetectorType = "MPDetector"
+    detector_type: DetectorType = "Detectorv2"
     face_model: str = "retinaface"
     landmark_model: str = "mp_facemesh_v2"
     au_model: Optional[str] = "mp_blendshapes"
@@ -56,6 +56,13 @@ def build_detector(config: DetectorConfig):
         identity_model=config.identity_model,
         device=config.device,
     )
+    if config.detector_type == "Detectorv2":
+        # Detectorv2 is a standalone multitask model: it does not take
+        # landmark_model / au_model / emotion_model / gaze_model kwargs.
+        return Detectorv2(
+            identity_model=config.identity_model,
+            device=config.device,
+        )
     if config.detector_type == "MPDetector":
         # MPDetector doesn't take gaze_model; gaze comes from iris.
         return MPDetector(**common_kwargs)
