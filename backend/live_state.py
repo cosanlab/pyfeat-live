@@ -31,6 +31,12 @@ class LiveSession:
     toggles: dict[str, bool] = field(default_factory=dict)
     landmark_style: str = "mesh"
     mp_landmarks: bool = False
+    # The active detector kind string (e.g. "MPDetector"). Set by
+    # /configure and read by /recording/start so the recorder can
+    # persist the matching capabilities block into metadata.json.
+    # Defaults to the /configure default so recordings started without
+    # an explicit configure still carry a valid capabilities block.
+    detector_type: str = "MPDetector"
     # Which overlay family the active detector wants: 'dlib68_polygons'
     # (classic Detector) or 'mesh478_muscle' (Detectorv2 / MPDetector).
     # Read by the bake path and passed to draw_overlays. A later task

@@ -41,6 +41,8 @@ from typing import Optional
 import av
 import pandas as pd
 
+from pyfeatlive_core.capabilities import capabilities_for
+
 logger = logging.getLogger(__name__)
 
 
@@ -207,6 +209,9 @@ class SessionRecorder:
             "video_mode": self.config.video_mode if self.config.record_video else None,
             "record_fex": self.config.record_fex,
             "detector": self.config.detector_info,
+            "capabilities": capabilities_for(
+                self.config.detector_info["detector_type"]
+            ).to_dict(),
         }
         try:
             (self.dir / "metadata.json").write_text(json.dumps(meta, indent=2))

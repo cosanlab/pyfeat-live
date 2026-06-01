@@ -33,6 +33,8 @@ import av
 import pandas as pd
 from PIL import Image as PILImage
 
+from pyfeatlive_core.capabilities import capabilities_for
+
 logger = logging.getLogger(__name__)
 
 
@@ -204,6 +206,7 @@ def save_analyze_session(
         "source_name": source_name,
         "fps": fps,
         "detector": detector_info,
+        "capabilities": capabilities_for(detector_info["detector_type"]).to_dict(),
         "settings": settings,
         "frames_in_fex": int(len(fex)),
     }
@@ -336,11 +339,11 @@ def fex_frame_indices(fex) -> list[int]:
     return sorted({int(v) for v in fex["frame"].dropna().tolist()})
 
 
-def fex_uses_mp_landmarks(fex) -> bool:
-    """Heuristic: MPDetector emits 478 landmarks (x_0..x_477); the
-    classic Detector emits 68 (x_0..x_67). Look for x_100 — present
-    only in the MP schema."""
-    return "x_100" in fex.columns
+def session_uses_mesh478(meta: dict) -> bool:
+    """Whether a saved session's detector produced a 478-vertex mesh.
+    Reads the persisted capabilities block written at record time."""
+    caps = meta.get("capabilities") or {}
+    return caps.get("landmark_space") == "mp478"
 
 
 def fex_for_frame(fex, frame_idx: int):

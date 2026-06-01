@@ -361,6 +361,7 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
     # in-flight detection to finish before swapping.
     async with live.detector_lock:
         live.detector = detector
+        live.detector_type = req.detector_type
         caps = capabilities_for(req.detector_type)
         live.mp_landmarks = caps.landmark_space == "mp478"
         live.overlay_kind = caps.overlay_kind
@@ -425,6 +426,7 @@ async def recording_start(req: StartRecordingRequest, request: Request) -> dict:
         record_fex=req.record_fex,
         video_mode=req.video_mode,
         fps=req.fps, width=req.width, height=req.height,
+        detector_info={"detector_type": live.detector_type},
     )
     recorder = SessionRecorder(default_sessions_root(), cfg)
     live.recorder = recorder

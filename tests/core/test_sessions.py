@@ -20,3 +20,9 @@ def test_list_sessions_returns_iterable_of_session_objects():
 
 def test_session_class_is_exported():
     assert hasattr(s, "Session")
+
+
+def test_session_landmark_space_from_metadata():
+    from pyfeatlive_core.sessions import session_uses_mesh478
+    assert session_uses_mesh478({"capabilities": {"landmark_space": "mp478"}}) is True
+    assert session_uses_mesh478({"capabilities": {"landmark_space": "dlib68"}}) is False
