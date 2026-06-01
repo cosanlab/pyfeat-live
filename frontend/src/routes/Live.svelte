@@ -57,7 +57,7 @@
 
   let toggles: OverlayToggles = $state({
     rects: true, landmarks: true, poses: false,
-    gaze: false, aus: false, emotions: false,
+    gaze: false, aus: false, emotions: false, valenceArousal: true,
   });
 
   // --- Corner-drag resize (matches the Viewer) --------------------------
@@ -556,6 +556,31 @@
             {#each liveMeta.emo as [name, val]}
               <div>{name.charAt(0).toUpperCase() + name.slice(1)}  {val.toFixed(2)}</div>
             {/each}
+          </div>
+        {/if}
+        {#if isStreaming && liveMeta && toggles.valenceArousal && liveMeta.valence_arousal}
+          <!-- Valence/Arousal two-axis indicator. Anchored top-right of
+               the face bbox, below the emotions panel. The plot itself is
+               not mirrored (it's a sibling of the canvas), so no flip
+               compensation is needed beyond the right-anchor positioning. -->
+          {@const va = liveMeta.valence_arousal}
+          <div
+            class="absolute px-2 py-1.5 rounded-md bg-black/70 text-zinc-200 pointer-events-none"
+            style="right: {((liveMeta.bbox[0]) / srcW * 100).toFixed(2)}%; top: {Math.min(96, (liveMeta.bbox[1] + liveMeta.bbox[3] + 6) / srcH * 100).toFixed(2)}%;"
+          >
+            <svg width="56" height="56" viewBox="0 0 56 56" class="block">
+              <rect x="2" y="2" width="52" height="52" rx="3"
+                fill="none" stroke="#52525b" stroke-width="1" />
+              <line x1="28" y1="2" x2="28" y2="54" stroke="#3f3f46" stroke-width="1" />
+              <line x1="2" y1="28" x2="54" y2="28" stroke="#3f3f46" stroke-width="1" />
+              <circle
+                cx={28 + va.valence * 26}
+                cy={28 - va.arousal * 26}
+                r="3.5" fill="#22c55e" />
+            </svg>
+            <div class="mt-1 text-[10px] font-mono text-zinc-300 leading-none whitespace-nowrap">
+              V {va.valence.toFixed(2)}&nbsp; A {va.arousal.toFixed(2)}
+            </div>
           </div>
         {/if}
         {#if isStreaming && liveMeta && toggles.poses && liveMeta.pose}

@@ -102,7 +102,7 @@
             <span class="text-[10.5px] text-zinc-400 mb-1">Detector</span>
             <select class="px-2 py-1 rounded bg-zinc-900 border border-zinc-800 text-[11.5px]" value={pipeline.detector_type}
               onchange={(e) => pipeline.detector_type = (e.target as HTMLSelectElement).value as any}>
-              <option>MPDetector</option><option>Detector</option>
+              <option>Detectorv2</option><option>MPDetector</option><option>Detector</option>
             </select>
           </label>
           {#each ['face_model', 'landmark_model', 'au_model', 'emotion_model', 'identity_model'] as field}

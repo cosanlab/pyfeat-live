@@ -26,6 +26,7 @@ export interface OverlayToggles {
   gaze: boolean;
   aus: boolean;
   emotions: boolean;
+  valenceArousal: boolean;
 }
 
 export type LandmarkStyle = 'mesh' | 'lines' | 'points';

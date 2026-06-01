@@ -50,7 +50,7 @@
 
   let toggles: OverlayToggles = $state({
     rects: true, landmarks: true, poses: false, gaze: true,
-    aus: false, emotions: false,
+    aus: false, emotions: false, valenceArousal: true,
   });
 
   // Overlay toggle chips (mirrors the Live page control bar).
@@ -526,6 +526,7 @@
   <OverlayConfigModal
     style={overlayStyle}
     {toggles}
+    hasValenceArousal={(currentSession as SessionDetail | null)?.detector_type === 'Detectorv2'}
     onStyleChange={(s) => (overlayStyle = s)}
     onToggle={(key) => (toggles = { ...toggles, [key]: !toggles[key] })}
     onReset={() => (overlayStyle = defaultOverlayStyle())}

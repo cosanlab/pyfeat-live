@@ -36,6 +36,8 @@
     // Which detector field — if set to null — disables this chip.
     // Faceboxes/Landmarks/Pose stay always-on (no field required).
     requires?: keyof LiveConfigure;
+    // Only Detectorv2 emits this channel; hide the chip otherwise.
+    detectorv2Only?: boolean;
   };
   const CHIP_DEFS: Chip[] = [
     { key: 'rects', label: 'Faceboxes' },
@@ -44,7 +46,13 @@
     { key: 'gaze', label: 'Gaze', requires: 'gaze_model' },
     { key: 'aus', label: 'AUs', requires: 'au_model' },
     { key: 'emotions', label: 'Emotions', requires: 'emotion_model' },
+    { key: 'valenceArousal', label: 'Valence / Arousal', detectorv2Only: true },
   ];
+
+  // Detectorv2-only chips are hidden entirely for other detectors.
+  const visibleChips = $derived(
+    CHIP_DEFS.filter((c) => !c.detectorv2Only || config.detector_type === 'Detectorv2'),
+  );
 
   // A chip is "unavailable" when the model that feeds it is set to
   // null in the current config — the backend won't emit that channel
@@ -58,7 +66,7 @@
 <div class="flex items-center gap-2 px-4 py-2.5 bg-zinc-950 border-t border-zinc-900">
   <!-- overlay chips -->
   <div class="flex gap-1.5 flex-wrap">
-    {#each CHIP_DEFS as chip}
+    {#each visibleChips as chip}
       {@const dim = unavailable(chip)}
       <button
         class="px-2.5 py-1 rounded-md text-[11px] font-medium border {toggles[chip.key] && !dim ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'} {dim ? 'opacity-40 cursor-not-allowed' : ''}"

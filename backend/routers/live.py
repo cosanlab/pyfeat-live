@@ -146,6 +146,16 @@ def _live_meta_header(fex, frame_dims=None) -> Optional[str]:
             key=lambda t: -t[1],
         )[:3]
         meta["emo"] = scored
+    # Valence/Arousal (Detectorv2 only) — continuous, each in [-1, 1].
+    if "valence" in row.index and "arousal" in row.index:
+        try:
+            v, a = float(row["valence"]), float(row["arousal"])
+            if not pd.isna(v) and not pd.isna(a):
+                meta["valence_arousal"] = {
+                    "valence": round(v, 3), "arousal": round(a, 3),
+                }
+        except (TypeError, ValueError):
+            pass
     # Pose readout (degrees)
     if all(c in row.index for c in ("Pitch", "Yaw", "Roll")):
         try:

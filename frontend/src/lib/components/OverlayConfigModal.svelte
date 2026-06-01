@@ -7,12 +7,14 @@
   type Props = {
     style: OverlayStyleConfig;
     toggles: OverlayToggles;
+    // Only true for Detectorv2 sessions, which emit continuous V/A.
+    hasValenceArousal?: boolean;
     onStyleChange: (s: OverlayStyleConfig) => void;
     onToggle: (key: keyof OverlayToggles) => void;
     onReset: () => void;
     onClose: () => void;
   };
-  let { style, toggles, onStyleChange, onToggle, onReset, onClose }: Props = $props();
+  let { style, toggles, hasValenceArousal = false, onStyleChange, onToggle, onReset, onClose }: Props = $props();
 
   // Patch one section of the style object and emit the new whole.
   function upd<K extends keyof OverlayStyleConfig>(
@@ -34,7 +36,13 @@
     { key: 'gaze', label: 'Gaze' },
     { key: 'aus', label: 'AUs' },
     { key: 'emotions', label: 'Emotions' },
+    { key: 'valenceArousal', label: 'Valence / Arousal' },
   ];
+
+  // Detectorv2-only rows are hidden for detectors that don't emit them.
+  const visibleSections = $derived(
+    SECTIONS.filter((s) => s.key !== 'valenceArousal' || hasValenceArousal),
+  );
 
   const LANDMARK_STYLES = ['mesh', 'lines', 'points'] as const;
 </script>
@@ -62,7 +70,7 @@
     </div>
 
     <div class="divide-y divide-zinc-800/70">
-      {#each SECTIONS as s}
+      {#each visibleSections as s}
         <div class="px-4 py-3">
           <!-- Section header: label + enable switch -->
           <label class="flex items-center gap-2 cursor-pointer mb-2">

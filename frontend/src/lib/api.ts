@@ -113,6 +113,8 @@ export interface LiveMeta {
   emo?: [string, number][];
   // Pose in degrees
   pose?: { p: number; y: number; r: number };
+  // Continuous valence/arousal (Detectorv2 only), each in [-1, 1].
+  valence_arousal?: { valence: number; arousal: number };
 }
 
 export const liveApi = {
