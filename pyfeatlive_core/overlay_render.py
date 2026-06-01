@@ -346,18 +346,25 @@ def _draw_landmarks(
         edges = MP_CONTOUR_EDGES if mp_landmarks else DLIB_PARTS_EDGES
 
     if edges is not None:
-        # Wireframe: draw each edge as a thin white line. Use the shared
-        # _lm_xy accessor so MP/Detectorv2 edge indices (which span the
-        # full 478 mesh) read the mesh_x_/mesh_y_ columns rather than the
-        # dlib-68 x_/y_ subset — reading x_<i> for i>67 (or even i<=67,
-        # which is a DIFFERENT point on Detectorv2) produced the
-        # crisscrossing garbage lines.
+        # Wireframe. Use the shared _lm_xy accessor so MP/Detectorv2 edge
+        # indices (which span the full 478 mesh) read mesh_x_/mesh_y_ rather
+        # than the dlib-68 x_/y_ subset (reading x_<i> for the wrong point
+        # set produced the old crisscrossing garbage).
+        #
+        # The dense MP tessellation (~2.5k edges) reads as a heavy white
+        # mask at full opacity/width, so draw it as a faint hairline
+        # (width 1 on the 2x canvas => ~0.5px, antialiased down). The
+        # sparse 'lines'/dlib contours stay a touch more visible.
+        if style == "mesh":
+            line_w, line_a = 1, 95
+        else:
+            line_w, line_a = max(1, scale), 175
         for a, b in edges:
             xa, ya = _lm_xy(row, a)
             xb, yb = _lm_xy(row, b)
             if xa is None or xb is None:
                 continue
-            drw.line([(xa, ya), (xb, yb)], fill=(255, 255, 255, 200), width=1 * scale)
+            drw.line([(xa, ya), (xb, yb)], fill=(255, 255, 255, line_a), width=line_w)
     else:
         # 'points': per-landmark dots — cheapest; works for both schemas
         # via the shared accessor (mesh_x_ preferred, x_ fallback).
