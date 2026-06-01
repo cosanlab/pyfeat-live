@@ -29,6 +29,17 @@
   }
 
   const MODEL_OPTIONS = {
+    // Detectorv2 is a built-in multitask model; sub-models are ignored by
+    // the backend. Keyed here only so MODEL_OPTIONS[detector_type] stays
+    // exhaustive over the detector_type union. The Analyze detector picker
+    // does not currently expose Detectorv2 as a selectable option.
+    Detectorv2: {
+      face_model: ['retinaface'],
+      landmark_model: ['mp_facemesh_v2'],
+      au_model: ['mp_blendshapes'],
+      emotion_model: ['resmasknet', 'svm', null],
+      identity_model: ['arcface', 'arcface_r50', 'facenet', null],
+    },
     Detector: {
       face_model: ['img2pose', 'retinaface'],
       landmark_model: ['mobilefacenet', 'mobilenet', 'pfld'],

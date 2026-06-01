@@ -67,7 +67,7 @@ export const systemApi = {
 
 // ---------------- live ----------------
 export interface LiveConfigure {
-  detector_type: 'Detector' | 'MPDetector';
+  detector_type: 'Detectorv2' | 'MPDetector' | 'Detector';
   face_model: string;
   landmark_model: string;
   au_model: string | null;

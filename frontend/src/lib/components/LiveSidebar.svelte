@@ -28,6 +28,17 @@
   }
 
   const MODEL_OPTIONS = {
+    // Detectorv2 is a standalone multitask model: the backend ignores
+    // these sub-model fields entirely. Placeholders keep switchDetectorType
+    // (which reads index [0] of each) consistent; values are never used.
+    Detectorv2: {
+      face_model: ['retinaface'],
+      landmark_model: ['mp_facemesh_v2'],
+      au_model: ['mp_blendshapes'],
+      emotion_model: ['resmasknet'],
+      identity_model: ['arcface'],
+      gaze_model: ['mp_iris (built-in)'],
+    },
     Detector: {
       face_model: ['retinaface', 'img2pose'],
       landmark_model: ['mobilefacenet', 'mobilenet', 'pfld'],
@@ -49,6 +60,25 @@
   } as const;
 
   const opts = $derived(MODEL_OPTIONS[config.detector_type]);
+
+  // Detectorv2 is a built-in multitask model — its Landmark/Action-units
+  // sub-model pickers don't apply, so hide those two rows for it.
+  const modelRows = $derived(
+    (
+      [
+        ['Face', 'face_model'],
+        ['Landmark', 'landmark_model'],
+        ['Action units', 'au_model'],
+        ['Emotion', 'emotion_model'],
+        ['Identity', 'identity_model'],
+        ['Gaze', 'gaze_model'],
+      ] as [string, string][]
+    ).filter(
+      ([, key]) =>
+        config.detector_type !== 'Detectorv2' ||
+        (key !== 'landmark_model' && key !== 'au_model'),
+    ),
+  );
 
   // Switching detector type must also reset the model fields, because
   // e.g. landmark_model='mp_facemesh_v2' is invalid for the classic
@@ -82,7 +112,7 @@
   <div>
     <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">Detector</div>
     <div class="flex gap-0.5 bg-zinc-900 rounded-md p-0.5">
-      {#each ['MPDetector', 'Detector'] as type}
+      {#each ['Detectorv2', 'MPDetector', 'Detector'] as type}
         <button
           class="flex-1 text-[10.5px] py-1 rounded text-center {config.detector_type === type ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500'}"
           onclick={() => switchDetectorType(type as LiveConfigure['detector_type'])}
@@ -94,14 +124,7 @@
   <!-- Models -->
   <div>
     <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">Models</div>
-    {#each [
-      ['Face', 'face_model'],
-      ['Landmark', 'landmark_model'],
-      ['Action units', 'au_model'],
-      ['Emotion', 'emotion_model'],
-      ['Identity', 'identity_model'],
-      ['Gaze', 'gaze_model'],
-    ] as [label, key]}
+    {#each modelRows as [label, key]}
       <div class="mb-2">
         <div class="text-[11px] text-zinc-400 mb-1">{label}</div>
         <div class="relative">

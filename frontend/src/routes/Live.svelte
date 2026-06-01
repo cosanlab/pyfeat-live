@@ -28,13 +28,16 @@
   let detectionRes: DetectionRes = $state(DETECTION_PRESETS[0]!);
 
   let config: LiveConfigure = $state({
-    detector_type: 'Detector',
+    detector_type: 'Detectorv2',
+    // Detectorv2 is a built-in multitask model; the backend ignores these
+    // sub-model fields. Values mirror LiveSidebar's Detectorv2 defaults so
+    // the initial config is internally consistent.
     face_model: 'retinaface',
-    landmark_model: 'mobilefacenet',
-    au_model: 'xgb',
+    landmark_model: 'mp_facemesh_v2',
+    au_model: 'mp_blendshapes',
     emotion_model: 'resmasknet',
     identity_model: 'arcface',
-    gaze_model: 'l2cs',
+    gaze_model: 'mp_iris (built-in)',
     device: 'mps',
   });
 
