@@ -19,8 +19,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 import torch
-from feat import Fex
+from feat import Detectorv2, Fex
 from feat.MPDetector import MPDetector
+from feat.multitask import AU_COLUMNS_V2, EMOTION_COLUMNS_V2
 from feat.pretrained import AU_LANDMARK_MAP
 from feat.utils import (
     FEAT_EMOTION_COLUMNS,
@@ -76,8 +77,37 @@ _FEX_KWARGS_MPDETECTOR = dict(
 )
 
 
+# Detectorv2 emits a native multitask schema: 24 AUs (AU01..AU43),
+# 8 emotions (incl. Contempt), valence/arousal, a 478-point mesh, 6D
+# pose, gaze and ArcFace identity. We mirror Detectorv2.detect()'s own
+# Fex wrapping (see feat/detector_v2.py) so the Fex our batched path
+# produces is schema-identical to detector.detect() output.
+_FEX_KWARGS_DETECTORV2 = dict(
+    au_columns=AU_COLUMNS_V2,
+    emotion_columns=EMOTION_COLUMNS_V2,
+    facebox_columns=FEAT_FACEBOX_COLUMNS,
+    landmark_columns=openface_2d_landmark_columns,
+    facepose_columns=FEAT_FACEPOSE_COLUMNS_6D,
+    gaze_columns=FEAT_GAZE_COLUMNS,
+    identity_columns=FEAT_IDENTITY_COLUMNS[1:],
+    detector="Detectorv2",
+)
+
+
 def _fex_wrap_kwargs(detector) -> dict:
     """Pick the Fex column-metadata kwargs appropriate for this detector."""
+    if isinstance(detector, Detectorv2):
+        # Detectorv2.info carries a different key set than classic
+        # Detector/MPDetector (no landmark_model/au_model/emotion_model).
+        # Use .get() so a missing key yields None rather than KeyError,
+        # matching detector_v2.py's own Fex construction.
+        info = detector.info
+        return {
+            **_FEX_KWARGS_DETECTORV2,
+            "face_model": info.get("face_model"),
+            "identity_model": info.get("identity_model"),
+            "facepose_model": info.get("facepose_model"),
+        }
     base = (
         _FEX_KWARGS_MPDETECTOR
         if isinstance(detector, MPDetector)
@@ -164,12 +194,24 @@ def detect_pil_images(
         "FileName": [str(np.nan)] * n,
     }
 
-    face_size = getattr(detector, "face_size", 112)
-    faces_data = detector.detect_faces(
-        batch_data["Image"],
-        face_size=face_size,
-        face_detection_threshold=0.5,
-    )
+    if isinstance(detector, Detectorv2):
+        # Detectorv2.detect_faces() takes NO face_size kwarg — it owns its
+        # own 256-px chip size internally. It calls convert_image_to_tensor
+        # then frames.float() / 255.0, so it expects pixel values in the
+        # 0-255 range. Our batch_data["Image"] tensor is float32 but already
+        # 0-255 (PILToTensor does not normalize; img_type="float32" is just a
+        # dtype cast, not a /255), so it feeds Detectorv2 correctly as-is.
+        faces_data = detector.detect_faces(
+            batch_data["Image"],
+            face_detection_threshold=0.5,
+        )
+    else:
+        face_size = getattr(detector, "face_size", 112)
+        faces_data = detector.detect_faces(
+            batch_data["Image"],
+            face_size=face_size,
+            face_detection_threshold=0.5,
+        )
     _tick("detect_faces")
     try:
         df = detector.forward(faces_data, batch_data)
