@@ -244,8 +244,7 @@ def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1) -> None:
     has_index = hasattr(row, "index")
 
     def _xy(i):
-        for xk, yk in ((f"mesh_x_{i}", f"mesh_y_{i}"), (f"X_{i}", f"Y_{i}"),
-                       (f"x_{i}", f"y_{i}")):
+        for xk, yk in ((f"mesh_x_{i}", f"mesh_y_{i}"), (f"x_{i}", f"y_{i}")):
             if has_index:
                 if xk in row.index and yk in row.index:
                     return row[xk], row[yk]

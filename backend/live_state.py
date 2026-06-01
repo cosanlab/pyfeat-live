@@ -30,22 +30,22 @@ class LiveSession:
     # the frontend.
     toggles: dict[str, bool] = field(default_factory=dict)
     landmark_style: str = "mesh"
-    mp_landmarks: bool = False
+    mp_landmarks: bool = True
     # The active detector kind string (e.g. "MPDetector"). Set by
     # /configure and read by /recording/start so the recorder can
     # persist the matching capabilities block into metadata.json.
     # Defaults to the /configure default so recordings started without
     # an explicit configure still carry a valid capabilities block.
-    detector_type: str = "MPDetector"
+    detector_type: str = "Detectorv2"
     # Which overlay family the active detector wants: 'dlib68_polygons'
     # (classic Detector) or 'mesh478_muscle' (Detectorv2 / MPDetector).
     # Read by the bake path and passed to draw_overlays. A later task
     # wires the detector→overlay_kind assignment in /configure.
-    overlay_kind: str = "dlib68_polygons"
+    overlay_kind: str = "mesh478_muscle"
     # Whether the active detector emits valence/arousal. A later task
     # sets this from detector capabilities; the field exists now so the
     # attribute is always present.
-    has_valence_arousal: bool = False
+    has_valence_arousal: bool = True
     # Optional (w, h) the detector input is resized to before py-feat
     # runs. The bake happens at the SOURCE resolution with detector
     # coords scaled back, so this is a pure speed knob — capture and

@@ -18,6 +18,26 @@ def test_configure_returns_active_config(client):
     assert data["device"] == "cpu"
 
 
+def test_configure_accepts_detectorv2_default(client):
+    """Detectorv2 is the app default; /configure must accept it (not 422)."""
+    body = {
+        "detector_type": "Detectorv2",
+        "face_model": "retinaface",
+        "landmark_model": "mp_facemesh_v2",
+        "au_model": "mp_blendshapes",
+        "emotion_model": None,
+        "identity_model": None,
+        "device": "cpu",
+    }
+    r = client.post("/api/live/configure", json=body)
+    assert r.status_code == 200
+    assert r.json()["detector_type"] == "Detectorv2"
+    live = client.app.state.live
+    assert live.overlay_kind == "mesh478_muscle"
+    assert live.has_valence_arousal is True
+    assert live.mp_landmarks is True
+
+
 def test_configure_validates_unknown_keys(client):
     r = client.post("/api/live/configure", json={"detector_type": "Nonsense"})
     assert r.status_code == 422  # FastAPI validation error

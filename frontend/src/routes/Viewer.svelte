@@ -133,13 +133,20 @@
 
   // Map fex row → Face shape for the overlay.
   const facesForCurrentFrame = $derived.by((): Face[] => {
-    const mpLandmarks = (currentSession as SessionDetail | null)?.detector_type === 'MPDetector';
-    const nLm = mpLandmarks ? 478 : 68;
+    // 478-mesh space covers Detectorv2 AND MPDetector (capabilities-driven,
+    // not the raw detector string — Detectorv2 is also a 478-mesh detector).
+    const isMesh478 =
+      (currentSession as SessionDetail | null)?.metadata?.capabilities?.landmark_space === 'mp478';
+    const nLm = isMesh478 ? 478 : 68;
     return currentFrameRows.map((r) => {
+      // Prefer Detectorv2's mesh_x_/mesh_y_ columns (478 Face Mesh) when
+      // present; fall back to x_/y_ (MPDetector / dlib). Mirrors
+      // backend/serialization.py::serialize_faces.
+      const useMesh = isMesh478 && typeof r['mesh_x_0'] === 'number';
       const lm: (number | null)[] = [];
       for (let i = 0; i < nLm; i++) {
-        const x = r[`x_${i}`];
-        const y = r[`y_${i}`];
+        const x = useMesh ? r[`mesh_x_${i}`] : r[`x_${i}`];
+        const y = useMesh ? r[`mesh_y_${i}`] : r[`y_${i}`];
         lm.push(typeof x === 'number' ? x : null);
         lm.push(typeof y === 'number' ? y : null);
       }
@@ -174,7 +181,13 @@
     });
   });
 
-  const mpLandmarks = $derived((currentSession as SessionDetail | null)?.detector_type === 'MPDetector');
+  // 478-mesh detection covers BOTH Detectorv2 and MPDetector. Derive from the
+  // recorded session capabilities (metadata.capabilities.landmark_space ===
+  // 'mp478') rather than the raw detector string so Detectorv2 sessions render
+  // the 478 mesh + AU heatmap instead of falling back to the dlib-68 path.
+  const mpLandmarks = $derived(
+    (currentSession as SessionDetail | null)?.metadata?.capabilities?.landmark_space === 'mp478',
+  );
 
   // Current frame's row for the selected identity (for the inspector bars).
   const currentFrameValues = $derived.by((): Record<string, number | null> | null => {

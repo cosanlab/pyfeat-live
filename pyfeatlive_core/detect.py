@@ -33,7 +33,6 @@ from feat.utils import (
     openface_2d_landmark_columns,
 )
 from feat.utils.image_operations import convert_image_to_tensor
-from pyfeatlive_core.capabilities import DISPLAY_AUS, DISPLAY_EMOTIONS
 
 if TYPE_CHECKING:
     from PIL import Image

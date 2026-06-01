@@ -15,8 +15,22 @@ export interface SessionSummary {
   source_type: string | null;
 }
 
+// Mirrors pyfeatlive_core/capabilities.py::DetectorCapabilities.to_dict().
+// Persisted to metadata.json under `capabilities` for each recorded session.
+export interface DetectorCapabilities {
+  kind: string;
+  landmark_space: 'mp478' | 'dlib68';
+  has_mesh478: boolean;
+  overlay_kind: 'dlib68_polygons' | 'mesh478_muscle';
+  has_valence_arousal: boolean;
+  au_set?: string[];
+  emotion_columns?: string[];
+}
+
 export interface SessionDetail extends SessionSummary {
-  metadata: Record<string, unknown>;
+  metadata: Record<string, unknown> & {
+    capabilities?: DetectorCapabilities;
+  };
 }
 
 export interface Identity {

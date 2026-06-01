@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from pyfeatlive_core.capabilities import capabilities_for
 from pyfeatlive_core.detect import detect_pil_images, display_view
-from pyfeatlive_core.detector import DetectorConfig, build_detector
+from pyfeatlive_core.detector import DetectorConfig, DetectorType, build_detector
 from pyfeatlive_core.jpeg import encode_png
 from pyfeatlive_core.overlay_render import draw_overlays
 from pyfeatlive_core.recorder import (
@@ -325,7 +325,7 @@ def _scale_fex_coords(fex, sx: float, sy: float):
 
 
 class ConfigureRequest(BaseModel):
-    detector_type: Literal["Detector", "MPDetector"] = "MPDetector"
+    detector_type: DetectorType = "Detectorv2"
     face_model: str = "retinaface"
     landmark_model: str = "mp_facemesh_v2"
     au_model: Optional[str] = "mp_blendshapes"

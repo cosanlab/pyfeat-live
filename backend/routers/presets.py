@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from pyfeatlive_core.detector import DetectorType
 from pyfeatlive_core.presets import (
     Preset,
     _builtin_presets,
@@ -66,7 +67,7 @@ def get_preset(preset_id: str) -> dict:
 
 class CreatePresetRequest(BaseModel):
     name: str
-    detector_type: Literal["Detector", "MPDetector"]
+    detector_type: DetectorType
     face_model: str
     landmark_model: str
     au_model: str
@@ -101,7 +102,7 @@ def create_preset(req: CreatePresetRequest) -> dict:
 
 class PatchPresetRequest(BaseModel):
     name: Optional[str] = None
-    detector_type: Optional[Literal["Detector", "MPDetector"]] = None
+    detector_type: Optional[DetectorType] = None
     face_model: Optional[str] = None
     landmark_model: Optional[str] = None
     au_model: Optional[str] = None
