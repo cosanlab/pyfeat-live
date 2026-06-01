@@ -149,14 +149,20 @@ def _scale_fex_coords_inplace(fex: pd.DataFrame, scale: float) -> pd.DataFrame:
     """Multiply every pixel-coord column in a fex DataFrame by ``scale``.
 
     Returns a new DataFrame; the original is not mutated. Touches:
-    FaceRect{X,Y,Width,Height} and every x_N / y_N landmark pair.
+    FaceRect{X,Y,Width,Height}, every x_N / y_N landmark pair, and every
+    mesh_x_N / mesh_y_N full-mesh pair (Detectorv2 stores its 478-point
+    mesh there; mesh_z_ is depth and unused by the 2D overlay, so it's
+    left untouched). After this, BOTH mesh schemas — MPDetector's
+    x_/y_ and Detectorv2's mesh_x_/mesh_y_ — are uniformly pre-scaled to
+    the 2x canvas, so downstream primitives must use them directly.
     """
     out = fex.copy()
     for col in ("FaceRectX", "FaceRectY", "FaceRectWidth", "FaceRectHeight"):
         if col in out.columns:
             out[col] = out[col] * scale
     for col in out.columns:
-        if col.startswith("x_") or col.startswith("y_"):
+        if (col.startswith("x_") or col.startswith("y_")
+                or col.startswith("mesh_x_") or col.startswith("mesh_y_")):
             out[col] = out[col] * scale
     return out
 
@@ -264,7 +270,11 @@ def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1) -> None:
             xy = _xy(vi)
             if xy is None:
                 continue
-            x, y = float(xy[0]) * scale, float(xy[1]) * scale
+            # Coords are already pre-scaled to the 2x canvas by
+            # _scale_fex_coords_inplace (MPDetector x_/y_ and Detectorv2
+            # mesh_x_/mesh_y_ alike), so use them directly — ``scale`` now
+            # only sizes the dot radius, matching _draw_landmarks.
+            x, y = float(xy[0]), float(xy[1])
             drw.ellipse([x - r, y - r, x + r, y + r], fill=rgb)
 
 

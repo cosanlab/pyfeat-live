@@ -98,3 +98,35 @@ def test_draw_overlays_mesh_au_smoke():
     before = frame.copy()
     draw_overlays(frame, fex, {"aus": True}, overlay_kind="mesh478_muscle")
     assert not np.array_equal(frame, before)  # something was drawn
+
+
+def test_draw_overlays_mesh_au_mpdetector_coords_not_double_scaled():
+    """MPDetector stores the 478 mesh in lowercase x_<i>/y_<i>, which the
+    overlay pre-scales to the 2x canvas. The mesh-AU renderer must not
+    scale them a second time, or the dots land at 2x the intended source
+    location. Place all AU12-driven vertices near a known source point and
+    assert coloured pixels appear THERE, not at double the coordinates."""
+    import numpy as np
+    import pandas as pd
+    from pyfeatlive_core.overlay_render import draw_overlays
+    from pyfeatlive_core.au_mesh import au_to_vertices
+
+    cx, cy = 120, 90  # source-space target, well inside the frame
+    row = {"FaceScore": 0.99, "AU12": 1.0}
+    # MPDetector schema: lowercase x_<i>/y_<i> for all 478 vertices.
+    for i in range(478):
+        row[f"x_{i}"] = cx
+        row[f"y_{i}"] = cy
+    fex = pd.DataFrame([row])
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    draw_overlays(frame, fex, {"aus": True}, overlay_kind="mesh478_muscle")
+
+    # AU12 drives a non-empty vertex set; with cx,cy inside the frame the
+    # coloured disc must appear within a few px of (cx, cy). A double-scale
+    # bug would put it near (2*cx, 2*cy) = (240, 180) instead.
+    assert au_to_vertices().get("AU12"), "fixture assumption: AU12 drives vertices"
+    ys, xs = np.where(frame.any(axis=2))
+    assert xs.size > 0, "nothing drawn"
+    assert abs(int(xs.mean()) - cx) <= 6 and abs(int(ys.mean()) - cy) <= 6, (
+        f"dots at ~({xs.mean():.0f},{ys.mean():.0f}); expected ~({cx},{cy}) — likely double-scaled"
+    )
