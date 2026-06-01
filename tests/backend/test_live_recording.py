@@ -8,7 +8,14 @@ import pytest
 from pyfeatlive_core.detector import DetectorConfig, build_detector
 
 
-FIXTURE = Path(__file__).parent / "fixtures" / "blank.jpg"
+# A *real* detectable face. The recorder is fed from the detection worker
+# (live._run_detection -> rec.offer_frame), so a frame only reaches the
+# recorder once a detection completes. A blank/faceless image still offers a
+# frame, but the (deferred, fire-and-forget) detection of an empty image can
+# race the stop call, leaving frame_index == 0 and the empty session dir
+# pruned. Posting a real face gives a deterministic detection (and fex rows),
+# so the session is reliably written to disk.
+FIXTURE = Path(__file__).parent.parent / "core" / "fixtures" / "single_face.jpg"
 
 
 @pytest.fixture
@@ -38,19 +45,28 @@ def test_start_then_stop_creates_session_folder(live_client_recording):
     assert "session_id" in session
     assert "started_at" in session
 
-    # Write one frame via the detection endpoint so the recorder has at least
-    # one offered frame. SessionRecorder.close() removes the session directory
-    # when no frames were written, so we need the frame to keep the dir alive.
-    # Note: blank.jpg produces no detected faces so no fex rows are written,
-    # but frames_written is still incremented which is enough to keep the dir.
+    # Drive frames through the detection endpoint so the recorder is fed.
+    # Detection is launched fire-and-forget per upload (gated by an in-flight
+    # flag), and only the detection worker offers frames to the recorder, so
+    # one POST is not enough: we post repeatedly until a detection has
+    # completed (X-Detection-Generation advances), guaranteeing the recorder
+    # received at least one frame before we stop.
     with open(FIXTURE, "rb") as f:
         body = f.read()
-    fr = client.post(
-        "/api/live/frame",
-        content=body,
-        headers={"Content-Type": "image/jpeg"},
-    )
-    assert fr.status_code == 200
+    deadline = time.time() + 30
+    detected = False
+    while time.time() < deadline:
+        fr = client.post(
+            "/api/live/frame",
+            content=body,
+            headers={"Content-Type": "image/jpeg"},
+        )
+        assert fr.status_code == 200
+        if int(fr.headers.get("X-Detection-Generation", "0")) > 0:
+            detected = True
+            break
+        time.sleep(0.1)
+    assert detected, "no detection completed within timeout"
 
     # Give the writer thread a moment to flush the frame to disk.
     time.sleep(0.5)

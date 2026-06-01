@@ -101,7 +101,16 @@
           <label class="flex flex-col">
             <span class="text-[10.5px] text-zinc-400 mb-1">Detector</span>
             <select class="px-2 py-1 rounded bg-zinc-900 border border-zinc-800 text-[11.5px]" value={pipeline.detector_type}
-              onchange={(e) => pipeline.detector_type = (e.target as HTMLSelectElement).value as any}>
+              onchange={(e) => {
+                const newType = (e.target as HTMLSelectElement).value as PipelineConfig['detector_type'];
+                pipeline.detector_type = newType;
+                // Reset sub-models to valid options for the new detector type
+                // so we never carry a stale model (e.g. mp_facemesh_v2 into a
+                // classic Detector), which would make build_detector raise.
+                const d = MODEL_OPTIONS[newType];
+                pipeline.landmark_model = d.landmark_model[0];
+                pipeline.au_model = d.au_model[0];
+              }}>
               <option>Detectorv2</option><option>MPDetector</option><option>Detector</option>
             </select>
           </label>

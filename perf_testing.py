@@ -27,7 +27,7 @@
 #   - vectorised landmark writes in invert_padding_to_results: 5-10%
 #     on post-processing.
 
-from feat import Detector
+from feat import Detector, Detectorv2
 from feat.MPDetector import MPDetector
 from feat.utils.image_operations import convert_image_to_tensor
 from feat.utils.io import get_test_data_path
@@ -99,6 +99,11 @@ def main():
     mp = MPDetector()
     for batch_n in (1, 2, 4):
         profile_case(f"mpdetector_b{batch_n}", mp, batch_n)
+
+    print("Profiling Detectorv2 (built-in multitask, 478 landmarks)...")
+    dv2 = Detectorv2(device="cpu")
+    for batch_n in (1, 2, 4):
+        profile_case(f"detectorv2_b{batch_n}", dv2, batch_n)
 
     print("\nDone. snakeviz basic_<name>.prof to inspect.")
 
