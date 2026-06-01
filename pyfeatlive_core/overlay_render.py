@@ -257,45 +257,70 @@ def _draw_au_heatmap(
 
 
 def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1) -> None:
-    """Colour the MP-478 mesh vertices driven by each AU, by AU intensity.
+    """Filled per-muscle AU heatmap over the MP-478 mesh.
 
-    Reads mesh_x_<i>/mesh_y_<i> (Detectorv2) or X_<i>/Y_<i> (MPDetector)
-    from the row; uses the AU->vertex map from au_mesh. Draws each driven
-    vertex as a small filled disc whose colour comes from the Blues LUT
-    at the driving AU's intensity. Simple per-vertex stipple — adequate
-    for the prototype; a filled-region pass can come later.
+    For each facial muscle in py-feat's geodesic muscle->mesh map, fill the
+    convex hull of that muscle's 478-mesh vertices (in image coords) with a
+    Blues-LUT colour scaled by its driving AU's intensity. Mirrors the v1
+    dlib-68 muscle-polygon look, but anatomically mapped onto the 478 mesh
+    so it works for Detectorv2 (mesh_x_) and MPDetector (x_) alike.
 
-    ``row`` is a pd.Series (from fex.iterrows()); membership is tested via
-    ``in row.index`` and values accessed via ``row[key]``.
+    Coords come from ``_lm_xy`` already pre-scaled to the 2x canvas by
+    ``_scale_fex_coords_inplace``. ``row`` is a pd.Series; membership is
+    tested via ``in row.index`` and values accessed via ``row[key]``.
     """
-    from pyfeatlive_core.au_mesh import au_to_vertices
+    from feat.utils.muscle_to_landmark import load_muscle_to_landmark_map
     from pyfeatlive_core.au_heatmap import au_cmap_lut
-    lut = au_cmap_lut("Blues")
-    amap = au_to_vertices()
+    try:
+        from scipy.spatial import ConvexHull
+    except Exception:  # pragma: no cover - scipy always present via py-feat
+        ConvexHull = None
 
+    lut = au_cmap_lut("Blues")
+    muscles = load_muscle_to_landmark_map()
     has_index = hasattr(row, "index")
 
-    r = max(1, scale)
-    for au, verts in amap.items():
-        if has_index:
-            if au not in row.index:
-                continue
-        else:
-            if au not in row:
-                continue
-        val = float(row[au]) if row[au] == row[au] else 0.0  # NaN guard
-        if val <= 0.0:
+    # Draw weaker muscles first so stronger AU regions paint on top.
+    def _au_val(au):
+        present = (au in row.index) if has_index else (au in row)
+        if not present:
+            return None
+        v = row[au]
+        return float(v) if v == v else 0.0  # NaN guard
+
+    drawable = []
+    for info in muscles.values():
+        au = info.get("au")
+        if not au:
             continue
-        rgb = tuple(int(c) for c in lut[min(255, max(0, int(val * 255)))])
-        for vi in verts:
+        val = _au_val(au)
+        if val is None or val <= 0.0:
+            continue
+        pts = []
+        for vi in info.get("mp478_vertices", ()):
             x, y = _lm_xy(row, vi)
-            if x is None:
-                continue
-            # Coords are already pre-scaled to the 2x canvas by
-            # _scale_fex_coords_inplace (MPDetector x_/y_ and Detectorv2
-            # mesh_x_/mesh_y_ alike), so use them directly — ``scale`` now
-            # only sizes the dot radius, matching _draw_landmarks.
-            drw.ellipse([x - r, y - r, x + r, y + r], fill=rgb)
+            if x is not None:
+                pts.append((x, y))
+        if len(pts) >= 3:
+            drawable.append((val, pts))
+
+    for val, pts in sorted(drawable, key=lambda t: t[0]):
+        rgb = tuple(int(c) for c in lut[min(255, max(0, int(val * 255)))])
+        poly = pts
+        if ConvexHull is not None and len(pts) >= 3:
+            try:
+                arr = np.asarray(pts, dtype=float)
+                hull = ConvexHull(arr)
+                poly = [tuple(arr[v]) for v in hull.vertices]
+            except Exception:
+                poly = pts
+        if len(poly) < 3:
+            continue
+        drw.polygon(
+            poly,
+            fill=(rgb[0], rgb[1], rgb[2], 130),       # ~50% alpha fill
+            outline=(rgb[0], rgb[1], rgb[2], 200),
+        )
 
 
 def _draw_landmarks(
