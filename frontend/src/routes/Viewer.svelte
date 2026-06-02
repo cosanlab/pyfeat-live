@@ -432,19 +432,19 @@
             onclick={() => (toggles = { ...toggles, [chip.key]: !toggles[chip.key] })}
           >{chip.label}</button>
         {/each}
+        {#if hasVideo}
+          <button
+            class="p-1.5 rounded-md border {showVideo ? 'border-zinc-800 text-zinc-400' : 'bg-green-500/10 border-green-500/30 text-green-400'} hover:text-zinc-200 hover:border-zinc-700"
+            title={showVideo ? 'Hide video (overlays only)' : 'Show video'}
+            onclick={() => (showVideo = !showVideo)}
+          >{#if showVideo}<Eye size={14} />{:else}<EyeOff size={14} />{/if}</button>
+        {/if}
         <button
           class="p-1.5 rounded-md border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
           title="Overlay settings"
           onclick={() => (showOverlayConfig = true)}
         ><SlidersHorizontal size={14} /></button>
       </div>
-      {#if hasVideo}
-        <button
-          class="p-1.5 rounded-md border {showVideo ? 'border-zinc-800 text-zinc-400' : 'bg-green-500/10 border-green-500/30 text-green-400'} hover:text-zinc-200 hover:border-zinc-700"
-          title={showVideo ? 'Hide video (overlays only)' : 'Show video'}
-          onclick={() => (showVideo = !showVideo)}
-        >{#if showVideo}<Eye size={14} />{:else}<EyeOff size={14} />{/if}</button>
-      {/if}
     </div>
     <ScrubBar
       {currentFrame}
