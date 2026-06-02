@@ -114,62 +114,70 @@ def _live_meta_header(fex, frame_dims=None) -> Optional[str]:
         return None
     import json
     import pandas as pd
-    row = fex.iloc[0]
     meta: dict = {}
-    # Face bbox in source-frame coords (non-mirrored). Pair it with
-    # the actual source frame dimensions so the frontend can position
-    # HTML overlays correctly regardless of what resolution the
-    # camera actually delivered (browsers ignore getUserMedia's
-    # `ideal` constraint when they can't satisfy it).
-    try:
-        meta["bbox"] = [
-            float(row["FaceRectX"]), float(row["FaceRectY"]),
-            float(row["FaceRectWidth"]), float(row["FaceRectHeight"]),
-        ]
-        # Use the TRUE bake dimensions (source upload size) the caller
-        # passed in. The fex's FrameWidth/FrameHeight reflect the
-        # DETECTION input size, which differs from the bake size when
-        # detection_size downscaling is active — using those would
-        # mis-position the HTML overlays by the downscale factor.
-        if frame_dims is not None:
-            meta["frame"] = [int(frame_dims[0]), int(frame_dims[1])]
-    except (KeyError, TypeError, ValueError):
-        return None
-    # Top-3 emotions
+    # Use the TRUE bake dimensions (source upload size) the caller passed
+    # in. The fex's FrameWidth/FrameHeight reflect the DETECTION input
+    # size, which differs from the bake size when detection_size
+    # downscaling is active — using those would mis-position the HTML
+    # overlays by the downscale factor.
+    if frame_dims is not None:
+        meta["frame"] = [int(frame_dims[0]), int(frame_dims[1])]
+
     emo_cols = ("anger", "disgust", "fear", "happiness",
                 "sadness", "surprise", "neutral")
-    present = [c for c in emo_cols
-               if c in row.index and not pd.isna(row[c])]
-    if present:
-        scored = sorted(
-            ((c, round(float(row[c]), 3)) for c in present),
-            key=lambda t: -t[1],
-        )[:3]
-        meta["emo"] = scored
-    # Valence/Arousal (Detectorv2 only) — continuous, each in [-1, 1].
-    if "valence" in row.index and "arousal" in row.index:
+
+    # One entry per detected face so the frontend can render emotion /
+    # valence-arousal / pose panels for ALL faces simultaneously (not
+    # just the first). Header bytes stay small — a few hundred per face.
+    faces: list[dict] = []
+    for _, row in fex.iterrows():
+        face: dict = {}
+        # Face bbox in source-frame coords (non-mirrored).
         try:
-            v, a = float(row["valence"]), float(row["arousal"])
-            if not pd.isna(v) and not pd.isna(a):
-                meta["valence_arousal"] = {
-                    "valence": round(v, 3), "arousal": round(a, 3),
-                }
-        except (TypeError, ValueError):
-            pass
-    # Pose readout (degrees)
-    if all(c in row.index for c in ("Pitch", "Yaw", "Roll")):
-        try:
-            p, y, r = float(row["Pitch"]), float(row["Yaw"]), float(row["Roll"])
-            if not any(pd.isna(v) for v in (p, y, r)):
-                # Pitch/Yaw/Roll are in RADIANS; the frontend readout labels
-                # them "°", so convert to degrees here.
-                meta["pose"] = {
-                    "p": round(float(np.degrees(p)), 1),
-                    "y": round(float(np.degrees(y)), 1),
-                    "r": round(float(np.degrees(r)), 1),
-                }
-        except (TypeError, ValueError):
-            pass
+            face["bbox"] = [
+                float(row["FaceRectX"]), float(row["FaceRectY"]),
+                float(row["FaceRectWidth"]), float(row["FaceRectHeight"]),
+            ]
+        except (KeyError, TypeError, ValueError):
+            continue  # no bbox → can't position overlays for this face
+        # Top-3 emotions
+        present = [c for c in emo_cols
+                   if c in row.index and not pd.isna(row[c])]
+        if present:
+            face["emo"] = sorted(
+                ((c, round(float(row[c]), 3)) for c in present),
+                key=lambda t: -t[1],
+            )[:3]
+        # Valence/Arousal (Detectorv2 only) — continuous, each in [-1, 1].
+        if "valence" in row.index and "arousal" in row.index:
+            try:
+                v, a = float(row["valence"]), float(row["arousal"])
+                if not pd.isna(v) and not pd.isna(a):
+                    face["valence_arousal"] = {
+                        "valence": round(v, 3), "arousal": round(a, 3),
+                    }
+            except (TypeError, ValueError):
+                pass
+        # Pose readout (degrees)
+        if all(c in row.index for c in ("Pitch", "Yaw", "Roll")):
+            try:
+                p, y, r = (float(row["Pitch"]), float(row["Yaw"]),
+                           float(row["Roll"]))
+                if not any(pd.isna(v) for v in (p, y, r)):
+                    # Pitch/Yaw/Roll are in RADIANS; the frontend readout
+                    # labels them "°", so convert to degrees here.
+                    face["pose"] = {
+                        "p": round(float(np.degrees(p)), 1),
+                        "y": round(float(np.degrees(y)), 1),
+                        "r": round(float(np.degrees(r)), 1),
+                    }
+            except (TypeError, ValueError):
+                pass
+        faces.append(face)
+
+    if not faces:
+        return None
+    meta["faces"] = faces
     return json.dumps(meta, separators=(",", ":"))
 
 

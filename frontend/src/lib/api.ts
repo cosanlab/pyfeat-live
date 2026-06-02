@@ -102,19 +102,26 @@ export interface LiveHints {
 
 // Compact metadata for HTML overlays (emotion + pose panels) rendered
 // on top of the canvas. Avoids baking text into the mirrored canvas.
-export interface LiveMeta {
+// Per-face overlay metadata. One entry per detected face so the
+// emotion / valence-arousal / pose HTML panels render for ALL faces.
+export interface LiveFace {
   // Source-frame (non-mirrored) face bounding box: [x, y, w, h]
   bbox: [number, number, number, number];
-  // Actual source-frame dimensions [width, height]. Cameras may
-  // ignore getUserMedia's {ideal:...} so the frontend needs the
-  // real dims to position HTML overlays correctly.
-  frame?: [number, number];
   // Top-3 [emotion_name, prob]
   emo?: [string, number][];
   // Pose in degrees
   pose?: { p: number; y: number; r: number };
   // Continuous valence/arousal (Detectorv2 only), each in [-1, 1].
   valence_arousal?: { valence: number; arousal: number };
+}
+
+export interface LiveMeta {
+  // Actual source-frame dimensions [width, height]. Cameras may
+  // ignore getUserMedia's {ideal:...} so the frontend needs the
+  // real dims to position HTML overlays correctly.
+  frame?: [number, number];
+  // One entry per detected face.
+  faces: LiveFace[];
 }
 
 export const liveApi = {
