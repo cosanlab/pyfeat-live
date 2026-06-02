@@ -19,18 +19,25 @@
     // n×n centroid-cosine similarity matrix from the last cluster call,
     // or null when no clustering has been run this session yet.
     similarity: number[][] | null;
+    // Selection drives timeseries filtering in the parent. Clicking a
+    // card's thumbnail toggles its identity in this list.
+    selectedIdentityIds: string[];
+    onSelectIdentity: (iid: string) => void;
     // Parent re-fetches identities + assignments after these run.
     onClusterChange: (resp: ClusterResponse) => void;
     onMerge: (resp: { identities: Identity[] }) => void;
   };
   let {
     sessionId, identities, assignments, similarity,
+    selectedIdentityIds, onSelectIdentity,
     onClusterChange, onMerge,
   }: Props = $props();
 
   let threshold = $state(0.8);
   let busy = $state(false);
   let error: string | null = $state(null);
+  // Collapsed by default — auto-grouping is a secondary tool below the list.
+  let showAutoGroup = $state(false);
 
   // Editable name state — track the identity being edited and the draft.
   let editingId: string | null = $state(null);
@@ -128,65 +135,28 @@
   }
 </script>
 
-<section class="border-t border-zinc-900 pt-3 mt-3">
-  <h4 class="text-[10px] uppercase tracking-wider font-semibold text-zinc-500 mb-2.5 inline-flex items-center gap-1.5">
-    <Sparkles size={11} />
-    Clusters
+<section>
+  <h4 class="text-[10px] uppercase tracking-wider font-semibold text-zinc-500 mb-2.5">
+    Identities
   </h4>
 
-  <!-- Threshold slider + Re-cluster trigger -->
-  <div class="space-y-1.5 mb-3">
-    <div class="flex items-center justify-between text-[10.5px]">
-      <label for="cluster-threshold" class="text-zinc-500">Similarity threshold</label>
-      <span class="font-mono text-zinc-300">{threshold.toFixed(2)}</span>
-    </div>
-    <input
-      id="cluster-threshold"
-      type="range"
-      min="0.4"
-      max="0.95"
-      step="0.01"
-      bind:value={threshold}
-      class="w-full accent-green-400"
-    />
-    <button
-      class="w-full px-2 py-1.5 rounded bg-green-400 text-green-950 text-[11px] font-medium inline-flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-      onclick={recluster}
-      disabled={busy}
-    >
-      {#if busy}
-        <Loader size={12} class="animate-spin" />
-        Clustering…
-      {:else}
-        <Sparkles size={12} />
-        Re-cluster
-      {/if}
-    </button>
-    {#if error}
-      <div class="text-[10.5px] text-red-400 px-1.5 py-1 bg-red-950/30 border border-red-900/50 rounded">
-        {error}
-      </div>
-    {/if}
-  </div>
-
-  <!-- Cluster grid -->
+  <!-- Identity cards: thumbnail (click to select) · name (click to rename) ·
+       drag one onto another to merge. -->
   {#if identities.length === 0}
-    <div class="text-[10.5px] text-zinc-500 italic px-1.5 py-1">
-      no clusters yet — click Re-cluster
-    </div>
+    <div class="text-[10.5px] text-zinc-500 italic px-1.5 py-1">no identities yet</div>
   {:else}
-    <p class="text-[10px] text-zinc-500 mb-2 leading-snug">
-      Drag one face onto another to merge them into the same person.
-    </p>
     <div class="grid grid-cols-2 gap-2">
       {#each identities as ident (ident.identity_id)}
         {@const first = firstAssignmentByIdentity.get(ident.identity_id)}
         {@const count = frameCountByIdentity.get(ident.identity_id) ?? 0}
+        {@const selected = selectedIdentityIds.includes(ident.identity_id)}
         <div
           class="flex flex-col items-center gap-1.5 p-1.5 rounded border bg-zinc-950 transition-colors cursor-grab active:cursor-grabbing
             {dropTargetId === ident.identity_id && dragId !== ident.identity_id
               ? 'border-green-400 ring-1 ring-green-400'
-              : 'border-zinc-800'}
+              : selected
+                ? 'border-zinc-600 ring-1 ring-zinc-500'
+                : 'border-zinc-800'}
             {dragId === ident.identity_id ? 'opacity-40' : ''}"
           draggable="true"
           role="listitem"
@@ -209,20 +179,27 @@
             }
           }}
         >
-          {#if first}
-            <IdentityThumbnail
-              {sessionId}
-              frame={first.frame}
-              faceIdx={first.face_idx}
-              size={72}
-              fallbackColor={ident.color}
-            />
-          {:else}
-            <div
-              class="w-[72px] h-[72px] rounded-md border border-zinc-800"
-              style:background-color={ident.color}
-            ></div>
-          {/if}
+          <button
+            type="button"
+            class="rounded-md {selected ? 'ring-2 ring-zinc-300' : ''}"
+            title="Click to select / filter timeseries"
+            onclick={() => onSelectIdentity(ident.identity_id)}
+          >
+            {#if first}
+              <IdentityThumbnail
+                {sessionId}
+                frame={first.frame}
+                faceIdx={first.face_idx}
+                size={72}
+                fallbackColor={ident.color}
+              />
+            {:else}
+              <div
+                class="w-[72px] h-[72px] rounded-md border border-zinc-800"
+                style:background-color={ident.color}
+              ></div>
+            {/if}
+          </button>
           <div class="flex items-center gap-1 w-full">
             <span class="w-2.5 h-2.5 rounded-full shrink-0" style:background-color={ident.color}></span>
             {#if editingId === ident.identity_id}
@@ -231,6 +208,7 @@
                 type="text"
                 bind:value={editDraft}
                 onblur={commitEdit}
+                onclick={(e) => e.stopPropagation()}
                 onkeydown={(e) => {
                   if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
                   else if (e.key === 'Escape') cancelEdit();
@@ -254,14 +232,66 @@
     </div>
   {/if}
 
-  <!-- Merge suggestions (only after a cluster has been run) -->
-  {#if similarity && similarity.length === identities.length && identities.length >= 2}
-    <IdentityMergeSuggestions
-      {sessionId}
-      {identities}
-      {assignments}
-      {similarity}
-      {onMerge}
-    />
-  {/if}
+  <div class="mt-2 px-2.5 py-1.5 rounded border border-dashed border-zinc-700 text-zinc-500 text-[10.5px] text-center">
+    Click a face in the video to assign
+  </div>
+
+  <!-- Auto-group: secondary tool to cluster faces by ArcFace similarity. -->
+  <div class="border-t border-zinc-900 pt-2.5 mt-3">
+    <button
+      class="w-full flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold text-zinc-500 hover:text-zinc-300"
+      onclick={() => (showAutoGroup = !showAutoGroup)}
+    >
+      <Sparkles size={11} />
+      Auto-group by similarity
+      <span class="ml-auto font-mono text-zinc-600">{showAutoGroup ? '−' : '+'}</span>
+    </button>
+
+    {#if showAutoGroup}
+      <div class="space-y-1.5 mt-2.5">
+        <div class="flex items-center justify-between text-[10.5px]">
+          <label for="cluster-threshold" class="text-zinc-500">Similarity threshold</label>
+          <span class="font-mono text-zinc-300">{threshold.toFixed(2)}</span>
+        </div>
+        <input
+          id="cluster-threshold"
+          type="range"
+          min="0.4"
+          max="0.95"
+          step="0.01"
+          bind:value={threshold}
+          class="w-full accent-green-400"
+        />
+        <button
+          class="w-full px-2 py-1.5 rounded bg-green-400 text-green-950 text-[11px] font-medium inline-flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+          onclick={recluster}
+          disabled={busy}
+        >
+          {#if busy}
+            <Loader size={12} class="animate-spin" />
+            Clustering…
+          {:else}
+            <Sparkles size={12} />
+            Re-cluster
+          {/if}
+        </button>
+        {#if error}
+          <div class="text-[10.5px] text-red-400 px-1.5 py-1 bg-red-950/30 border border-red-900/50 rounded">
+            {error}
+          </div>
+        {/if}
+      </div>
+
+      <!-- Merge suggestions (only after a cluster has been run) -->
+      {#if similarity && similarity.length === identities.length && identities.length >= 2}
+        <IdentityMergeSuggestions
+          {sessionId}
+          {identities}
+          {assignments}
+          {similarity}
+          {onMerge}
+        />
+      {/if}
+    {/if}
+  </div>
 </section>

@@ -110,7 +110,8 @@
 </script>
 
 <div
-  class="relative flex-1 bg-black flex items-center justify-center min-h-[240px] cursor-crosshair overflow-hidden"
+  class="relative bg-black flex items-start justify-center overflow-hidden cursor-crosshair shrink-0"
+  style="resize: vertical; height: 45vh; min-height: 160px;"
   onclick={handleStageClick}
   role="presentation"
 >
@@ -122,8 +123,8 @@
          space) were drawn onto a differently-sized/positioned canvas
          and appeared offset. Both now fill this aspect-matched box. -->
     <div
-      class="relative"
-      style="aspect-ratio: {width} / {height}; max-width: 100%; max-height: 100%; width: 100%;"
+      class="relative h-full"
+      style="aspect-ratio: {width} / {height}; max-width: 100%; max-height: 100%;"
     >
       <video
         bind:this={video}
