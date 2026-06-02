@@ -38,7 +38,10 @@ export function drawLandmarks(
   ctx.globalAlpha = opts?.opacity ?? 1;
   ctx.fillStyle = color;
   ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(0.5, size * 0.85);
+  // The dense 478 tessellation reads as a heavy mask at normal stroke
+  // widths, so draw mesh as the thinnest crisp hairline. The sparse
+  // 'lines'/dlib contours stay size-scaled for visibility.
+  ctx.lineWidth = style === 'mesh' ? 0.5 : Math.max(0.5, size * 0.85);
 
   if (style === 'points' || !edges) {
     for (let i = 0; i < lm.length; i += 2) {

@@ -47,7 +47,7 @@ export interface OverlayStyleConfig {
 export function defaultOverlayStyle(): OverlayStyleConfig {
   return {
     faceboxes: { color: '#22c55e', opacity: 1, lineWidth: 2 },
-    landmarks: { style: 'mesh', color: '#22c55e', opacity: 1, size: 1.2 },
+    landmarks: { style: 'mesh', color: '#ffffff', opacity: 1, size: 1.2 },
     pose: { sizeScale: 0.5 },
     gaze: { color: '#22c55e', opacity: 1, lineWidth: 2 },
     aus: { colormap: 'Blues', opacity: 0.55 },
