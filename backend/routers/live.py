@@ -200,12 +200,14 @@ async def _run_detection(live, img: Image.Image) -> None:
             mp_landmarks = live.mp_landmarks
             landmark_style = live.landmark_style or "mesh"
             overlay_kind = getattr(live, "overlay_kind", "dlib68_polygons")
+            gaze_convention = getattr(live, "gaze_convention", "l2cs")
             t0 = time.perf_counter()
             png, fex, dims, baked_arr = await loop.run_in_executor(
                 _DETECTION_EXECUTOR,
                 _detect_and_bake,
                 detector, img, detection_size,
                 toggles, mp_landmarks, landmark_style, overlay_kind,
+                gaze_convention,
             )
             dur = time.perf_counter() - t0
         print(f"detect+bake: {dims[0]}x{dims[1]} dur={dur*1000:.0f}ms")
@@ -248,6 +250,7 @@ def _detect_and_bake(
     detector, img: Image.Image, detection_size,
     toggles: dict, mp_landmarks: bool, landmark_style: str,
     overlay_kind: str = "dlib68_polygons",
+    gaze_convention: str = "l2cs",
 ):
     """Full per-frame pipeline, run in the detection worker thread:
     detect → scale coords to source space → bake overlay → PNG-encode.
@@ -272,7 +275,7 @@ def _detect_and_bake(
         draw_overlays(
             frame_arr, display_view(fex), toggles,
             mp_landmarks=mp_landmarks, overlay_kind=overlay_kind,
-            landmark_style=landmark_style,
+            landmark_style=landmark_style, gaze_convention=gaze_convention,
         )
     # PNG (lossless) so overlay edges + 1px landmark dots survive intact.
     png = encode_png(frame_arr)
@@ -292,8 +295,21 @@ def _detection_input(
     tw, th = target_size
     if tw >= img.width and th >= img.height:
         return img, 1.0, 1.0
-    det_img = img.resize((tw, th), Image.LANCZOS)
-    return det_img, img.width / tw, img.height / th
+    # Scale by a SINGLE factor (fit within target) so the detector never
+    # sees an aspect-distorted face. Detectorv2 predicts its 478 mesh from
+    # the face crop; a vertically/horizontally squished crop (which the old
+    # non-aspect-preserving resize produced whenever the camera's aspect
+    # ratio != detection_size's, e.g. a 4:3 webcam vs 640x360) yields a mesh
+    # that a per-axis rescale can't undo — the bbox survives (a box is a
+    # box), the mesh comes back compressed. Mirrors Detectorv2's native
+    # ImageDataset(preserve_aspect_ratio=True).
+    s = min(tw / img.width, th / img.height)
+    det_img = img.resize(
+        (max(1, round(img.width * s)), max(1, round(img.height * s))),
+        Image.LANCZOS,
+    )
+    inv = 1.0 / s
+    return det_img, inv, inv
 
 
 def _scale_fex_coords(fex, sx: float, sy: float):
@@ -376,6 +392,7 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
         live.mp_landmarks = caps.landmark_space == "mp478"
         live.overlay_kind = caps.overlay_kind
         live.has_valence_arousal = caps.has_valence_arousal
+        live.gaze_convention = caps.gaze_convention
         if req.toggles is not None:
             live.toggles = req.toggles
         if req.landmark_style is not None:

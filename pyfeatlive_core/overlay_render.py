@@ -15,6 +15,7 @@ ImageDraw directly and read coords from the Fex row.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -75,6 +76,7 @@ def draw_overlays(
     mp_landmarks: bool | None = None,
     overlay_kind: str = "dlib68_polygons",
     landmark_style: str = "mesh",
+    gaze_convention: str = "l2cs",
 ) -> None:
     """Draw overlays per the toggles. No-op if fex is None/empty.
 
@@ -131,7 +133,8 @@ def draw_overlays(
         if toggles.get("poses"):
             _draw_pose(drw, row, font_small, mp_landmarks=mp_landmarks, scale=SCALE)
         if toggles.get("gaze"):
-            _draw_gaze(drw, row, mp_landmarks=mp_landmarks, scale=SCALE)
+            _draw_gaze(drw, row, mp_landmarks=mp_landmarks, scale=SCALE,
+                       gaze_convention=gaze_convention)
         if toggles.get("emotions"):
             _draw_emotions(drw, row, font_label, scale=SCALE)
 
@@ -256,71 +259,92 @@ def _draw_au_heatmap(
         pass
 
 
-def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1) -> None:
-    """Filled per-muscle AU heatmap over the MP-478 mesh.
+@lru_cache(maxsize=1)
+def _mesh_au_topology():
+    """Cached (triangles, vertex->AUs) for the 478-mesh AU heatmap.
 
-    For each facial muscle in py-feat's geodesic muscle->mesh map, fill the
-    convex hull of that muscle's 478-mesh vertices (in image coords) with a
-    Blues-LUT colour scaled by its driving AU's intensity. Mirrors the v1
-    dlib-68 muscle-polygon look, but anatomically mapped onto the 478 mesh
-    so it works for Detectorv2 (mesh_x_) and MPDetector (x_) alike.
-
-    Coords come from ``_lm_xy`` already pre-scaled to the 2x canvas by
-    ``_scale_fex_coords_inplace``. ``row`` is a pd.Series; membership is
-    tested via ``in row.index`` and values accessed via ``row[key]``.
+    triangles: list of (a, b, c) MP-478 vertex indices from the MediaPipe
+      tessellation (852 triangles; the connection list is stored as
+      consecutive edge-triples that each close a triangle).
+    vertex_aus: {vertex_idx: [AU names that drive it]} from py-feat's
+      geodesic muscle->mesh map.
     """
-    from feat.utils.muscle_to_landmark import load_muscle_to_landmark_map
+    from pyfeatlive_core.au_mesh import au_to_vertices
+    from pyfeatlive_core.overlay_edges import MP_TESS_EDGES as E
+    triangles = [
+        (E[i][0], E[i][1], E[i + 1][1]) for i in range(0, len(E) - 2, 3)
+    ]
+    vertex_aus: dict[int, list[str]] = {}
+    for au, verts in au_to_vertices().items():
+        for v in verts:
+            vertex_aus.setdefault(int(v), []).append(au)
+    return triangles, vertex_aus
+
+
+def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1) -> None:
+    """Smooth AU heatmap over the MP-478 mesh tessellation.
+
+    Builds a per-vertex AU intensity (max over the muscles that drive each
+    vertex, from py-feat's geodesic muscle->mesh map) and fills each
+    MediaPipe tessellation triangle with a Blues-LUT colour at the mean of
+    its three vertices' intensities, with alpha scaled by intensity so the
+    resting face fades out (no opaque blob) and active muscles read clearly.
+    Triangles tile without overlap, so it stays crisp and anatomically
+    precise — works for Detectorv2 (mesh_x_) and MPDetector (x_) alike.
+
+    Coords come from ``_lm_xy`` (already pre-scaled to the 2x canvas).
+    ``row`` is a pd.Series; membership via ``in row.index``.
+    """
     from pyfeatlive_core.au_heatmap import au_cmap_lut
-    try:
-        from scipy.spatial import ConvexHull
-    except Exception:  # pragma: no cover - scipy always present via py-feat
-        ConvexHull = None
 
     lut = au_cmap_lut("Blues")
-    muscles = load_muscle_to_landmark_map()
+    triangles, vertex_aus = _mesh_au_topology()
     has_index = hasattr(row, "index")
 
-    # Draw weaker muscles first so stronger AU regions paint on top.
     def _au_val(au):
         present = (au in row.index) if has_index else (au in row)
         if not present:
-            return None
+            return 0.0
         v = row[au]
         return float(v) if v == v else 0.0  # NaN guard
 
-    drawable = []
-    for info in muscles.values():
-        au = info.get("au")
-        if not au:
-            continue
-        val = _au_val(au)
-        if val is None or val <= 0.0:
-            continue
-        pts = []
-        for vi in info.get("mp478_vertices", ()):
-            x, y = _lm_xy(row, vi)
-            if x is not None:
-                pts.append((x, y))
-        if len(pts) >= 3:
-            drawable.append((val, pts))
+    # Per-vertex intensity = strongest AU driving that vertex.
+    au_cache: dict[str, float] = {}
+    vint: dict[int, float] = {}
+    for v, aus in vertex_aus.items():
+        m = 0.0
+        for au in aus:
+            if au not in au_cache:
+                au_cache[au] = _au_val(au)
+            if au_cache[au] > m:
+                m = au_cache[au]
+        if m > 0.0:
+            vint[v] = m
 
-    for val, pts in sorted(drawable, key=lambda t: t[0]):
-        rgb = tuple(int(c) for c in lut[min(255, max(0, int(val * 255)))])
-        poly = pts
-        if ConvexHull is not None and len(pts) >= 3:
-            try:
-                arr = np.asarray(pts, dtype=float)
-                hull = ConvexHull(arr)
-                poly = [tuple(arr[v]) for v in hull.vertices]
-            except Exception:
-                poly = pts
-        if len(poly) < 3:
+    if not vint:
+        return
+
+    # Gamma > 1 suppresses the low-to-mid AU activations that fire on a
+    # resting face (Detectorv2 emits a spread of 0.1-0.3 across many AUs),
+    # so only genuinely-active muscles read clearly instead of tinting the
+    # whole face blue.
+    GAMMA = 2.2
+    THRESH = 0.08
+    for a, b, c in triangles:
+        m = (vint.get(a, 0.0) + vint.get(b, 0.0) + vint.get(c, 0.0)) / 3.0
+        if m < THRESH:
             continue
-        drw.polygon(
-            poly,
-            fill=(rgb[0], rgb[1], rgb[2], 130),       # ~50% alpha fill
-            outline=(rgb[0], rgb[1], rgb[2], 200),
-        )
+        disp = m ** GAMMA
+        pa = _lm_xy(row, a)
+        pb = _lm_xy(row, b)
+        pc = _lm_xy(row, c)
+        if pa[0] is None or pb[0] is None or pc[0] is None:
+            continue
+        rgb = tuple(int(x) for x in lut[min(255, max(0, int(disp * 255)))])
+        alpha = int(min(185, disp * 240))   # faint at rest, strong when active
+        if alpha <= 0:
+            continue
+        drw.polygon([pa, pb, pc], fill=(rgb[0], rgb[1], rgb[2], alpha))
 
 
 def _draw_landmarks(
@@ -443,6 +467,7 @@ def _draw_gaze(
     *,
     mp_landmarks: bool,
     scale: int = 1,
+    gaze_convention: str = "l2cs",
 ) -> None:
     """Single yellow arrow from between-the-eyes toward gaze direction."""
     has_index = hasattr(row, "index")
@@ -475,8 +500,15 @@ def _draw_gaze(
     # output-sign bug upstream — see followup task.)
     gp_rad = float(gp)
     gy_rad = float(gy)
-    dir_x = -float(np.sin(gy_rad))
-    dir_y = -float(np.sin(gp_rad))
+    if gaze_convention == "multitask":
+        # Detectorv2's multitask gaze head — py-feat's draw_facegaze
+        # convention: +x = camera's right, +pitch = up.
+        dir_x = float(np.sin(gy_rad) * np.cos(gp_rad))
+        dir_y = -float(np.sin(gp_rad))
+    else:
+        # L2CS (classic Detector / MPDetector) — yaw sign hand-tuned.
+        dir_x = -float(np.sin(gy_rad))
+        dir_y = -float(np.sin(gp_rad))
     length = min(w, h) * 0.9
     end_x = origin_x + length * dir_x
     end_y = origin_y + length * dir_y

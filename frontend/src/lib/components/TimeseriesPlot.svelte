@@ -134,14 +134,15 @@
   // likely wants to plot over time. Excluded:
   //   - frame / face_idx / FaceRect* / FaceScore / input / approx_time
   //     — bookkeeping, not analytics
-  //   - x_N / y_N / z_N landmark coordinates — too many to be useful as
-  //     individual chips (68 or 478 per axis)
+  //   - x_N / y_N / z_N landmark coords + mesh_x_N / mesh_y_N / mesh_z_N
+  //     (Detectorv2's 478-point Face Mesh, 1434 cols) — too many to be
+  //     useful as individual chips
   //   - Identity_N face-embedding dims — high-dimensional embeddings
   //     (e.g., ArcFace's 512 numbers per face); not interpretable
   //     individually
   const availableSeries = $derived.by(() => {
     if (fexRows.length === 0) return [];
-    const skipPattern = /^(frame|face_idx|FaceRect|FaceScore|input|approx_time|x_\d|y_\d|z_\d|Identity_)/;
+    const skipPattern = /^(frame|face_idx|FaceRect|FaceScore|input|approx_time|x_\d|y_\d|z_\d|mesh_[xyz]_\d|Identity_)/;
     const sample = fexRows[0];
     return Object.keys(sample).filter(k => !skipPattern.test(k));
   });

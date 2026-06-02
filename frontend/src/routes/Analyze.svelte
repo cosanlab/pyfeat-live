@@ -41,8 +41,8 @@
       };
     }
     return {
-      detector_type: 'Detector', face_model: 'retinaface',
-      landmark_model: 'mobilefacenet', au_model: 'xgb',
+      detector_type: 'Detectorv2', face_model: 'retinaface',
+      landmark_model: 'mp_facemesh_v2', au_model: 'mp_blendshapes',
       emotion_model: 'resmasknet', identity_model: 'arcface',
       preset_id: null, preset_name: null,
     };

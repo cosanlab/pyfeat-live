@@ -36,6 +36,12 @@ DETECTORV2_EMOTION_RENAME = {
 
 LandmarkSpace = Literal["dlib68", "mp478"]
 OverlayKind = Literal["dlib68_polygons", "mesh478_muscle"]
+# Gaze sign convention for the overlay arrow. The classic Detector +
+# MPDetector use the L2CS model, whose yaw sign the overlay was hand-tuned
+# for (dir_x = -sin(yaw)). Detectorv2's multitask gaze head follows
+# py-feat's own draw_facegaze convention (dir_x = +sin(yaw)*cos(pitch)),
+# so its left/right is flipped relative to L2CS.
+GazeConvention = Literal["l2cs", "multitask"]
 
 
 @dataclass(frozen=True)
@@ -47,6 +53,7 @@ class DetectorCapabilities:
     overlay_kind: OverlayKind
     has_valence_arousal: bool
     emotion_columns: list[str]
+    gaze_convention: GazeConvention = "l2cs"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -61,6 +68,7 @@ _CAPS = {
         overlay_kind="mesh478_muscle",
         has_valence_arousal=True,
         emotion_columns=list(DISPLAY_EMOTIONS),
+        gaze_convention="multitask",
     ),
     "MPDetector": DetectorCapabilities(
         kind="MPDetector",

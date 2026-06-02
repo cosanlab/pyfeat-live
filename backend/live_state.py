@@ -46,6 +46,10 @@ class LiveSession:
     # sets this from detector capabilities; the field exists now so the
     # attribute is always present.
     has_valence_arousal: bool = True
+    # Gaze arrow sign convention: 'l2cs' (classic Detector / MPDetector) or
+    # 'multitask' (Detectorv2 — py-feat draw_facegaze convention, yaw not
+    # flipped). Set from detector capabilities in /configure.
+    gaze_convention: str = "multitask"
     # Optional (w, h) the detector input is resized to before py-feat
     # runs. The bake happens at the SOURCE resolution with detector
     # coords scaled back, so this is a pure speed knob — capture and
