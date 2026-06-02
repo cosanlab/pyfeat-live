@@ -37,17 +37,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS arm64 — primary target. Self-hosted on Apple Silicon
-          # GHA-hosted runner; produces .app + .dmg.
+          # macOS arm64 (Apple Silicon) — the only supported target.
+          # macos-14 GHA runners are themselves Apple Silicon, so this is
+          # a native host build (no --target), which keeps bundle output
+          # in the default target/release/bundle path. That matters for
+          # the updater: tauri-action only finds the .app.tar.gz.sig and
+          # emits latest.json when artifacts are at the un-prefixed path
+          # (an explicit --target nests them under target/<triple>/ and
+          # the signature lookup misses them → "Signature not found").
           - platform: macos-14
             target: aarch64-apple-darwin
             uv_asset: uv-aarch64-apple-darwin.tar.gz
-          # macOS x86_64 — secondary; same Tauri config, different uv
-          # binary. Apple Silicon runners can cross-compile via
-          # rustup target add.
-          - platform: macos-14
-            target: x86_64-apple-darwin
-            uv_asset: uv-x86_64-apple-darwin.tar.gz
           # Windows x86_64 — TODO: enable once macOS pipeline is green.
           # - platform: windows-2022
           #   target: x86_64-pc-windows-msvc
@@ -224,7 +224,11 @@ jobs:
           # APPLE_API_KEY_PATH is exported by the previous step into GITHUB_ENV
         with:
           projectPath: tauri
-          args: --target ${{ matrix.target }}
+          # No --target: build natively for the host (macos-14 = Apple
+          # Silicon). This keeps bundle output at target/release/bundle so
+          # tauri-action finds the .app.tar.gz.sig and emits latest.json
+          # for the auto-updater. An explicit --target nests artifacts
+          # under target/<triple>/ and breaks the signature lookup.
           # Tag handling: on tag push the action reads the tag name;
           # on workflow_dispatch the input is forwarded.
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
@@ -232,12 +236,9 @@ jobs:
           releaseBody: |
             ## Installation
 
-            Download the right artifact for your platform:
+            Requires macOS on Apple Silicon (M-series).
 
             - macOS Apple Silicon: `Py-feat.Live_*_aarch64.dmg`
-            - macOS Intel:         `Py-feat.Live_*_x64.dmg`
-            - Windows:             `Py-feat.Live_*_x64-setup.exe`  (TODO)
-            - Linux:               `py-feat-live_*_amd64.AppImage`  (TODO)
 
             First launch downloads ~1.5GB of Python dependencies and
             ~1GB of model weights into your user data directory.
