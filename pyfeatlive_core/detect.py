@@ -14,11 +14,22 @@ notebooks, or CLI scripts.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 import torch
+
+# Process-wide GPU detection mutex. On Apple MPS (and across concurrent CUDA
+# streams) two detections touching the device at once abort with a Metal /
+# command-buffer race ("command encoder already encoding ..."). The live
+# path detects on a worker thread (_DETECTION_EXECUTOR) while an analyze run
+# detects on its own task — both funnel through detect_pil_images, so a single
+# lock around the torch detect/forward calls serialises all GPU work and lets
+# MPS/CUDA be used safely for both Live and Extract. CPU is unaffected (the
+# lock is uncontended in the common single-detection case).
+_GPU_LOCK = threading.Lock()
 from feat import Detectorv2, Fex
 from feat.MPDetector import MPDetector
 from feat.multitask import AU_COLUMNS_V2, EMOTION_COLUMNS_V2
@@ -201,39 +212,44 @@ def detect_pil_images(
         "FileName": [str(np.nan)] * n,
     }
 
-    if isinstance(detector, Detectorv2):
-        # Detectorv2.detect_faces() takes NO face_size kwarg — it owns its
-        # own 256-px chip size internally. It calls convert_image_to_tensor
-        # then frames.float() / 255.0, so it expects pixel values in the
-        # 0-255 range. Our batch_data["Image"] tensor is float32 but already
-        # 0-255 (PILToTensor does not normalize; img_type="float32" is just a
-        # dtype cast, not a /255), so it feeds Detectorv2 correctly as-is.
-        faces_data = detector.detect_faces(
-            batch_data["Image"],
-            face_detection_threshold=0.5,
-        )
-    else:
-        face_size = getattr(detector, "face_size", 112)
-        faces_data = detector.detect_faces(
-            batch_data["Image"],
-            face_size=face_size,
-            face_detection_threshold=0.5,
-        )
-    _tick("detect_faces")
+    # Serialise the GPU detect/forward across the whole process (see _GPU_LOCK).
+    _GPU_LOCK.acquire()
     try:
-        df = detector.forward(faces_data, batch_data)
-        _tick("forward")
-    except (ValueError, RuntimeError) as exc:
-        # py-feat 0.7 has known shape-mismatch bugs in MPDetector.forward
-        # when certain (au/emotion) model combos are paired with the MP
-        # 478-point mesh — e.g. resmasknet + MP triggers a HOG-extraction
-        # landmark shape error. Don't kill the whole frame loop; return
-        # an empty Fex so the client sees "0 faces" instead of HTTP 500.
-        import logging
-        logging.getLogger(__name__).warning(
-            "detector.forward failed (%s); returning empty Fex", exc,
-        )
-        return Fex(pd.DataFrame(), **_fex_wrap_kwargs(detector))
+        if isinstance(detector, Detectorv2):
+            # Detectorv2.detect_faces() takes NO face_size kwarg — it owns its
+            # own 256-px chip size internally. It calls convert_image_to_tensor
+            # then frames.float() / 255.0, so it expects pixel values in the
+            # 0-255 range. Our batch_data["Image"] tensor is float32 but already
+            # 0-255 (PILToTensor does not normalize; img_type="float32" is just a
+            # dtype cast, not a /255), so it feeds Detectorv2 correctly as-is.
+            faces_data = detector.detect_faces(
+                batch_data["Image"],
+                face_detection_threshold=0.5,
+            )
+        else:
+            face_size = getattr(detector, "face_size", 112)
+            faces_data = detector.detect_faces(
+                batch_data["Image"],
+                face_size=face_size,
+                face_detection_threshold=0.5,
+            )
+        _tick("detect_faces")
+        try:
+            df = detector.forward(faces_data, batch_data)
+            _tick("forward")
+        except (ValueError, RuntimeError) as exc:
+            # py-feat 0.7 has known shape-mismatch bugs in MPDetector.forward
+            # when certain (au/emotion) model combos are paired with the MP
+            # 478-point mesh — e.g. resmasknet + MP triggers a HOG-extraction
+            # landmark shape error. Don't kill the whole frame loop; return
+            # an empty Fex so the client sees "0 faces" instead of HTTP 500.
+            import logging
+            logging.getLogger(__name__).warning(
+                "detector.forward failed (%s); returning empty Fex", exc,
+            )
+            return Fex(pd.DataFrame(), **_fex_wrap_kwargs(detector))
+    finally:
+        _GPU_LOCK.release()
 
     # Mirror Detector.detect()'s post-forward annotation: tag each face
     # row with its source frame index and a placeholder input filename.
