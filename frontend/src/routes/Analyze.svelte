@@ -60,8 +60,10 @@
       // to the first preset otherwise.
       activePreset = presets.find(p => p.id === 'classic-retinaface')
         ?? presets[0] ?? null;
-      if (compute.mps.available) computeDevice = 'mps';
-      else if (compute.cuda.available) computeDevice = 'cuda';
+      // Default to CPU. Apple MPS is known-buggy in py-feat (mixed cpu/mps
+      // ops + Metal command-buffer races that abort the sidecar mid-extract);
+      // CUDA is fine to auto-select. MPS stays user-selectable but not default.
+      if (compute.cuda.available) computeDevice = 'cuda';
       ws = analyzeApi.openWebSocket(handleEvent);
     } catch (e: any) {
       apiError = `Backend unreachable: ${e?.message ?? e}`;

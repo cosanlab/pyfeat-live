@@ -38,7 +38,7 @@
     emotion_model: 'resmasknet',
     identity_model: 'arcface',
     gaze_model: 'mp_iris (built-in)',
-    device: 'mps',
+    device: 'cpu',
   });
 
   let compute: ComputeInfo | null = $state(null);
@@ -159,8 +159,10 @@
     await refreshDevices();
     try {
       compute = await systemApi.compute();
-      if (compute.mps.available) config.device = 'mps';
-      else if (compute.cuda.available) config.device = 'cuda';
+      // Default to CPU. Apple MPS is known-buggy in py-feat (mixed cpu/mps
+      // ops + Metal command-buffer races that abort the sidecar); CUDA is
+      // fine to auto-select. MPS stays user-selectable but never the default.
+      if (compute.cuda.available) config.device = 'cuda';
       else config.device = 'cpu';
     } catch (e: any) {
       apiError = `Backend unreachable: ${e?.message ?? e}`;
