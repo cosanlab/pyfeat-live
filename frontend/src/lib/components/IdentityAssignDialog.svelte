@@ -19,7 +19,17 @@
   const nextColor = $derived(
     PALETTE.find(c => !identities.some(i => i.color === c)) ?? PALETTE[identities.length % PALETTE.length],
   );
+
+  // Esc closes the dialog from anywhere (matches the X button + backdrop click).
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onCancel();
+    }
+  }
 </script>
+
+<svelte:window onkeydown={onWindowKeydown} />
 
 <div class="fixed inset-0 flex items-start justify-center pt-24 z-50 bg-black/40 backdrop-blur-sm" role="presentation" onclick={onCancel}>
   <div class="w-[300px] bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl p-3.5" role="dialog" onclick={(e) => e.stopPropagation()}>

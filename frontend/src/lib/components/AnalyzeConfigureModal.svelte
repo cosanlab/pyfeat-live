@@ -56,7 +56,17 @@
     },
   } as const;
   const opts = $derived(MODEL_OPTIONS[pipeline.detector_type]);
+
+  // Esc closes the modal from anywhere (matches the X button + backdrop click).
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onCancel();
+    }
+  }
 </script>
+
+<svelte:window onkeydown={onWindowKeydown} />
 
 <div class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" role="presentation" onclick={onCancel}>
   <div
