@@ -60,32 +60,6 @@
     gaze: false, aus: false, emotions: false, valenceArousal: true,
   });
 
-  // --- Corner-drag resize (matches the Viewer) --------------------------
-  let stageBox: HTMLDivElement | null = $state(null);
-  let videoScale = $state(1);
-  let resizing: { startX: number; startW: number; contW: number; signX: number } | null = null;
-  function startResize(e: PointerEvent, signX: number) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!stageBox?.parentElement) return;
-    resizing = {
-      startX: e.clientX,
-      startW: stageBox.getBoundingClientRect().width,
-      contW: stageBox.parentElement.getBoundingClientRect().width,
-      signX,
-    };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }
-  function moveResize(e: PointerEvent) {
-    if (!resizing) return;
-    const dx = (e.clientX - resizing.startX) * resizing.signX;
-    videoScale = Math.min(1, Math.max(0.3, (resizing.startW + dx * 2) / resizing.contW));
-  }
-  function endResize(e: PointerEvent) {
-    if (!resizing) return;
-    resizing = null;
-    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
-  }
 
   // Capture the currently displayed frame (backend-baked frame + overlays)
   // and download it as a PNG. Mirrored to match the on-screen selfie view.
@@ -484,11 +458,13 @@
     <!-- Video stage. The hidden <video> only holds the MediaStream for
          capture; the visible image is displayCanvas, painted from
          backend-baked JPEGs so frame + overlay update together. -->
-    <div class="relative flex-1 bg-black flex items-center justify-center min-h-[260px] overflow-hidden">
+    <div
+      class="relative bg-black flex items-start justify-center overflow-hidden shrink-0"
+      style="resize: vertical; height: 45vh; min-height: 200px;"
+    >
       <div
-        bind:this={stageBox}
-        class="group relative bg-black"
-        style="aspect-ratio: {WIDTH} / {HEIGHT}; max-width: 100%; max-height: 100%; width: {videoScale * 100}%;"
+        class="relative bg-black h-full"
+        style="aspect-ratio: {WIDTH} / {HEIGHT}; max-width: 100%; max-height: 100%;"
       >
         <video
           bind:this={sourceVideo}
@@ -507,19 +483,6 @@
           class="absolute inset-0 w-full h-full object-contain"
           style="transform: scaleX(-1);"
         ></canvas>
-
-        <!-- Corner resize handles (visible on hover); drag to scale the
-             video box, aspect preserved. signX +1 right corners, -1 left. -->
-        {#each [{ pos: 'top-0 left-0', sx: -1, cur: 'nwse' }, { pos: 'top-0 right-0', sx: 1, cur: 'nesw' }, { pos: 'bottom-0 left-0', sx: -1, cur: 'nesw' }, { pos: 'bottom-0 right-0', sx: 1, cur: 'nwse' }] as hnd}
-          <div
-            class="absolute {hnd.pos} w-3 h-3 z-20 rounded-sm bg-green-400/70 border border-green-200/80 opacity-0 group-hover:opacity-100 transition-opacity"
-            style:cursor="{hnd.cur}-resize"
-            role="presentation"
-            onpointerdown={(e) => startResize(e, hnd.sx)}
-            onpointermove={moveResize}
-            onpointerup={endResize}
-          ></div>
-        {/each}
 
         {#if isStreaming}
           <span class="absolute top-3.5 left-3.5 px-3 py-1 rounded text-[9.5px] font-bold tracking-wider {isPaused ? 'bg-yellow-500/15 text-yellow-500 border-yellow-500/30' : 'bg-green-500/15 text-green-500 border-green-500/30'} border inline-flex items-center gap-2">
