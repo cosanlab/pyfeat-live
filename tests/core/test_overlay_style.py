@@ -84,3 +84,78 @@ def test_nonpositive_size_and_width_fall_back():
 
 def test_hex_with_leading_space():
     assert hex_to_rgb(" #00ff00") == (0, 255, 0)
+
+
+import numpy as np
+import pandas as pd
+from PIL import Image, ImageDraw
+from pyfeatlive_core import overlay_render
+
+
+def _one_face_row():
+    return pd.Series({
+        "FaceRectX": 20.0, "FaceRectY": 20.0,
+        "FaceRectWidth": 60.0, "FaceRectHeight": 60.0,
+    })
+
+
+def test_draw_rect_none_is_cyan_default():
+    img = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+    drw = ImageDraw.Draw(img, "RGBA")
+    overlay_render._draw_rect(drw, _one_face_row(), scale=1, ostyle=None)
+    assert img.getpixel((20, 20))[:3] == (0, 220, 255)
+
+
+def test_draw_rect_honors_style_color():
+    from pyfeatlive_core.overlay_style import OverlayStyle
+    style = OverlayStyle.from_dict({"faceboxes": {"color": "#ff0000", "opacity": 1, "lineWidth": 2}})
+    img = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+    drw = ImageDraw.Draw(img, "RGBA")
+    overlay_render._draw_rect(drw, _one_face_row(), scale=1, ostyle=style)
+    assert img.getpixel((20, 20))[:3] == (255, 0, 0)
+
+
+def test_draw_overlays_none_matches_default_baseline():
+    fex = pd.DataFrame([_one_face_row()])
+    toggles = {"rects": True}
+    a = np.zeros((120, 120, 3), dtype=np.uint8)
+    b = np.zeros((120, 120, 3), dtype=np.uint8)
+    overlay_render.draw_overlays(a, fex, toggles, overlay_style=None)
+    overlay_render.draw_overlays(b, fex, toggles, overlay_style=None)
+    assert np.array_equal(a, b)
+    c = np.zeros((120, 120, 3), dtype=np.uint8)
+    overlay_render.draw_overlays(c, fex, toggles)  # no overlay_style arg
+    assert np.array_equal(a, c)
+
+
+def test_draw_overlays_style_changes_facebox():
+    fex = pd.DataFrame([_one_face_row()])
+    toggles = {"rects": True}
+    default = np.zeros((120, 120, 3), dtype=np.uint8)
+    styled = np.zeros((120, 120, 3), dtype=np.uint8)
+    overlay_render.draw_overlays(default, fex, toggles, overlay_style=None)
+    overlay_render.draw_overlays(
+        styled, fex, toggles,
+        overlay_style={"faceboxes": {"color": "#ff0000", "opacity": 1, "lineWidth": 4}},
+    )
+    assert not np.array_equal(default, styled)
+
+
+def test_draw_overlays_styled_landmarks_change_pixels():
+    # Two dlib-68 landmark points so the 'points' style draws dots.
+    # _lm_xy tries mesh_x_<i>/mesh_y_<i> first, then falls back to x_<i>/y_<i>,
+    # so populating x_<i>/y_<i> columns is sufficient to make the points path draw.
+    row = _one_face_row().copy()
+    for i in range(68):
+        row[f"x_{i}"] = 30.0 + (i % 10) * 4
+        row[f"y_{i}"] = 30.0 + (i // 10) * 4
+    fex = pd.DataFrame([row])
+    toggles = {"landmarks": True}
+    default = np.zeros((120, 120, 3), dtype=np.uint8)
+    styled = np.zeros((120, 120, 3), dtype=np.uint8)
+    overlay_render.draw_overlays(default, fex, toggles, landmark_style="points", overlay_style=None)
+    overlay_render.draw_overlays(
+        styled, fex, toggles, landmark_style="points",
+        overlay_style={"landmarks": {"color": "#ff0000", "opacity": 1, "size": 2}},
+    )
+    assert not np.array_equal(default, styled)

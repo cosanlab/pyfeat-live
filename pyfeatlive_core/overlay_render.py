@@ -77,6 +77,7 @@ def draw_overlays(
     overlay_kind: str = "dlib68_polygons",
     landmark_style: str = "mesh",
     gaze_convention: str = "l2cs",
+    overlay_style: dict | None = None,
 ) -> None:
     """Draw overlays per the toggles. No-op if fex is None/empty.
 
@@ -115,26 +116,29 @@ def draw_overlays(
     font_small = _overlay_font(12 * SCALE)
     n_landmarks = 478 if mp_landmarks else 68
 
+    from pyfeatlive_core.overlay_style import OverlayStyle
+    ostyle = OverlayStyle.from_dict(overlay_style) if overlay_style else None
+
     for _, row in fex_scaled.iterrows():
         # Order matters — later draws cover earlier ones. Match the JS
         # port's draw order: rect → au heatmap → landmarks → pose →
         # gaze → emotions.
         if toggles.get("rects"):
-            _draw_rect(drw, row, scale=SCALE)
+            _draw_rect(drw, row, scale=SCALE, ostyle=ostyle)
         if toggles.get("aus"):
             if overlay_kind == "mesh478_muscle":
-                _draw_au_mesh_heatmap(drw, row, scale=SCALE)
+                _draw_au_mesh_heatmap(drw, row, scale=SCALE, ostyle=ostyle)
             else:
-                _draw_au_heatmap(drw, row, mp_landmarks=mp_landmarks, scale=SCALE)
+                _draw_au_heatmap(drw, row, mp_landmarks=mp_landmarks, scale=SCALE, ostyle=ostyle)
         if toggles.get("landmarks"):
             _draw_landmarks(drw, row, mp_landmarks=mp_landmarks,
                             style=landmark_style, n_landmarks=n_landmarks,
-                            scale=SCALE)
+                            scale=SCALE, ostyle=ostyle)
         if toggles.get("poses"):
-            _draw_pose(drw, row, font_small, mp_landmarks=mp_landmarks, scale=SCALE)
+            _draw_pose(drw, row, font_small, mp_landmarks=mp_landmarks, scale=SCALE, ostyle=ostyle)
         if toggles.get("gaze"):
             _draw_gaze(drw, row, mp_landmarks=mp_landmarks, scale=SCALE,
-                       gaze_convention=gaze_convention)
+                       gaze_convention=gaze_convention, ostyle=ostyle)
         if toggles.get("emotions"):
             _draw_emotions(drw, row, font_label, scale=SCALE)
 
@@ -206,20 +210,26 @@ def _lm_xy(row: Any, i: int) -> tuple[float, float] | tuple[None, None]:
 # Private primitives — lifted from v1 draw_overlays_pil in utils.py
 # ---------------------------------------------------------------------------
 
-def _draw_rect(drw: ImageDraw.ImageDraw, row: pd.Series, *, scale: int = 1) -> None:
-    """Face bounding box in cyan."""
+def _draw_rect(drw: ImageDraw.ImageDraw, row: pd.Series, *, scale: int = 1, ostyle=None) -> None:
+    """Face bounding box. Cyan by default; styled when ostyle is given."""
     x = float(row["FaceRectX"])
     y = float(row["FaceRectY"])
     w = float(row["FaceRectWidth"])
     h = float(row["FaceRectHeight"])
     if np.isnan(x) or np.isnan(y) or np.isnan(w) or np.isnan(h):
         return
-    drw.rectangle([x, y, x + w, y + h], outline=(0, 220, 255, 255), width=2 * scale)
+    if ostyle is not None:
+        color = (*ostyle.faceboxes.color, int(round(ostyle.faceboxes.opacity * 255)))
+        width = ostyle.faceboxes.line_width * scale
+    else:
+        color = (0, 220, 255, 255)
+        width = 2 * scale
+    drw.rectangle([x, y, x + w, y + h], outline=color, width=width)
 
 
 def _draw_au_heatmap(
     drw: ImageDraw.ImageDraw, row: pd.Series, *, mp_landmarks: bool,
-    scale: int = 1,
+    scale: int = 1, ostyle=None,
 ) -> None:
     """Blues-palette muscle-polygon heatmap over dlib-68 (or MP→dlib-68 view)."""
     try:
@@ -231,8 +241,13 @@ def _draw_au_heatmap(
         # Build per-row muscle polygons from landmark coordinates.
         bottom = (polygon_row["y_8"] - polygon_row["y_57"]) / 2
         polys = _compute_muscle_polygons(polygon_row, bottom)
-        lut = au_cmap_lut("Blues")
+        cmap = ostyle.aus.colormap if ostyle is not None else "Blues"
+        lut = au_cmap_lut(cmap)
 
+        # NOTE: truncate (int(...)) not round() — with op=1.0 this must
+        # reproduce the pre-style baseline alpha exactly (byte-identical
+        # None path). The opacity multiplier only scales it down.
+        op = ostyle.aus.opacity if ostyle is not None else 1.0
         for muscle_name, vertices in polys.items():
             au_col = MUSCLE_AU_NAME.get(muscle_name)
             if au_col is None:
@@ -247,8 +262,8 @@ def _draw_au_heatmap(
                     continue
             val = row[au_col]
             rgb = _au_cmap_lookup(val, lut)
-            color = (rgb[0], rgb[1], rgb[2], 140)   # ~55% alpha fill
-            outline = (rgb[0], rgb[1], rgb[2], 220)
+            color = (rgb[0], rgb[1], rgb[2], int(140 * op))
+            outline = (rgb[0], rgb[1], rgb[2], int(220 * op))
             if any(np.isnan(v) for vert in vertices for v in vert):
                 continue
             pts = [(float(vx), float(vy)) for vx, vy in vertices]
@@ -281,7 +296,7 @@ def _mesh_au_topology():
     return triangles, vertex_aus
 
 
-def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1) -> None:
+def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1, ostyle=None) -> None:
     """Smooth AU heatmap over the MP-478 mesh tessellation.
 
     Builds a per-vertex AU intensity (max over the muscles that drive each
@@ -297,7 +312,8 @@ def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1) -> None:
     """
     from pyfeatlive_core.au_heatmap import au_cmap_lut
 
-    lut = au_cmap_lut("Blues")
+    cmap = ostyle.aus.colormap if ostyle is not None else "Blues"
+    lut = au_cmap_lut(cmap)
     triangles, vertex_aus = _mesh_au_topology()
     has_index = hasattr(row, "index")
 
@@ -341,7 +357,11 @@ def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1) -> None:
         if pa[0] is None or pb[0] is None or pc[0] is None:
             continue
         rgb = tuple(int(x) for x in lut[min(255, max(0, int(disp * 255)))])
-        alpha = int(min(185, disp * 240))   # faint at rest, strong when active
+        # NOTE: truncate (int(...)) not round() — with op=1.0 this must
+        # reproduce the pre-style baseline alpha exactly (byte-identical
+        # None path). The opacity multiplier only scales it down.
+        op = ostyle.aus.opacity if ostyle is not None else 1.0
+        alpha = int(min(185, disp * 240) * op)   # faint at rest, strong when active
         if alpha <= 0:
             continue
         drw.polygon([pa, pb, pc], fill=(rgb[0], rgb[1], rgb[2], alpha))
@@ -355,6 +375,7 @@ def _draw_landmarks(
     style: str,
     n_landmarks: int,
     scale: int = 1,
+    ostyle=None,
 ) -> None:
     """Landmark wireframe or dot cloud.
 
@@ -379,19 +400,38 @@ def _draw_landmarks(
         # mask at full opacity/width, so draw it as a faint hairline
         # (width 1 on the 2x canvas => ~0.5px, antialiased down). The
         # sparse 'lines'/dlib contours stay a touch more visible.
-        if style == "mesh":
-            line_w, line_a = 1, 95
+        if ostyle is not None:
+            lm_color = ostyle.landmarks.color
+            lm_alpha = int(round(ostyle.landmarks.opacity * 255))
+            if style == "mesh":
+                line_w = 1  # hairline — do NOT scale by size
+                # Mesh stays a fixed 1px hairline regardless of landmarks.size;
+                # size only affects 'points'/'lines'. Matches the Viewer.
+            else:
+                line_w = max(1, int(round(ostyle.landmarks.size)) * scale)
         else:
-            line_w, line_a = max(1, scale), 175
+            lm_color = (255, 255, 255)
+            if style == "mesh":
+                line_w, lm_alpha = 1, 95
+            else:
+                line_w, lm_alpha = max(1, scale), 175
         for a, b in edges:
             xa, ya = _lm_xy(row, a)
             xb, yb = _lm_xy(row, b)
             if xa is None or xb is None:
                 continue
-            drw.line([(xa, ya), (xb, yb)], fill=(255, 255, 255, line_a), width=line_w)
+            drw.line([(xa, ya), (xb, yb)], fill=(*lm_color, lm_alpha), width=line_w)
     else:
         # 'points': per-landmark dots — cheapest; works for both schemas
         # via the shared accessor (mesh_x_ preferred, x_ fallback).
+        if ostyle is not None:
+            lm_color = ostyle.landmarks.color
+            lm_alpha = int(round(ostyle.landmarks.opacity * 255))
+            pt_r = int(round(ostyle.landmarks.size)) * scale
+        else:
+            lm_color = (255, 255, 255)
+            lm_alpha = 230
+            pt_r = 1 * scale
         for i in range(n_landmarks):
             px, py = _lm_xy(row, i)
             if px is None:
@@ -407,14 +447,14 @@ def _draw_landmarks(
                 if not present:
                     break
                 continue
-            r = 1 * scale
+            r = pt_r
             drw.ellipse([px - r, py - r, px + r, py + r],
-                        fill=(255, 255, 255, 230))
+                        fill=(*lm_color, lm_alpha))
 
 
 def _draw_pose(
     drw: ImageDraw.ImageDraw, row: pd.Series, font_small: ImageFont.FreeTypeFont,
-    *, mp_landmarks: bool = True, scale: int = 1,
+    *, mp_landmarks: bool = True, scale: int = 1, ostyle=None,
 ) -> None:
     """Three-axis pose indicator (RGB for pitch/roll/yaw) + numeric readout."""
     x = float(row["FaceRectX"])
@@ -430,7 +470,10 @@ def _draw_pose(
 
     cx = x + w / 2
     cy = y + h / 2
-    size = min(w, h) / 2
+    base = min(w, h) / 2
+    # 0.5 == default sizeScale (overlay_style._DEF_POSE_SCALE): a
+    # default style yields size == base (the prior hardcoded length).
+    size = base * (ostyle.pose.size_scale / 0.5) if ostyle is not None else base
     # Reconstruct the rotation matrix py-feat decomposed and project its
     # unit columns. Pitch/Roll/Yaw (radians) are, per py-feat's extraction
     # formulas, rotations about X/Y/Z respectively, composed as
@@ -468,6 +511,7 @@ def _draw_gaze(
     mp_landmarks: bool,
     scale: int = 1,
     gaze_convention: str = "l2cs",
+    ostyle=None,
 ) -> None:
     """Single yellow arrow from between-the-eyes toward gaze direction."""
     has_index = hasattr(row, "index")
@@ -513,7 +557,12 @@ def _draw_gaze(
     end_x = origin_x + length * dir_x
     end_y = origin_y + length * dir_y
 
-    color = (255, 220, 0, 255)  # LIVE_YELLOW + full alpha
+    if ostyle is not None:
+        color = (*ostyle.gaze.color, int(round(ostyle.gaze.opacity * 255)))
+        shaft_width = ostyle.gaze.line_width * scale
+    else:
+        color = (255, 220, 0, 255)  # LIVE_YELLOW + full alpha
+        shaft_width = 4 * scale
 
     norm = float(np.hypot(dir_x, dir_y))
     if norm > 1e-3:
@@ -529,7 +578,7 @@ def _draw_gaze(
         by = end_y - ny * head_length
         # Shaft ends at the arrowhead's base.
         drw.line(
-            [(origin_x, origin_y), (bx, by)], fill=color, width=4 * scale,
+            [(origin_x, origin_y), (bx, by)], fill=color, width=shaft_width,
         )
         # Filled arrowhead — no outline.
         corner1 = (bx + px * head_width, by + py * head_width)
