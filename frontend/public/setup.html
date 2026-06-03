@@ -55,6 +55,30 @@
         padding: 0.8em 1.2em;
         font-size: 0.9em;
       }
+      #update {
+        display: none;
+        margin: 0 1.2em 0.4em;
+        padding: 0.9em 1.1em;
+        background: #14271c;
+        border: 1px solid #1f7a44;
+        border-radius: 8px;
+      }
+      #update .row { display: flex; align-items: center; gap: 0.8em; flex-wrap: wrap; }
+      #update .title { font-weight: 600; font-size: 0.95em; }
+      #update .ver { opacity: 0.8; font-size: 0.85em; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+      #update .grow { flex: 1; }
+      #update button {
+        font: inherit; font-size: 0.85em; font-weight: 500;
+        padding: 0.45em 0.9em; border-radius: 6px; cursor: pointer;
+        border: 1px solid transparent;
+      }
+      #update .apply { background: #0f9d58; color: #fff; border-color: #0f9d58; }
+      #update .apply:disabled { opacity: 0.5; cursor: default; }
+      #update .skip { background: transparent; color: #cfd3da; border-color: #3a3f4b; }
+      #update .skip:disabled { opacity: 0.4; cursor: default; }
+      #update .bar { display: none; height: 6px; margin-top: 0.7em; background: #0b1a12; border-radius: 3px; overflow: hidden; }
+      #update .bar > div { height: 100%; width: 0%; background: #0f9d58; transition: width 0.15s linear; }
+      #update .pstat { display: none; margin-top: 0.5em; font-size: 0.8em; opacity: 0.85; }
     </style>
   </head>
   <body>
@@ -62,6 +86,22 @@
       <h1><span class="spinner" id="spin"></span><span id="status">Preparing runtime…</span></h1>
       <p id="hint">First-run install — Python and ML libraries (~1.5GB). Subsequent launches will be instant.</p>
     </header>
+
+    <!-- Auto-update banner. Hidden until the Rust shell reports an
+         available update; while shown, it holds the splash→app redirect
+         so a fast backend boot can't skip past it. -->
+    <div id="update">
+      <div class="row">
+        <span class="title">Update available</span>
+        <span class="ver" id="update-ver"></span>
+        <span class="grow"></span>
+        <button class="apply" id="update-apply">Update &amp; Restart</button>
+        <button class="skip" id="update-skip">Skip for now</button>
+      </div>
+      <div class="bar" id="update-bar"><div></div></div>
+      <div class="pstat" id="update-pstat"></div>
+    </div>
+
     <pre id="log"></pre>
 
     <script>
@@ -80,6 +120,29 @@
       const status = document.getElementById("status");
       const hint = document.getElementById("hint");
       const spin = document.getElementById("spin");
+      const updateBox = document.getElementById("update");
+      const updateVer = document.getElementById("update-ver");
+      const updateApply = document.getElementById("update-apply");
+      const updateSkip = document.getElementById("update-skip");
+      const updateBar = document.getElementById("update-bar");
+      const updateBarFill = updateBar.firstElementChild;
+      const updatePstat = document.getElementById("update-pstat");
+
+      // Gate the splash→app redirect on the update decision. The backend
+      // may go healthy before OR after the update check resolves; we only
+      // navigate to the app once the backend is up AND there's no pending
+      // update the user hasn't dismissed (and we're not mid-install).
+      let backendReady = false;
+      let updatePending = false;
+      let applying = false;
+
+      function maybeRedirect() {
+        if (backendReady && !updatePending && !applying) {
+          status.textContent = "Ready";
+          spin.style.display = "none";
+          location.replace(target);
+        }
+      }
 
       function append(stream, line) {
         const span = document.createElement("span");
@@ -110,6 +173,57 @@
           div.textContent = String(e.payload);
           document.body.appendChild(div);
         });
+
+        // --- Auto-updater banner --------------------------------------
+        // The Rust shell checks for updates at startup and emits
+        // "updater://available" on a hit. We show a banner and hold the
+        // redirect (via updatePending) until the user applies or skips.
+        const core = window.__TAURI__.core;
+        event.listen("updater://available", (e) => {
+          const p = e.payload || {};
+          updatePending = true;
+          updateVer.textContent =
+            (p.current_version ? "v" + p.current_version + " → " : "") + "v" + p.version;
+          updateBox.style.display = "block";
+        });
+        event.listen("updater://progress", (e) => {
+          const p = e.payload || {};
+          updateBar.style.display = "block";
+          updatePstat.style.display = "block";
+          if (p.total) {
+            const pct = Math.min(100, Math.round((p.downloaded / p.total) * 100));
+            updateBarFill.style.width = pct + "%";
+            updatePstat.textContent = "Downloading… " + pct + "%";
+          } else {
+            updatePstat.textContent =
+              "Downloading… " + Math.round((p.downloaded || 0) / 1048576) + " MB";
+          }
+        });
+        event.listen("updater://installing", () => {
+          updateBarFill.style.width = "100%";
+          updatePstat.textContent = "Installing… the app will restart.";
+        });
+        updateApply.onclick = async () => {
+          applying = true;
+          updateApply.disabled = true;
+          updateSkip.disabled = true;
+          updatePstat.style.display = "block";
+          updatePstat.textContent = "Starting update…";
+          try {
+            await core.invoke("apply_update");
+            // On success the app restarts; execution won't reach here.
+          } catch (err) {
+            applying = false;
+            updateApply.disabled = false;
+            updateSkip.disabled = false;
+            updatePstat.textContent = "Update failed: " + err;
+          }
+        };
+        updateSkip.onclick = () => {
+          updatePending = false;
+          updateBox.style.display = "none";
+          maybeRedirect();
+        };
       }
 
       // Poll the FastAPI backend's health endpoint, independent of the
@@ -122,9 +236,14 @@
         try {
           const r = await fetch(`${target}/api/system/health`, { cache: "no-store" });
           if (r.ok) {
-            status.textContent = "Ready";
-            spin.style.display = "none";
-            location.replace(target);
+            // Backend is up. Redirect now unless we're holding for an
+            // update decision — in which case the Skip/Apply handlers
+            // drive what happens next. Either way, stop polling.
+            backendReady = true;
+            if (updatePending || applying) {
+              status.textContent = "Ready — update available";
+            }
+            maybeRedirect();
             return;
           }
         } catch (_) {

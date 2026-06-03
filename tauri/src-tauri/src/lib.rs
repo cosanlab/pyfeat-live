@@ -56,6 +56,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SidecarState(Mutex::new(None)))
+        .invoke_handler(tauri::generate_handler![apply_update])
         .setup(|app| {
             // Window first so the splash is visible while the install runs.
             // The splash (setup.html) polls the backend and redirects once
@@ -571,6 +572,49 @@ async fn check_for_update(app: &AppHandle) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Download, verify, and install the pending update, then relaunch into
+/// it. Invoked from the splash "Update & Restart" button. Re-runs the
+/// check to obtain a fresh `Update` handle (cheap — one HTTPS request),
+/// streams download progress to the splash via `updater://progress`
+/// ({downloaded, total}), emits `updater://installing` once the bytes
+/// are in, then restarts. `restart()` triggers RunEvent::ExitRequested,
+/// which kills the sidecar, before relaunching the freshly-installed
+/// bundle.
+#[tauri::command]
+async fn apply_update(app: AppHandle) -> Result<(), String> {
+    let updater = app
+        .updater()
+        .map_err(|e| format!("updater plugin not initialised: {e}"))?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| format!("update check failed: {e}"))?
+        .ok_or_else(|| "no update available".to_string())?;
+
+    let progress_app = app.clone();
+    let finish_app = app.clone();
+    let mut downloaded: usize = 0;
+    update
+        .download_and_install(
+            move |chunk, total| {
+                downloaded += chunk;
+                let _ = progress_app.emit(
+                    "updater://progress",
+                    serde_json::json!({ "downloaded": downloaded, "total": total }),
+                );
+            },
+            move || {
+                let _ = finish_app.emit("updater://installing", ());
+            },
+        )
+        .await
+        .map_err(|e| format!("download/install failed: {e}"))?;
+
+    // Relaunch into the freshly-installed version. `restart()` diverges
+    // (returns `!`), so it's the trailing expression — nothing runs after.
+    app.restart()
 }
 
 /// Compile-time host triple.
