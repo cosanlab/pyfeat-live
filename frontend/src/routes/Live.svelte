@@ -4,10 +4,12 @@
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import { liveApi, systemApi } from '../lib/api';
   import type { LiveConfigure, ComputeInfo, LiveMeta } from '../lib/api';
-  import type { OverlayToggles } from '../lib/overlay/types';
+  import type { OverlayToggles, OverlayStyleConfig } from '../lib/overlay/types';
+  import { defaultOverlayStyle } from '../lib/overlay/types';
   import { cameraStore, refreshDevices, startCamera, stopCamera } from '../lib/webrtc/useCamera.svelte';
   import LiveSidebar from '../lib/components/LiveSidebar.svelte';
   import LiveControlBar from '../lib/components/LiveControlBar.svelte';
+  import OverlayConfigModal from '../lib/components/OverlayConfigModal.svelte';
 
   // Display dimensions — always render at this size regardless of what
   // resolution detection runs at. The backend bakes overlays onto the
@@ -54,6 +56,22 @@
   let landmarkStyle: LandmarkStyle = $state(
     config.detector_type === 'Detector' ? 'lines' : 'mesh',
   );
+
+  // Per-overlay visual style, shared with the Viewer via the same
+  // localStorage key so settings persist and stay in sync across pages.
+  const OVERLAY_STYLE_KEY = 'pyfeatlive.overlayStyle';
+  function loadOverlayStyle(): OverlayStyleConfig {
+    try {
+      const raw = localStorage.getItem(OVERLAY_STYLE_KEY);
+      if (raw) return { ...defaultOverlayStyle(), ...JSON.parse(raw) };
+    } catch { /* ignore corrupt/unavailable storage */ }
+    return defaultOverlayStyle();
+  }
+  let overlayStyle: OverlayStyleConfig = $state(loadOverlayStyle());
+  $effect(() => {
+    try { localStorage.setItem(OVERLAY_STYLE_KEY, JSON.stringify(overlayStyle)); } catch { /* noop */ }
+  });
+  let showOverlayConfig = $state(false);
 
   let toggles: OverlayToggles = $state({
     rects: true, landmarks: true, poses: false,
@@ -164,7 +182,9 @@
     // point mesh looks best as 'mesh'. Only re-default on actual
     // type change so the user can still override after the fact.
     if (c.detector_type !== config.detector_type) {
-      landmarkStyle = c.detector_type === 'Detector' ? 'lines' : 'mesh';
+      const ls = c.detector_type === 'Detector' ? 'lines' : 'mesh';
+      landmarkStyle = ls;
+      overlayStyle = { ...overlayStyle, landmarks: { ...overlayStyle.landmarks, style: ls } };
     }
     config = c;
     try {
@@ -173,6 +193,7 @@
         toggles: toggles as unknown as Record<string, boolean>,
         landmark_style: landmarkStyle,
         detection_res: { w: detectionRes.w, h: detectionRes.h },
+        style: overlayStyle,
       });
       apiError = null;
     } catch (e: any) {
@@ -191,6 +212,7 @@
         toggles: toggles as unknown as Record<string, boolean>,
         landmark_style: landmarkStyle,
         detection_res: { w: detectionRes.w, h: detectionRes.h },
+        style: overlayStyle,
       });
     } catch (e: any) {
       apiError = `Overlay hints failed: ${e?.message ?? e}`;
@@ -411,6 +433,11 @@
     landmarkStyle = s;
     if (isStreaming) pushOverlayHints();
   }
+  function onStyleChange(s: OverlayStyleConfig) {
+    overlayStyle = s;
+    landmarkStyle = s.landmarks.style;
+    if (isStreaming) pushOverlayHints();
+  }
   function onDetectionResChange(r: DetectionRes) {
     detectionRes = r;
     if (isStreaming) pushOverlayHints();
@@ -423,11 +450,9 @@
       <LiveSidebar
         {config}
         {compute}
-        {landmarkStyle}
         {detectionRes}
         detectionPresets={DETECTION_PRESETS}
         onConfigChange={applyConfig}
-        onLandmarkStyleChange={onLandmarkStyleChange}
         onDetectionResChange={onDetectionResChange}
       />
       <button
@@ -517,8 +542,8 @@
           {#each liveMeta.faces as face}
             {#if toggles.emotions && face.emo && face.emo.length > 0}
               <div
-                class="absolute px-3.5 py-2 rounded-md bg-black/70 text-white text-[15px] leading-snug font-mono pointer-events-none whitespace-nowrap"
-                style="right: {((face.bbox[0]) / srcW * 100).toFixed(2)}%; top: {Math.max(2, (face.bbox[1] - 92) / srcH * 100).toFixed(2)}%;"
+                class="absolute px-3.5 py-2 rounded-md bg-black/70 pointer-events-none whitespace-nowrap font-mono leading-snug"
+                style="right: {((face.bbox[0]) / srcW * 100).toFixed(2)}%; top: {Math.max(2, (face.bbox[1] - 92) / srcH * 100).toFixed(2)}%; color: {overlayStyle.emotions.color}; opacity: {overlayStyle.emotions.opacity}; font-size: {overlayStyle.emotions.fontSize}px;"
               >
                 {#each face.emo as [name, val]}
                   <div>{name.charAt(0).toUpperCase() + name.slice(1)}  {val.toFixed(2)}</div>
@@ -579,6 +604,19 @@
       onRecord={record}
       onStopRecord={stop}
       onCapture={captureFrame}
+      onOpenSettings={() => (showOverlayConfig = true)}
     />
   </div>
 </div>
+
+{#if showOverlayConfig}
+  <OverlayConfigModal
+    style={overlayStyle}
+    {toggles}
+    hasValenceArousal={config.detector_type === 'Detectorv2'}
+    {onStyleChange}
+    onToggle={(key) => onToggleChange(key, !toggles[key])}
+    onReset={() => onStyleChange(defaultOverlayStyle())}
+    onClose={() => (showOverlayConfig = false)}
+  />
+{/if}

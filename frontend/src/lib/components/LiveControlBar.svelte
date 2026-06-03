@@ -4,6 +4,7 @@
   import Pause from '@lucide/svelte/icons/pause';
   import Play from '@lucide/svelte/icons/play';
   import Camera from '@lucide/svelte/icons/camera';
+  import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
   import type { OverlayToggles } from '../overlay/types';
   import type { LiveConfigure } from '../api';
 
@@ -21,6 +22,7 @@
     onRecord: () => void;
     onStopRecord: () => void;
     onCapture: () => void;
+    onOpenSettings: () => void;
   };
   let {
     toggles, config, isMpDetector,
@@ -28,6 +30,7 @@
     onToggleChange,
     onStartStream, onPauseStream, onStopStream,
     onRecord, onStopRecord, onCapture,
+    onOpenSettings,
   }: Props = $props();
 
   type Chip = {
@@ -76,6 +79,11 @@
       >{chip.label}</button>
     {/each}
   </div>
+  <button
+    class="p-1.5 rounded-md border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+    title="Overlay settings"
+    onclick={onOpenSettings}
+  ><SlidersHorizontal size={14} /></button>
 
   <!-- Camera stream controls -->
   <div class="ml-auto flex gap-1.5 items-center pl-3.5 border-l border-zinc-900">

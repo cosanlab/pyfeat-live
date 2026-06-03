@@ -9,6 +9,7 @@ import type {
   Annotation,
   AnnotationKind,
 } from './types';
+import type { OverlayStyleConfig } from './overlay/types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -91,6 +92,7 @@ export interface LiveConfigure {
   toggles?: Record<string, boolean>;
   landmark_style?: 'points' | 'lines' | 'mesh';
   detection_res?: { w: number; h: number };
+  style?: OverlayStyleConfig;
 }
 
 // Mid-stream hint updates that don't require a detector rebuild.
@@ -98,6 +100,7 @@ export interface LiveHints {
   toggles?: Record<string, boolean>;
   landmark_style?: 'points' | 'lines' | 'mesh';
   detection_res?: { w: number; h: number };
+  style?: OverlayStyleConfig;
 }
 
 // Compact metadata for HTML overlays (emotion + pose panels) rendered
