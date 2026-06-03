@@ -543,9 +543,13 @@
         {#if isStreaming && liveMeta}
           {#each liveMeta.faces as face}
             {#if toggles.emotions && face.emo && face.emo.length > 0}
+              <!-- Place the panel fully ABOVE the face when there's room,
+                   else BELOW it — never overlapping the facebox. -->
+              {@const emoH = face.emo.length * overlayStyle.emotions.fontSize * 1.4 + 22}
+              {@const emoTop = face.bbox[1] - emoH >= 4 ? face.bbox[1] - emoH : face.bbox[1] + face.bbox[3] + 6}
               <div
                 class="absolute px-3.5 py-2 rounded-md bg-black/70 pointer-events-none whitespace-nowrap font-mono leading-snug"
-                style="right: {((face.bbox[0]) / srcW * 100).toFixed(2)}%; top: {Math.max(2, (face.bbox[1] - (face.emo.length * overlayStyle.emotions.fontSize * 1.4 + 22)) / srcH * 100).toFixed(2)}%; color: {overlayStyle.emotions.color}; opacity: {overlayStyle.emotions.opacity}; font-size: {overlayStyle.emotions.fontSize}px;"
+                style="right: {((face.bbox[0]) / srcW * 100).toFixed(2)}%; top: {(emoTop / srcH * 100).toFixed(2)}%; color: {overlayStyle.emotions.color}; opacity: {overlayStyle.emotions.opacity}; font-size: {overlayStyle.emotions.fontSize}px;"
               >
                 {#each face.emo as [name, val]}
                   <div>{name.charAt(0).toUpperCase() + name.slice(1)}  {val.toFixed(2)}</div>
