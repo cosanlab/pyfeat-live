@@ -99,6 +99,7 @@ export interface LiveConfigure {
   landmark_style?: 'points' | 'lines' | 'mesh';
   detection_res?: { w: number; h: number };
   style?: OverlayStyleConfig;
+  smooth?: boolean;
 }
 
 // Mid-stream hint updates that don't require a detector rebuild.
@@ -107,6 +108,7 @@ export interface LiveHints {
   landmark_style?: 'points' | 'lines' | 'mesh';
   detection_res?: { w: number; h: number };
   style?: OverlayStyleConfig;
+  smooth?: boolean;
 }
 
 // Compact metadata for HTML overlays (emotion + pose panels) rendered

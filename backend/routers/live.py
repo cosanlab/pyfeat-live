@@ -204,6 +204,10 @@ async def _run_detection(live, img: Image.Image) -> None:
         # ran on the loop, blocking uploads + the recorder feed.
         async with live.detector_lock:
             detector = live.detector
+            # Temporal bbox stabilization: Detectorv2 reads this attribute in
+            # detect_faces (no-op on other detectors). Set per detection so a
+            # mid-stream toggle takes effect without a detector rebuild.
+            setattr(detector, "bbox_smoothing_alpha", 0.35 if live.smooth else 0.0)
             detection_size = live.detection_size
             toggles = live.toggles or {}
             mp_landmarks = live.mp_landmarks
@@ -371,6 +375,7 @@ class ConfigureRequest(BaseModel):
     toggles: Optional[dict[str, bool]] = None
     landmark_style: Optional[str] = None
     style: Optional[dict] = None
+    smooth: Optional[bool] = None
     detection_res: Optional[dict[str, int]] = None  # {w, h}
 
 
@@ -415,6 +420,8 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
             live.landmark_style = req.landmark_style
         if req.style is not None:
             live.style = req.style
+        if req.smooth is not None:
+            live.smooth = req.smooth
         if req.detection_res is not None:
             live.detection_size = (
                 int(req.detection_res["w"]), int(req.detection_res["h"]),
@@ -428,6 +435,7 @@ class HintsRequest(BaseModel):
     toggles: Optional[dict[str, bool]] = None
     landmark_style: Optional[str] = None
     style: Optional[dict] = None
+    smooth: Optional[bool] = None
     detection_res: Optional[dict[str, int]] = None
 
 
@@ -447,6 +455,8 @@ async def hints(req: HintsRequest, request: Request) -> dict:
         live.landmark_style = req.landmark_style
     if req.style is not None:
         live.style = req.style
+    if req.smooth is not None:
+        live.smooth = req.smooth
     if req.detection_res is not None:
         live.detection_size = (
             int(req.detection_res["w"]), int(req.detection_res["h"]),

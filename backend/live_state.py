@@ -31,6 +31,9 @@ class LiveSession:
     toggles: dict[str, bool] = field(default_factory=dict)
     landmark_style: str = "mesh"
     style: dict | None = None
+    # Temporal bbox stabilization (EMA) to reduce overlay jitter on a still
+    # face. On by default; toggled from the overlay-settings modal.
+    smooth: bool = True
     mp_landmarks: bool = True
     # The active detector kind string (e.g. "MPDetector"). Set by
     # /configure and read by /recording/start so the recorder can

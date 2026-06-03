@@ -65,6 +65,12 @@
     try { localStorage.setItem(OVERLAY_STYLE_KEY, JSON.stringify(overlayStyle)); } catch { /* noop */ }
   });
   let showOverlayConfig = $state(false);
+  // Temporal bbox stabilization (reduces overlay jitter). On by default.
+  let smooth = $state(true);
+  function onSmoothChange(v: boolean) {
+    smooth = v;
+    if (isStreaming) pushOverlayHints();
+  }
 
   let toggles: OverlayToggles = $state({
     rects: true, landmarks: true, poses: false,
@@ -187,6 +193,7 @@
         landmark_style: landmarkStyle,
         detection_res: { w: WIDTH, h: HEIGHT },
         style: overlayStyle,
+        smooth,
       });
       apiError = null;
     } catch (e: any) {
@@ -206,6 +213,7 @@
         landmark_style: landmarkStyle,
         detection_res: { w: WIDTH, h: HEIGHT },
         style: overlayStyle,
+        smooth,
       });
     } catch (e: any) {
       apiError = `Overlay hints failed: ${e?.message ?? e}`;
@@ -294,9 +302,11 @@
       ctx.drawImage(sourceVideo, 0, 0, sW, sH);
       const tDraw = profile ? performance.now() : 0;
 
-      // 2. JPEG-encode
+      // 2. JPEG-encode. q=0.92 (was 0.85): lower DCT noise feeding the face
+      // detector each frame → less bbox jitter (the root of overlay flicker)
+      // for only ~1-2ms more upload on loopback.
       const blob = await new Promise<Blob | null>((res) =>
-        captureCanvas!.toBlob((b) => res(b), 'image/jpeg', 0.85),
+        captureCanvas!.toBlob((b) => res(b), 'image/jpeg', 0.92),
       );
       if (signal.aborted) return;
       if (!blob) { await new Promise((r) => setTimeout(r, 16)); continue; }
@@ -622,6 +632,8 @@
   <OverlayConfigModal
     style={overlayStyle}
     {toggles}
+    {smooth}
+    {onSmoothChange}
     hasValenceArousal={config.detector_type === 'Detectorv2'}
     {onStyleChange}
     onToggle={(key) => onToggleChange(key, !toggles[key])}

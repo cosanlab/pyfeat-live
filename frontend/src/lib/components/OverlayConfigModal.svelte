@@ -13,8 +13,15 @@
     onToggle: (key: keyof OverlayToggles) => void;
     onReset: () => void;
     onClose: () => void;
+    // Live-only: temporal bbox stabilization toggle. Omitted by the Viewer.
+    smooth?: boolean;
+    onSmoothChange?: (v: boolean) => void;
   };
-  let { style, toggles, hasValenceArousal = false, onStyleChange, onToggle, onReset, onClose }: Props = $props();
+  let {
+    style, toggles, hasValenceArousal = false,
+    onStyleChange, onToggle, onReset, onClose,
+    smooth, onSmoothChange,
+  }: Props = $props();
 
   // Patch one section of the style object and emit the new whole.
   function upd<K extends keyof OverlayStyleConfig>(
@@ -68,6 +75,19 @@
         <X size={14} />
       </button>
     </div>
+
+    {#if onSmoothChange}
+      <label class="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/70 cursor-pointer">
+        <input
+          type="checkbox"
+          class="accent-green-500 w-3.5 h-3.5"
+          checked={smooth}
+          onchange={(e) => onSmoothChange?.((e.target as HTMLInputElement).checked)}
+        />
+        <span class="text-[12px] font-medium text-zinc-100">Stabilize overlays</span>
+        <span class="text-[10px] text-zinc-500">— smooth the face box to reduce jitter</span>
+      </label>
+    {/if}
 
     <div class="divide-y divide-zinc-800/70">
       {#each visibleSections as s}
