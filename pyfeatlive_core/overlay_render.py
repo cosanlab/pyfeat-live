@@ -212,6 +212,36 @@ def _lm_xy(row: Any, i: int) -> tuple[float, float] | tuple[None, None]:
     return None, None
 
 
+def _mesh_xy_arrays(row: Any, n: int) -> tuple[np.ndarray, np.ndarray]:
+    """Vertices 0..n-1 as (xs, ys) float arrays via ONE batched read.
+
+    The per-edge/-triangle ``_lm_xy`` Series lookups dominate the mesh
+    draw cost (~5000 pandas indexings for the 478-mesh wireframe). Reading
+    all vertex columns in a single ``reindex`` is far faster. Mirrors
+    ``_lm_xy``'s mesh_x_/mesh_y_ preference; missing/NaN vertices come back
+    as ``np.nan`` so callers skip them (NaN != NaN).
+    """
+    if hasattr(row, "index"):
+        cols = row.index
+        xp = "mesh_x_" if "mesh_x_0" in cols else "x_"
+        yp = "mesh_y_" if xp == "mesh_x_" else "y_"
+        xs = pd.to_numeric(
+            row.reindex([f"{xp}{i}" for i in range(n)]), errors="coerce"
+        ).to_numpy(dtype=float)
+        ys = pd.to_numeric(
+            row.reindex([f"{yp}{i}" for i in range(n)]), errors="coerce"
+        ).to_numpy(dtype=float)
+        return xs, ys
+    # dict-like fallback (rare).
+    xs = np.full(n, np.nan)
+    ys = np.full(n, np.nan)
+    for i in range(n):
+        x, y = _lm_xy(row, i)
+        if x is not None:
+            xs[i], ys[i] = x, y
+    return xs, ys
+
+
 # ---------------------------------------------------------------------------
 # Private primitives — lifted from v1 draw_overlays_pil in utils.py
 # ---------------------------------------------------------------------------
@@ -352,15 +382,21 @@ def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1, ostyle=None) -> None:
     # whole face blue.
     GAMMA = 2.2
     THRESH = 0.08
+    # Pre-extract the 478 mesh vertices once (numpy) — avoids ~2500 per-
+    # triangle pandas lookups.
+    xs, ys = _mesh_xy_arrays(row, 478)
+    nv = len(xs)
     for a, b, c in triangles:
         m = (vint.get(a, 0.0) + vint.get(b, 0.0) + vint.get(c, 0.0)) / 3.0
         if m < THRESH:
             continue
         disp = m ** GAMMA
-        pa = _lm_xy(row, a)
-        pb = _lm_xy(row, b)
-        pc = _lm_xy(row, c)
-        if pa[0] is None or pb[0] is None or pc[0] is None:
+        if a >= nv or b >= nv or c >= nv:
+            continue
+        xa = xs[a]
+        xb = xs[b]
+        xc = xs[c]
+        if xa != xa or xb != xb or xc != xc:  # NaN → vertex absent
             continue
         rgb = tuple(int(x) for x in lut[min(255, max(0, int(disp * 255)))])
         # NOTE: truncate (int(...)) not round() — with op=1.0 this must
@@ -370,7 +406,10 @@ def _draw_au_mesh_heatmap(drw, row, *, scale: int = 1, ostyle=None) -> None:
         alpha = int(min(185, disp * 240) * op)   # faint at rest, strong when active
         if alpha <= 0:
             continue
-        drw.polygon([pa, pb, pc], fill=(rgb[0], rgb[1], rgb[2], alpha))
+        drw.polygon(
+            [(xa, ys[a]), (xb, ys[b]), (xc, ys[c])],
+            fill=(rgb[0], rgb[1], rgb[2], alpha),
+        )
 
 
 def _draw_landmarks(
@@ -421,12 +460,19 @@ def _draw_landmarks(
                 line_w, lm_alpha = 1, 95
             else:
                 line_w, lm_alpha = max(1, scale), 175
+        # Pre-extract all vertex coords once (numpy), then index per edge —
+        # avoids ~5000 per-edge pandas lookups for the 478-mesh wireframe.
+        xs, ys = _mesh_xy_arrays(row, n_landmarks)
+        ne = len(xs)
+        fill = (*lm_color, lm_alpha)
         for a, b in edges:
-            xa, ya = _lm_xy(row, a)
-            xb, yb = _lm_xy(row, b)
-            if xa is None or xb is None:
+            if a >= ne or b >= ne:
                 continue
-            drw.line([(xa, ya), (xb, yb)], fill=(*lm_color, lm_alpha), width=line_w)
+            xa = xs[a]
+            xb = xs[b]
+            if xa != xa or xb != xb:  # NaN → vertex absent
+                continue
+            drw.line([(xa, ys[a]), (xb, ys[b])], fill=fill, width=line_w)
     else:
         # 'points': per-landmark dots — cheapest; works for both schemas
         # via the shared accessor (mesh_x_ preferred, x_ fallback).
