@@ -7,8 +7,10 @@ from typing import Any
 
 import torch
 from fastapi import APIRouter
+from fastapi.responses import PlainTextResponse
 
 import pyfeatlive_core
+from backend import logbuffer
 from pyfeatlive_core.au_heatmap import build_au_table
 from pyfeatlive_core.overlay_edges import all_edge_sets
 
@@ -20,6 +22,13 @@ router = APIRouter(prefix="/api/system", tags=["system"])
 def health() -> dict:
     """Tauri polls this to know when the sidecar is ready."""
     return {"status": "ok", "version": pyfeatlive_core.__version__}
+
+
+@router.get("/logs", response_class=PlainTextResponse)
+def logs() -> str:
+    """Recent backend log lines (ring buffer) as plain text — the UI
+    shows these and offers a .txt download for troubleshooting."""
+    return logbuffer.dump()
 
 
 @router.get("/compute")

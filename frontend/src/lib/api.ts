@@ -69,6 +69,12 @@ export interface AuMeshTable {
 export const systemApi = {
   health: () => request<{ status: string; version: string }>('/api/system/health'),
   compute: () => request<ComputeInfo>('/api/system/compute'),
+  // Plain-text backend log buffer (not JSON) — used by the Logs viewer.
+  logs: async (): Promise<string> => {
+    const r = await fetch('/api/system/logs', { cache: 'no-store' });
+    if (!r.ok) throw new ApiError(r.status, `logs: ${r.status} ${r.statusText}`);
+    return r.text();
+  },
   overlayEdges: () => request<OverlayEdgeSets>('/api/system/overlay-edges'),
   auTable: () => request<AuTable>('/api/system/au-table'),
   auMeshTable: () => request<AuMeshTable>('/api/system/au-mesh-table'),

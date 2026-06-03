@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, Optional
@@ -248,9 +249,11 @@ async def _run_detection(live, img: Image.Image) -> None:
                     fex if fex is not None and len(fex) else None,
                 )
             except Exception:
-                pass
+                logging.getLogger(__name__).exception("recorder offer_frame failed")
     except Exception:
-        pass
+        # Detection/bake crashed — surface it (visible in /api/system/logs)
+        # instead of silently freezing the feed (e.g. a bad AU colormap).
+        logging.getLogger(__name__).exception("live detection failed")
     finally:
         live._detection_in_flight = False
 

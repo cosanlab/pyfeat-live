@@ -29,6 +29,14 @@ from backend.routers import analyze as analyze_router
 
 def create_app() -> FastAPI:
     """Build a new FastAPI app. Used by tests and the runtime entry."""
+    # Capture recent logs in a ring buffer so the UI can show/download them.
+    import logging
+    from backend import logbuffer
+    logbuffer.install()
+    logging.getLogger("pyfeatlive").info(
+        "backend started — pyfeat-live v%s", pyfeatlive_core.__version__
+    )
+
     app = FastAPI(
         title="pyfeat-live v2",
         version=pyfeatlive_core.__version__,

@@ -1,8 +1,9 @@
 <script lang="ts">
+  import FileText from '@lucide/svelte/icons/file-text';
   import type { View } from '../types';
 
-  type Props = { view: View; onViewChange: (v: View) => void };
-  let { view, onViewChange }: Props = $props();
+  type Props = { view: View; onViewChange: (v: View) => void; onOpenLogs: () => void };
+  let { view, onViewChange, onOpenLogs }: Props = $props();
 
   const tabs: { id: View; label: string }[] = [
     { id: 'live', label: 'Live' },
@@ -25,5 +26,12 @@
         {tab.label}
       </button>
     {/each}
+    <button
+      class="ml-2 px-2 py-1 rounded text-[11px] text-zinc-500 hover:text-zinc-300 inline-flex items-center gap-1"
+      onclick={onOpenLogs}
+      title="View backend logs"
+    >
+      <FileText size={12} /> Logs
+    </button>
   </nav>
 </header>
