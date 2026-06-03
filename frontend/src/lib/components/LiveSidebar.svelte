@@ -4,20 +4,12 @@
   import logoUrl from '../../assets/logo.png';
   import type { LiveConfigure, ComputeInfo } from '../api';
 
-  type DetectionRes = { label: string; w: number; h: number };
-
   type Props = {
     config: LiveConfigure;
     compute: ComputeInfo | null;
-    detectionRes: DetectionRes;
-    detectionPresets: readonly DetectionRes[];
     onConfigChange: (c: LiveConfigure) => void;
-    onDetectionResChange: (r: DetectionRes) => void;
   };
-  let {
-    config, compute, detectionRes, detectionPresets,
-    onConfigChange, onDetectionResChange,
-  }: Props = $props();
+  let { config, compute, onConfigChange }: Props = $props();
 
   function update<K extends keyof LiveConfigure>(key: K, value: LiveConfigure[K]) {
     onConfigChange({ ...config, [key]: value });
@@ -107,12 +99,12 @@
   <!-- Detector type -->
   <div>
     <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">Detector</div>
-    <div class="flex flex-col gap-0.5 bg-zinc-900 rounded-md p-0.5">
-      {#each ['Detectorv2', 'MPDetector', 'Detector'] as type}
+    <div class="grid grid-cols-3 gap-0.5 bg-zinc-900 rounded-md p-0.5">
+      {#each [['Detectorv2', 'Detector​v2'], ['MPDetector', 'MP​Detector'], ['Detector', 'Detector​v1']] as [type, label]}
         <button
-          class="w-full text-[11.5px] py-1.5 rounded text-center {config.detector_type === type ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
+          class="text-[10px] leading-tight px-1 py-1 rounded text-center break-words min-w-0 {config.detector_type === type ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
           onclick={() => switchDetectorType(type as LiveConfigure['detector_type'])}
-        >{type}</button>
+        >{label}</button>
       {/each}
     </div>
   </div>
@@ -157,21 +149,6 @@
     </div>
   </div>
 
-  <!-- Detection resolution -->
-  <div>
-    <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">
-      Detection size
-    </div>
-    <div class="grid grid-cols-2 gap-0.5 bg-zinc-900 rounded-md p-0.5">
-      {#each detectionPresets as preset}
-        <button
-          class="text-[10.5px] py-1 rounded text-center font-mono {detectionRes.w === preset.w ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500'}"
-          onclick={() => onDetectionResChange(preset)}
-          title="Detect at {preset.label}. Lower = faster detection (display stays at 640 × 360)."
-        >{preset.label}</button>
-      {/each}
-    </div>
-  </div>
 
   <!-- Camera -->
   <div>

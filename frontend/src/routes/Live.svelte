@@ -17,17 +17,9 @@
   // detection ran on.
   const WIDTH = 640, HEIGHT = 360;
 
-  // Detection resolution presets. Lower = faster detection but coarser
-  // landmark precision. Forwarded to the backend on configure() so the
-  // bake matches the detection coordinate space.
-  type DetectionRes = { label: string; w: number; h: number };
-  const DETECTION_PRESETS: readonly DetectionRes[] = [
-    { label: '640 × 360', w: 640, h: 360 },
-    { label: '480 × 270', w: 480, h: 270 },
-    { label: '320 × 180', w: 320, h: 180 },
-    { label: '240 × 135', w: 240, h: 135 },
-  ];
-  let detectionRes: DetectionRes = $state(DETECTION_PRESETS[0]!);
+  // Detection always runs at the display resolution now (the per-frame
+  // bake is fast enough that downscaling isn't needed — see the live
+  // coord-scaling vectorization), so there's no detection-size selector.
 
   let config: LiveConfigure = $state({
     detector_type: 'Detectorv2',
@@ -73,7 +65,7 @@
 
   let toggles: OverlayToggles = $state({
     rects: true, landmarks: true, poses: false,
-    gaze: false, aus: false, emotions: false, valenceArousal: true,
+    gaze: false, aus: false, emotions: false, valenceArousal: false,
   });
 
 
@@ -190,7 +182,7 @@
         ...c,
         toggles: toggles as unknown as Record<string, boolean>,
         landmark_style: landmarkStyle,
-        detection_res: { w: detectionRes.w, h: detectionRes.h },
+        detection_res: { w: WIDTH, h: HEIGHT },
         style: overlayStyle,
       });
       apiError = null;
@@ -209,7 +201,7 @@
       await liveApi.hints({
         toggles: toggles as unknown as Record<string, boolean>,
         landmark_style: landmarkStyle,
-        detection_res: { w: detectionRes.w, h: detectionRes.h },
+        detection_res: { w: WIDTH, h: HEIGHT },
         style: overlayStyle,
       });
     } catch (e: any) {
@@ -227,6 +219,7 @@
     }
     try {
       const stream = await startCamera(cameraStore.selectedDeviceId, WIDTH, HEIGHT);
+      streamingDeviceId = cameraStore.selectedDeviceId;
       if (sourceVideo) {
         sourceVideo.srcObject = stream;
         await sourceVideo.play();
@@ -247,6 +240,28 @@
     loopAbort = new AbortController();
     runCaptureLoop(loopAbort.signal);
   }
+
+  // Device the live stream is currently bound to. Plain (non-reactive)
+  // so the hot-swap effect below can update it without re-triggering.
+  let streamingDeviceId: string | null = null;
+
+  // Hot-swap the camera mid-stream: when the sidebar selects a different
+  // device while we're live, re-acquire it (startCamera stops the old
+  // stream) and re-point the capture <video>. The streamingDeviceId guard
+  // stops this firing on the initial start or on pause/stop transitions.
+  $effect(() => {
+    const id = cameraStore.selectedDeviceId;
+    if (!isStreaming || !id || id === streamingDeviceId) return;
+    streamingDeviceId = id;
+    (async () => {
+      try {
+        const stream = await startCamera(id, WIDTH, HEIGHT);
+        if (sourceVideo) { sourceVideo.srcObject = stream; await sourceVideo.play(); }
+      } catch (e: any) {
+        apiError = `Camera switch failed: ${e?.message ?? e}`;
+      }
+    })();
+  });
 
   // Sequential capture loop: grab → JPEG-encode → POST → decode response
   // → paint. The next capture starts only after the previous response
@@ -432,10 +447,6 @@
     landmarkStyle = s.landmarks.style;
     if (isStreaming) pushOverlayHints();
   }
-  function onDetectionResChange(r: DetectionRes) {
-    detectionRes = r;
-    if (isStreaming) pushOverlayHints();
-  }
 </script>
 
 <div class="flex flex-1 overflow-hidden">
@@ -444,10 +455,7 @@
       <LiveSidebar
         {config}
         {compute}
-        {detectionRes}
-        detectionPresets={DETECTION_PRESETS}
         onConfigChange={applyConfig}
-        onDetectionResChange={onDetectionResChange}
       />
       <button
         class="absolute top-4 -right-3 w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-50 inline-flex items-center justify-center z-10"
@@ -537,7 +545,7 @@
             {#if toggles.emotions && face.emo && face.emo.length > 0}
               <div
                 class="absolute px-3.5 py-2 rounded-md bg-black/70 pointer-events-none whitespace-nowrap font-mono leading-snug"
-                style="right: {((face.bbox[0]) / srcW * 100).toFixed(2)}%; top: {Math.max(2, (face.bbox[1] - 92) / srcH * 100).toFixed(2)}%; color: {overlayStyle.emotions.color}; opacity: {overlayStyle.emotions.opacity}; font-size: {overlayStyle.emotions.fontSize}px;"
+                style="right: {((face.bbox[0]) / srcW * 100).toFixed(2)}%; top: {Math.max(2, (face.bbox[1] - (face.emo.length * overlayStyle.emotions.fontSize * 1.4 + 22)) / srcH * 100).toFixed(2)}%; color: {overlayStyle.emotions.color}; opacity: {overlayStyle.emotions.opacity}; font-size: {overlayStyle.emotions.fontSize}px;"
               >
                 {#each face.emo as [name, val]}
                   <div>{name.charAt(0).toUpperCase() + name.slice(1)}  {val.toFixed(2)}</div>
