@@ -53,9 +53,7 @@
   // looks best as 'mesh'. Per-type default applied here for initial
   // state and re-applied on switchDetectorType (see applyConfig
   // wrapper in Live.svelte for that).
-  let landmarkStyle: LandmarkStyle = $state(
-    config.detector_type === 'Detector' ? 'lines' : 'mesh',
-  );
+  let landmarkStyle: LandmarkStyle = $state(loadOverlayStyle().landmarks.style);
 
   // Per-overlay visual style, shared with the Viewer via the same
   // localStorage key so settings persist and stay in sync across pages.
@@ -427,10 +425,6 @@
   // avoid spurious config calls; the next startStream() will sync them.
   function onToggleChange(key: keyof OverlayToggles, value: boolean) {
     toggles = { ...toggles, [key]: value };
-    if (isStreaming) pushOverlayHints();
-  }
-  function onLandmarkStyleChange(s: LandmarkStyle) {
-    landmarkStyle = s;
     if (isStreaming) pushOverlayHints();
   }
   function onStyleChange(s: OverlayStyleConfig) {
