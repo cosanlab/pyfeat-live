@@ -24,7 +24,7 @@
       landmark_model: ['mp_facemesh_v2'],
       au_model: ['mp_blendshapes'],
       emotion_model: ['resmasknet'],
-      identity_model: ['arcface', null],
+      identity_model: [null, 'arcface'],
       gaze_model: ['mp_iris (built-in)'],
     },
     Detector: {

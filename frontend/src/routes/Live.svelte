@@ -30,7 +30,10 @@
     landmark_model: 'mp_facemesh_v2',
     au_model: 'mp_blendshapes',
     emotion_model: 'resmasknet',
-    identity_model: 'arcface',
+    // ArcFace identity is OFF by default on Detectorv2 — it runs ~13ms/
+    // frame (the old fps ceiling) and identity isn't shown live anyway.
+    // Enable it in the sidebar when recording for later identity clustering.
+    identity_model: null,
     gaze_model: 'mp_iris (built-in)',
     device: 'mps',
   });
