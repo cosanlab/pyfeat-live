@@ -6,11 +6,12 @@
 #     bundle as resources, loaded via PYTHONPATH; not installed)
 #   - pins exact versions for first-run determinism
 #
-# Bumping a pin: edit the version, then `uv pip compile
-# sidecar/runtime/requirements.in --output-file sidecar/runtime/
-# requirements.txt --generate-hashes` once we add a .in input. For now
-# this file is the source of truth.
-py-feat @ git+https://github.com/cosanlab/py-feat@f168fcc
+# Bumping a pin: edit the version, then recompile the lock:
+#   uv pip compile sidecar/runtime/requirements.in \
+#     -o sidecar/runtime/requirements.txt --generate-hashes --python-version 3.12
+# (--python-version 3.12 matches the runtime venv so the build is
+# reproducible regardless of the host's default Python.)
+py-feat @ git+https://github.com/cosanlab/py-feat@95dc6a3
 fastapi>=0.115
 uvicorn[standard]>=0.34
 python-multipart>=0.0.18
