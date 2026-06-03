@@ -181,7 +181,19 @@ def au_cmap_lut(name: str = "Blues") -> list[tuple[int, int, int]]:
     if name not in _LUT_CACHE:
         import seaborn as sns
 
-        palette = sns.color_palette(name, 256)
+        # The frontend offers capitalized perceptual names (Viridis, Magma,
+        # Inferno, Turbo) but matplotlib registers those lowercase, so
+        # sns.color_palette("Viridis") raises ValueError — which previously
+        # killed the live detection thread and froze the feed. Try the name
+        # as-is, then lowercase, then fall back to Blues so a bad/unknown
+        # colormap NEVER crashes the bake.
+        try:
+            palette = sns.color_palette(name, 256)
+        except (ValueError, KeyError):
+            try:
+                palette = sns.color_palette(name.lower(), 256)
+            except (ValueError, KeyError):
+                palette = sns.color_palette("Blues", 256)
         _LUT_CACHE[name] = [
             (int(r * 255), int(g * 255), int(b * 255)) for r, g, b in palette
         ]

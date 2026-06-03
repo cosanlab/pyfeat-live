@@ -24,7 +24,7 @@
       landmark_model: ['mp_facemesh_v2'],
       au_model: ['mp_blendshapes'],
       emotion_model: ['resmasknet'],
-      identity_model: ['arcface'],
+      identity_model: ['arcface', null],
       gaze_model: ['mp_iris (built-in)'],
     },
     Detector: {
@@ -96,6 +96,23 @@
     </div>
   </div>
 
+  <!-- Camera (above Detector so device selection is the first thing) -->
+  <div>
+    <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">Camera</div>
+    <div class="relative">
+      <select
+        class="w-full appearance-none pl-2 pr-7 py-1.5 rounded bg-zinc-900 border border-zinc-800 text-[11.5px] text-zinc-200"
+        value={cameraStore.selectedDeviceId ?? ''}
+        onchange={(e) => (cameraStore.selectedDeviceId = (e.target as HTMLSelectElement).value)}
+      >
+        {#each cameraStore.devices as d}
+          <option value={d.deviceId}>{d.label}</option>
+        {/each}
+      </select>
+      <ChevronDown size={10} class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+    </div>
+  </div>
+
   <!-- Detector type -->
   <div>
     <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">Detector</div>
@@ -146,24 +163,6 @@
           onclick={() => update('device', dev as LiveConfigure['device'])}
         >{dev}</button>
       {/each}
-    </div>
-  </div>
-
-
-  <!-- Camera -->
-  <div>
-    <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">Camera</div>
-    <div class="relative">
-      <select
-        class="w-full appearance-none pl-2 pr-7 py-1.5 rounded bg-zinc-900 border border-zinc-800 text-[11.5px] text-zinc-200"
-        value={cameraStore.selectedDeviceId ?? ''}
-        onchange={(e) => (cameraStore.selectedDeviceId = (e.target as HTMLSelectElement).value)}
-      >
-        {#each cameraStore.devices as d}
-          <option value={d.deviceId}>{d.label}</option>
-        {/each}
-      </select>
-      <ChevronDown size={10} class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
     </div>
   </div>
 </aside>
