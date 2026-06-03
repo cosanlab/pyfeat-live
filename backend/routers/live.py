@@ -209,13 +209,14 @@ async def _run_detection(live, img: Image.Image) -> None:
             landmark_style = live.landmark_style or "mesh"
             overlay_kind = getattr(live, "overlay_kind", "dlib68_polygons")
             gaze_convention = getattr(live, "gaze_convention", "l2cs")
+            overlay_style = live.style
             t0 = time.perf_counter()
             png, fex, dims, baked_arr = await loop.run_in_executor(
                 _DETECTION_EXECUTOR,
                 _detect_and_bake,
                 detector, img, detection_size,
                 toggles, mp_landmarks, landmark_style, overlay_kind,
-                gaze_convention,
+                gaze_convention, overlay_style,
             )
             dur = time.perf_counter() - t0
         print(f"detect+bake: {dims[0]}x{dims[1]} dur={dur*1000:.0f}ms")
@@ -259,6 +260,7 @@ def _detect_and_bake(
     toggles: dict, mp_landmarks: bool, landmark_style: str,
     overlay_kind: str = "dlib68_polygons",
     gaze_convention: str = "l2cs",
+    overlay_style: Optional[dict] = None,
 ):
     """Full per-frame pipeline, run in the detection worker thread:
     detect → scale coords to source space → bake overlay → PNG-encode.
@@ -284,6 +286,7 @@ def _detect_and_bake(
             frame_arr, display_view(fex), toggles,
             mp_landmarks=mp_landmarks, overlay_kind=overlay_kind,
             landmark_style=landmark_style, gaze_convention=gaze_convention,
+            overlay_style=overlay_style,
         )
     # PNG (lossless) so overlay edges + 1px landmark dots survive intact.
     png = encode_png(frame_arr)
@@ -363,6 +366,7 @@ class ConfigureRequest(BaseModel):
     # frame so the in-pipeline bake matches what the UI would have drawn.
     toggles: Optional[dict[str, bool]] = None
     landmark_style: Optional[str] = None
+    style: Optional[dict] = None
     detection_res: Optional[dict[str, int]] = None  # {w, h}
 
 
@@ -405,6 +409,8 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
             live.toggles = req.toggles
         if req.landmark_style is not None:
             live.landmark_style = req.landmark_style
+        if req.style is not None:
+            live.style = req.style
         if req.detection_res is not None:
             live.detection_size = (
                 int(req.detection_res["w"]), int(req.detection_res["h"]),
@@ -417,6 +423,7 @@ class HintsRequest(BaseModel):
     """Cheap mid-stream updates that DON'T rebuild the detector."""
     toggles: Optional[dict[str, bool]] = None
     landmark_style: Optional[str] = None
+    style: Optional[dict] = None
     detection_res: Optional[dict[str, int]] = None
 
 
@@ -434,6 +441,8 @@ async def hints(req: HintsRequest, request: Request) -> dict:
         live.toggles = req.toggles
     if req.landmark_style is not None:
         live.landmark_style = req.landmark_style
+    if req.style is not None:
+        live.style = req.style
     if req.detection_res is not None:
         live.detection_size = (
             int(req.detection_res["w"]), int(req.detection_res["h"]),

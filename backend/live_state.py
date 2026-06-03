@@ -30,6 +30,7 @@ class LiveSession:
     # the frontend.
     toggles: dict[str, bool] = field(default_factory=dict)
     landmark_style: str = "mesh"
+    style: dict | None = None
     mp_landmarks: bool = True
     # The active detector kind string (e.g. "MPDetector"). Set by
     # /configure and read by /recording/start so the recorder can

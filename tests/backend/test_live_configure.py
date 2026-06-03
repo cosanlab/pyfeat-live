@@ -61,3 +61,32 @@ def test_configure_accepts_toggles(client):
     assert live.landmark_style == "points"
     # MPDetector wiring: this run used "Detector", so flag stays False.
     assert live.mp_landmarks is False
+
+
+def test_hints_accepts_and_stores_style(client):
+    """POST /api/live/hints with a style blob stores it on LiveSession.style."""
+    style_blob = {"faceboxes": {"color": "#ff0000", "opacity": 1, "lineWidth": 3}}
+    r = client.post("/api/live/hints", json={"style": style_blob})
+    assert r.status_code == 200
+    live = client.app.state.live
+    assert live.style == style_blob
+    assert live.style["faceboxes"]["color"] == "#ff0000"
+
+
+def test_configure_accepts_and_stores_style(client):
+    """POST /api/live/configure with a style blob stores it on LiveSession.style."""
+    style_blob = {"landmarks": {"color": "#00ff00", "opacity": 0.8, "lineWidth": 1}}
+    r = client.post("/api/live/configure", json={
+        "detector_type": "Detectorv2",
+        "face_model": "retinaface",
+        "landmark_model": "mp_facemesh_v2",
+        "au_model": "mp_blendshapes",
+        "emotion_model": None,
+        "identity_model": None,
+        "device": "cpu",
+        "style": style_blob,
+    })
+    assert r.status_code == 200
+    live = client.app.state.live
+    assert live.style == style_blob
+    assert live.style["landmarks"]["color"] == "#00ff00"
