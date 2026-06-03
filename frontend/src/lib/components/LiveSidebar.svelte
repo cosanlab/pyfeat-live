@@ -111,10 +111,10 @@
   <!-- Detector type -->
   <div>
     <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">Detector</div>
-    <div class="flex gap-0.5 bg-zinc-900 rounded-md p-0.5">
+    <div class="flex flex-col gap-0.5 bg-zinc-900 rounded-md p-0.5">
       {#each ['Detectorv2', 'MPDetector', 'Detector'] as type}
         <button
-          class="flex-1 text-[10.5px] py-1 rounded text-center {config.detector_type === type ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500'}"
+          class="w-full text-[11.5px] py-1.5 rounded text-center {config.detector_type === type ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
           onclick={() => switchDetectorType(type as LiveConfigure['detector_type'])}
         >{type}</button>
       {/each}
