@@ -8,6 +8,25 @@
   type Props = { onClose: () => void };
   let { onClose }: Props = $props();
 
+  // Drag the LEFT edge to resize the drawer width.
+  let width = $state(440);
+  let resizing: { startX: number; startW: number } | null = null;
+  function startResize(e: PointerEvent) {
+    e.preventDefault();
+    resizing = { startX: e.clientX, startW: width };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function moveResize(e: PointerEvent) {
+    if (!resizing) return;
+    const dx = resizing.startX - e.clientX; // drag left → wider
+    width = Math.max(280, Math.min(window.innerWidth * 0.8, resizing.startW + dx));
+  }
+  function endResize(e: PointerEvent) {
+    if (!resizing) return;
+    resizing = null;
+    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+  }
+
   let text = $state('Loading…');
   let error: string | null = $state(null);
   let pre: HTMLPreElement | null = $state(null);
@@ -58,7 +77,20 @@
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-<aside class="w-[440px] max-w-[80vw] shrink-0 flex flex-col bg-zinc-950 border-l border-zinc-900">
+<!-- Overlay docked to the top-right at the camera-feed height (45vh) so it
+     never extends down over the controls. Resizable from the left edge. -->
+<aside
+  class="absolute top-0 right-0 z-20 h-[45vh] min-h-[200px] flex flex-col bg-zinc-950 border-l border-zinc-900 shadow-xl"
+  style="width: {width}px;"
+>
+  <!-- left-edge resize handle -->
+  <div
+    class="absolute left-0 top-0 bottom-0 w-1.5 -translate-x-1/2 cursor-ew-resize hover:bg-green-500/40 z-10"
+    role="presentation"
+    onpointerdown={startResize}
+    onpointermove={moveResize}
+    onpointerup={endResize}
+  ></div>
   <div class="flex items-center gap-3 px-3.5 py-2.5 border-b border-zinc-900 shrink-0">
     <h5 class="text-[11px] uppercase tracking-wider font-semibold text-zinc-400">Logs</h5>
     <span class="text-[9px] uppercase tracking-wider text-green-500/80 font-mono">live</span>
