@@ -4,23 +4,19 @@
   import logoUrl from '../../assets/logo.png';
   import type { LiveConfigure, ComputeInfo } from '../api';
 
-  type LandmarkStyle = 'points' | 'lines' | 'mesh';
-
   type DetectionRes = { label: string; w: number; h: number };
 
   type Props = {
     config: LiveConfigure;
     compute: ComputeInfo | null;
-    landmarkStyle: LandmarkStyle;
     detectionRes: DetectionRes;
     detectionPresets: readonly DetectionRes[];
     onConfigChange: (c: LiveConfigure) => void;
-    onLandmarkStyleChange: (s: LandmarkStyle) => void;
     onDetectionResChange: (r: DetectionRes) => void;
   };
   let {
-    config, compute, landmarkStyle, detectionRes, detectionPresets,
-    onConfigChange, onLandmarkStyleChange, onDetectionResChange,
+    config, compute, detectionRes, detectionPresets,
+    onConfigChange, onDetectionResChange,
   }: Props = $props();
 
   function update<K extends keyof LiveConfigure>(key: K, value: LiveConfigure[K]) {
@@ -173,24 +169,6 @@
           onclick={() => onDetectionResChange(preset)}
           title="Detect at {preset.label}. Lower = faster detection (display stays at 640 × 360)."
         >{preset.label}</button>
-      {/each}
-    </div>
-  </div>
-
-  <!-- Landmark style -->
-  <div>
-    <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">Landmark style</div>
-    <div class="flex gap-0.5 bg-zinc-900 rounded-md p-0.5">
-      {#each (['points', 'lines', 'mesh'] as LandmarkStyle[]) as s}
-        <button
-          class="flex-1 text-[10.5px] py-1 rounded text-center capitalize {landmarkStyle === s ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500'}"
-          onclick={() => onLandmarkStyleChange(s)}
-          title={s === 'points'
-            ? 'one dot per landmark'
-            : s === 'lines'
-              ? 'feature outlines (dlib face-parts or MP contours)'
-              : 'full mesh (dlib Delaunay or MP tessellation)'}
-        >{s}</button>
       {/each}
     </div>
   </div>
