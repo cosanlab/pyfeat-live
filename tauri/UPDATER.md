@@ -50,7 +50,7 @@ In the repo's *Settings → Secrets and variables → Actions*:
 
 | Name | Value |
 |---|---|
-| `TAURI_SIGNING_PRIVATE_KEY` | `cat ~/.tauri/pyfeatlive.key | base64` (single line) |
+| `TAURI_SIGNING_PRIVATE_KEY` | the **raw contents** of `~/.tauri/pyfeatlive.key` — `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/pyfeatlive.key`. Do **not** run it through `base64`: the key file is already base64, so re-encoding double-encodes it and the build fails with `Missing encoded key in secret key`. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | passphrase you set above |
 | `APPLE_CERTIFICATE` | `base64 < DeveloperIDApplication.p12` |
 | `APPLE_CERTIFICATE_PASSWORD` | password used when exporting the .p12 |
