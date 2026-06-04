@@ -21,6 +21,15 @@
   // uploaded frame and returns it, so what we paint IS the frame
   // detection ran on.
   const WIDTH = 640, HEIGHT = 360;
+  // CAPTURE resolution — what we request from the camera and therefore the
+  // resolution the backend BAKES the overlay at (the baked frame is returned
+  // at its uploaded size). The display stage is wider than 640px, so a
+  // 640-wide bake gets CSS-upscaled and the mesh/lines look soft. Capturing
+  // at 720p means the browser DOWNscales to fit (crisp) instead. Detection
+  // still runs at WIDTH×HEIGHT via detection_res (a pure speed knob, scaled
+  // back up for the bake), so fps is unaffected — only sharpness improves.
+  // 16:9 matches WIDTH/HEIGHT, so the stage aspect-ratio is unchanged.
+  const CAP_W = 1280, CAP_H = 720;
 
   // Detection always runs at the display resolution now (the per-frame
   // bake is fast enough that downscaling isn't needed — see the live
@@ -262,7 +271,7 @@
       return;
     }
     try {
-      const stream = await startCamera(cameraStore.selectedDeviceId, WIDTH, HEIGHT);
+      const stream = await startCamera(cameraStore.selectedDeviceId, CAP_W, CAP_H);
       streamingDeviceId = cameraStore.selectedDeviceId;
       if (sourceVideo) {
         sourceVideo.srcObject = stream;
@@ -299,7 +308,7 @@
     streamingDeviceId = id;
     (async () => {
       try {
-        const stream = await startCamera(id, WIDTH, HEIGHT);
+        const stream = await startCamera(id, CAP_W, CAP_H);
         if (sourceVideo) { sourceVideo.srcObject = stream; await sourceVideo.play(); }
       } catch (e: any) {
         apiError = `Camera switch failed: ${e?.message ?? e}`;
