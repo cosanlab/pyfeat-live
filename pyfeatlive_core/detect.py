@@ -46,6 +46,7 @@ from feat.utils import (
 from feat.utils.image_operations import convert_image_to_tensor
 
 from pyfeatlive_core.capabilities import DETECTORV2_EMOTION_RENAME
+from pyfeatlive_core.live_tracker import LiveTracker, downscale_gray
 
 if TYPE_CHECKING:
     from PIL import Image
@@ -251,43 +252,36 @@ def detect_pil_images(
     finally:
         _GPU_LOCK.release()
 
-    # Mirror Detector.detect()'s post-forward annotation: tag each face
-    # row with its source frame index and a placeholder input filename.
-    frame_ids = []
-    file_names = []
+    if profile:
+        total = (time.perf_counter() - _t_start) * 1000.0
+        bits = " ".join(f"{k}={v:.1f}" for k, v in _ticks.items())
+        logger.info("detect_pil_images total=%.1fms %s", total, bits)
+
+    return _finalize_fex(detector, df, faces_data, frame_offset)
+
+
+def _finalize_fex(detector, df, faces_data, frame_offset: int) -> Fex:
+    """Shared post-forward tail: frame/input tags, v2 emotion rename, Fex
+    wrap, MPDetector pose backfill, FaceScore filter. Returns the final Fex.
+
+    Extracted from detect_pil_images so the tracked path reuses identical
+    wrapping. Behavior-identical to the inline version (drops only the
+    optional PYFEAT_LIVE_PROFILE per-step ticks)."""
+    # Tag each face row with its source frame index + placeholder filename.
+    frame_ids, file_names = [], []
     for i, face in enumerate(faces_data):
         n_faces = len(face["scores"])
         frame_ids.append(np.repeat(frame_offset + i, n_faces))
-        file_names.append(np.repeat(batch_data["FileName"][i], n_faces))
+        file_names.append(np.repeat(str(np.nan), n_faces))
     if frame_ids:
         df["input"] = np.concatenate(file_names) if file_names else []
         df["frame"] = np.concatenate(frame_ids) if frame_ids else []
 
-    # Detectorv2 emits capitalized py-feat-v0.7 emotion labels
-    # (Anger/Happy/Sad/...); rename them to the legacy lowercase scheme
-    # (anger/happiness/sadness/...) the rest of the app already uses, so
-    # emotions render uniformly across all three detectors. Applied to the
-    # df BEFORE it's wrapped, so both the recorded fex and the live
-    # meta/overlay paths see the lowercase names. MPDetector/classic
-    # Detector already emit lowercase resmasknet labels — leave untouched.
     if isinstance(detector, Detectorv2):
         df = df.rename(columns=DETECTORV2_EMOTION_RENAME)
 
-    # Wrap in a Fex NOW (not just at return) so the MPDetector pose
-    # backfill below can call convert_landmarks_3d(fex). In py-feat v0.7
-    # convert_landmarks_3d reads ``fex.landmarks`` — a Fex *property*
-    # that slices the landmark columns — so it must receive a Fex, not
-    # the raw forward() DataFrame. py-feat's own MPDetector.detect()
-    # likewise passes the assembled Fex (``batch_output``) into it.
     fex = Fex(df, **_fex_wrap_kwargs(detector))
 
-    # MPDetector pose: forward() leaves Pitch/Roll/Yaw + X/Y/Z as NaN
-    # (see MPDetector.forward() comment about pytorch inference_mode
-    # not allowing backprop). py-feat's MPDetector.detect() runs
-    # estimate_face_pose_from_mesh on the assembled Fex to backfill them.
-    # We mirror that step here so live mode gets real pose values too.
-    # No-op for classic Detector — its forward() already populates pose
-    # from img2pose / DLT-PnP.
     if isinstance(detector, MPDetector) and len(fex) > 0:
         try:
             from feat.MPDetector import convert_landmarks_3d
@@ -304,43 +298,108 @@ def detect_pil_images(
                 torch.cat((euler, t), dim=1).cpu().numpy()
             )
         except Exception as e:
-            # Pose estimation is best-effort; if the canonical face
-            # model can't be aligned (e.g., extreme pose, partial
-            # face), keep the NaN-fill rather than crashing the stream.
-            # Logged as warning rather than debug so silent failures
-            # don't get hidden — pose-NaN is invisible in the UI
-            # otherwise (overlay just doesn't draw).
             logger.warning(
-                "MPDetector pose backfill failed (%s); pose columns left NaN",
-                e,
+                "MPDetector pose backfill failed (%s); pose columns left NaN", e,
             )
-        _tick("pose_backfill")
 
-    # NOTE: py-feat v0.7's MPDetector emits the 20 FACS AU columns
-    # natively (internal blendshape→AU PLS), so the old hand-rolled Ozel
-    # blendshape→AU mapping has been removed. AU01..AU43 are already
-    # present in `fex` straight out of forward().
-
-    # Filter out zero-score placeholder rows. py-feat's detector always
-    # emits one row per frame even when no face is found (FaceScore == 0.0).
-    # Returning those rows would cause downstream code to treat "no face"
-    # as "one face with all-NaN features", which breaks AU heatmaps and
-    # recording. Callers can check `len(fex) == 0` for the empty case.
     if "FaceScore" in fex.columns and len(fex) > 0:
         fex = fex[fex["FaceScore"] > 0].reset_index(drop=True)
-    _tick("filter")
 
-    if profile:
-        total = (time.perf_counter() - _t_start) * 1000.0
-        bits = " ".join(f"{k}={v:.1f}" for k, v in _ticks.items())
-        logger.info("detect_pil_images total=%.1fms %s", total, bits)
-
-    # Re-wrap once more: boolean-mask slicing a Fex can return a plain
-    # DataFrame (or drop column metadata), so normalise back to a Fex
-    # with the canonical per-detector schema before handing it back.
     return Fex(
         pd.DataFrame(fex).reset_index(drop=True), **_fex_wrap_kwargs(detector)
     )
+
+
+def _meshes_from_fex(fex) -> list:
+    """Extract per-face [478,2] mesh arrays from a v2 Fex, in row order.
+
+    Rows whose mesh is NaN (shouldn't happen on real faces) are returned as
+    empty so the tracker treats them as lost."""
+    xs = [f"mesh_x_{i}" for i in range(478)]
+    ys = [f"mesh_y_{i}" for i in range(478)]
+    out = []
+    for _, row in fex.iterrows():
+        mx = row[xs].to_numpy(dtype=float)
+        my = row[ys].to_numpy(dtype=float)
+        if np.isnan(mx).any() or np.isnan(my).any():
+            out.append(np.empty((0, 2), float))
+        else:
+            out.append(np.column_stack([mx, my]))
+    return out
+
+
+def _build_v2_batch(frames: "list[Image.Image]"):
+    """Build (image_tensor, batch_data) for Detectorv2, matching
+    detect_pil_images' construction."""
+    n = len(frames)
+    image_tensor = torch.stack(
+        [convert_image_to_tensor(f, img_type="float32").squeeze(0) for f in frames],
+        dim=0,
+    )
+    batch_data = {
+        "Image": image_tensor,
+        "Scale": torch.ones(n),
+        "Padding": {
+            "Left": torch.zeros(n), "Top": torch.zeros(n),
+            "Right": torch.zeros(n), "Bottom": torch.zeros(n),
+        },
+        "FileName": [str(np.nan)] * n,
+    }
+    return image_tensor, batch_data
+
+
+def detect_pil_images_v2_tracked(
+    detector, frames: "list[Image.Image]", tracker: "LiveTracker",
+    frame_offset: int = 0,
+) -> Fex:
+    """Detectorv2 detect/track variant of detect_pil_images for Live.
+
+    Single-frame only (Live posts one frame at a time): ``frames`` must hold
+    exactly one image. Uses ``tracker`` to decide between a full RetinaFace
+    detect and a ROI-crop track, runs the matching detector call, finalizes
+    the Fex identically to detect_pil_images, and updates the tracker with
+    the resulting meshes. Falls back to a plain detect on any track-path
+    error so a single bad frame can't wedge the stream."""
+    if len(frames) != 1:
+        raise ValueError("detect_pil_images_v2_tracked expects exactly one frame")
+    img = frames[0]
+    cur_gray = downscale_gray(np.asarray(img))
+    frame_w, frame_h = img.width, img.height
+
+    image_tensor, batch_data = _build_v2_batch(frames)
+
+    _GPU_LOCK.acquire()
+    try:
+        do_detect = tracker.should_detect(cur_gray)
+        if not do_detect:
+            try:
+                boxes = torch.tensor(tracker.roi_boxes(), dtype=torch.float32)
+                faces_data = detector.crop_faces_from_boxes(batch_data["Image"], boxes)
+                df = detector.forward(faces_data, batch_data)
+            except (ValueError, RuntimeError) as exc:
+                logger.warning("track path failed (%s); falling back to detect", exc)
+                do_detect = True
+        if do_detect:
+            faces_data = detector.detect_faces(
+                batch_data["Image"], face_detection_threshold=0.5,
+            )
+            df = detector.forward(faces_data, batch_data)
+    finally:
+        _GPU_LOCK.release()
+
+    fex = _finalize_fex(detector, df, faces_data, frame_offset)
+    # NOTE: _finalize_fex drops FaceScore<=0 rows, so len(meshes) can be < the
+    # number of ROIs we cropped. note_track requires the count to match its
+    # stored ROIs; a shrunk count there just forces a re-detect next frame
+    # (safe — a marginal crop re-acquires via RetinaFace rather than mis-tracks).
+    meshes = _meshes_from_fex(fex)
+    if do_detect:
+        # do_detect may have flipped False→True via the track-path fallback
+        # above; record this frame as a detect (not a track) either way.
+        tracker.note_detect(meshes, frame_w, frame_h)
+    else:
+        tracker.note_track(meshes, frame_w, frame_h)
+    return fex
 
 
 def display_view(df: "pd.DataFrame") -> "pd.DataFrame":
