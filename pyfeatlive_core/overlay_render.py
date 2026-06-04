@@ -542,16 +542,19 @@ def _draw_pose(
     # points down, so the y-component is negated.
     # Classic Detector (img2pose) reports a forward-facing head as yaw ≈ ±π;
     # offset by π to bring "facing camera" back to 0. MPDetector needs none.
-    p, r = float(pitch), float(roll)
-    yw = float(yaw) + (0.0 if mp_landmarks else np.pi)
-    # Match py-feat's canonical pose-axis projection (feat/plotting.py
-    # draw_facepose): negate yaw, then project the rotated unit axes. py-feat
-    # computes in image (top-left) space and flips y only for its plotly
-    # renderer; here we draw directly with y = cy − dy so the green Y-axis
-    # points visually up. X→right (red), Y→up (green), Z→out-of-screen (blue).
-    # Drawn in source coords like the mesh, so the display selfie-mirror
-    # applies uniformly and the axes track the head exactly as the mesh does.
-    yw = -yw
+    # py-feat's draw_facepose projection (feat/plotting.py), adapted for
+    # Detectorv2 + our mirrored display. py-feat computes in image (top-left)
+    # space and flips y only for plotly; we draw directly with y = cy − dy so
+    # the green Y-axis points visually up. X→right (red), Y→up (green),
+    # Z→out-of-screen (blue). Detectorv2's multitask Euler angles report pitch
+    # and roll with the OPPOSITE sign to img2pose (which py-feat's formula was
+    # written for), so negate both here (verified on-camera: nodding/tilting
+    # the head now rotates the axes the matching way). Yaw keeps py-feat's
+    # negation; the axes are drawn in source coords like the mesh, so the
+    # display selfie-mirror applies to both uniformly.
+    p = -float(pitch)
+    r = -float(roll)
+    yw = -(float(yaw) + (0.0 if mp_landmarks else np.pi))
     cp, sp = np.cos(p), np.sin(p)
     cr, sr = np.cos(r), np.sin(r)
     cyw, syw = np.cos(yw), np.sin(yw)
