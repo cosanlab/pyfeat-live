@@ -31,6 +31,35 @@ def logs() -> str:
     return logbuffer.dump()
 
 
+@router.post("/logs/save")
+def save_logs() -> dict[str, str]:
+    """Write the buffered log to a .txt under ~/Documents/pyfeat-live/ and
+    reveal it in the OS file manager.
+
+    Done sidecar-side (not via a browser Blob download) because the desktop
+    WebView can't reliably save a programmatic download — the same reason
+    the Extract picker uses a native path instead of an <a download>. The
+    sidecar has full filesystem access, so it writes the file next to the
+    user's recordings (a discoverable location they already use) and pops
+    Finder/Explorer selecting it.
+    """
+    from datetime import datetime
+
+    from pyfeatlive_core.recorder import (
+        default_sessions_root, reveal_in_file_manager,
+    )
+
+    # Parent of the sessions dir → ~/Documents/pyfeat-live (not buried in a
+    # per-session subfolder).
+    out_dir = default_sessions_root().parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = out_dir / f"pyfeat-live_logs_{ts}.txt"
+    path.write_text(logbuffer.dump(), encoding="utf-8")
+    reveal_in_file_manager(path)
+    return {"path": str(path)}
+
+
 @router.get("/compute")
 def compute() -> dict[str, Any]:
     """Report which compute backends are usable on this machine.

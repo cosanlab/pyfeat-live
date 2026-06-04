@@ -75,6 +75,11 @@ export const systemApi = {
     if (!r.ok) throw new ApiError(r.status, `logs: ${r.status} ${r.statusText}`);
     return r.text();
   },
+  // Save the log to a .txt sidecar-side and reveal it in the file manager.
+  // The desktop WebView can't reliably save a Blob download, so the sidecar
+  // writes the file (next to recordings) and returns its path.
+  saveLogs: () =>
+    request<{ path: string }>('/api/system/logs/save', { method: 'POST' }),
   overlayEdges: () => request<OverlayEdgeSets>('/api/system/overlay-edges'),
   auTable: () => request<AuTable>('/api/system/au-table'),
   auMeshTable: () => request<AuMeshTable>('/api/system/au-mesh-table'),

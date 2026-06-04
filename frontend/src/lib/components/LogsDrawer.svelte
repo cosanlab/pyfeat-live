@@ -51,15 +51,19 @@
     stick = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
   }
 
-  function download() {
-    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `pyfeat-live_logs_${ts}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+  // Save sidecar-side: the desktop WebView can't reliably save a Blob
+  // download, so the backend writes the .txt (next to recordings) and
+  // reveals it in Finder/Explorer, returning the path we show below.
+  let saved: string | null = $state(null);
+  async function download() {
+    error = null;
+    try {
+      const { path } = await systemApi.saveLogs();
+      saved = path;
+      setTimeout(() => { if (saved === path) saved = null; }, 8000);
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : String(e);
+    }
   }
 
   function onWindowKeydown(e: KeyboardEvent) {
@@ -101,7 +105,7 @@
     <button
       class="inline-flex items-center gap-1 text-[10.5px] text-zinc-500 hover:text-zinc-300"
       onclick={download}
-    ><Download size={11} /> .txt</button>
+    ><Download size={11} /> Save .txt</button>
     <button class="ml-auto text-zinc-500 hover:text-zinc-300" onclick={onClose} aria-label="close">
       <X size={14} />
     </button>
@@ -110,6 +114,12 @@
   {#if error}
     <div class="px-3.5 py-2 text-[11px] text-red-300 font-mono border-b border-red-900/40 bg-red-950/20 shrink-0">
       {error}
+    </div>
+  {/if}
+
+  {#if saved}
+    <div class="px-3.5 py-2 text-[10.5px] text-green-300 font-mono border-b border-green-900/40 bg-green-950/20 shrink-0 break-all">
+      Saved + revealed: {saved}
     </div>
   {/if}
 
