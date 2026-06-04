@@ -320,10 +320,13 @@ def _meshes_from_fex(fex) -> list:
     empty so the tracker treats them as lost."""
     xs = [f"mesh_x_{i}" for i in range(478)]
     ys = [f"mesh_y_{i}" for i in range(478)]
+    # Pull the whole mesh block in two vectorized reads ([F,478] each) rather
+    # than iterrows + a per-row 478-col reindex — the latter runs every frame
+    # on the live path. reindex(columns=...) yields NaN for absent columns.
+    mxs = fex.reindex(columns=xs).to_numpy(dtype=float)
+    mys = fex.reindex(columns=ys).to_numpy(dtype=float)
     out = []
-    for _, row in fex.iterrows():
-        mx = row[xs].to_numpy(dtype=float)
-        my = row[ys].to_numpy(dtype=float)
+    for mx, my in zip(mxs, mys):
         if np.isnan(mx).any() or np.isnan(my).any():
             out.append(np.empty((0, 2), float))
         else:
