@@ -49,17 +49,17 @@ Layout structure is otherwise unchanged (Option C): the toolbar stays at the bot
 
 ---
 
-## 3. Logs drawer: toggle, full height, transparency
+## 3. Logs as a right-side panel that shrinks the video
 
-- **Toggle:** the top-nav **Logs button toggles** the drawer (open if closed, retract if open) instead of open-only. `App.svelte` flips `showLogs`; `TopNav` shows the Logs item as active while open.
-- **Full height — to the toolbar, not over it:** the drawer should span the full **video area** (top of the feed down to the **top of the toolbar**), replacing the fixed `h-[45vh]`. Note the Live toolbar (`LiveControlBar`) renders *inside* Live's content column, at the bottom of the video region — so a naive full-content-height drawer would cover it. The drawer must stop at the toolbar. Preferred implementation: render the drawer inside Live's video container (the `relative` element wrapping the display canvas, above the toolbar) as `absolute inset-y-0 right-0`, so it naturally fills the video region and stops where the toolbar begins. (Alternative: keep it in `App.svelte` but offset its bottom by the toolbar height — rejected as fragile.) Because this scopes the drawer to the video region, the open/close state must be reachable from both the top-nav button and Live.
-- **Transparency:** give the drawer panel a **slight translucency** (≈ 88% opaque, e.g. `bg-zinc-950/90` + a subtle `backdrop-blur`) so the streaming video is faintly visible behind it.
+Instead of an absolute overlay, the logs become a **solid right-side panel** docked within Live's right column. Opening it **shrinks the video** horizontally to make room (the video reflows smaller) rather than floating over it.
 
-The existing left-edge resize, live tail, and Save .txt behavior are unchanged.
+**Layout:** Live's right column is currently `[ video region (flex-1) ][ toolbar ]` stacked vertically. Wrap the video region in a **horizontal flex** that holds `[ video (flex-1) ][ logs panel (fixed/resizable width, when open) ]`. The **toolbar stays full-width** at the bottom of the column, unaffected — so opening logs shrinks only the video and the one-row chips never reflow.
 
-**State plumbing:** the toggle state (`showLogs`) currently lives in `App.svelte` and the drawer is a sibling of `<main>`. To make the drawer span only Live's video region (stopping at the toolbar) while the button stays in the global top nav, pass `showLogs` + an `onToggleLogs` callback down into `Live.svelte` (which renders the drawer inside its video container), or lift the state into a tiny shared store. The Logs button toggles this state and reflects active-while-open.
+- **Toggle:** the top-nav **Logs button toggles** the panel (open if closed, close if open); active-while-open.
+- **Solid, no transparency** — it sits beside the video, not over it. The existing left-edge **resize** drag now reflows the video width; live tail + Save .txt unchanged.
+- **Scope:** because the panel must shrink the video and leave the toolbar full-width, it lives inside the Live layout. The toggle state is shared from the global top-nav button into `Live.svelte` (pass `showLogs` + an `onToggleLogs` callback down, or a tiny shared store). On non-Live views the panel isn't rendered (the button is primarily a Live affordance — the sidecar logs are about live detection).
 
-**Files:** `frontend/src/App.svelte` (toggle state + plumbing), `frontend/src/lib/components/TopNav.svelte` (toggle + active state for the Logs button), `frontend/src/routes/Live.svelte` (render the drawer inside the video container), `frontend/src/lib/components/LogsDrawer.svelte` (full-region height + translucency).
+**Files:** `frontend/src/App.svelte` (toggle state + plumbing), `frontend/src/lib/components/TopNav.svelte` (toggle + active state for the Logs button), `frontend/src/routes/Live.svelte` (wrap video + panel in a flex row, render the panel), `frontend/src/lib/components/LogsDrawer.svelte` (convert from absolute drawer to a docked flex panel — full-height of the video row, left-edge resize retained).
 
 ---
 
@@ -87,7 +87,7 @@ The 3-axis pose indicator drawn by `_draw_pose` does not visually correspond to 
 
 - **Panel placement (unit):** the pure `placeMetaStack` helper — side selection by room, flip on edge, flip on other-face overlap, viewport clamp on all four edges, vertical centering. Frontend unit test (or a small extracted TS module the test imports).
 - **Toolbar:** visual — chips stay on one row at the 1440-wide default; build passes.
-- **Logs drawer:** the Logs button toggles open/closed; drawer reaches the toolbar; translucency renders. Visual.
+- **Logs panel:** the Logs button toggles the panel open/closed; opening it shrinks the video (video reflows narrower) while the toolbar stays full-width and one-row; left-edge resize reflows the video. Visual.
 - **Gaze / pose:** live on-camera verification against the acceptance criteria above; existing `overlay_render` tests stay green.
 - All existing fast tests stay green; `npm run build` succeeds.
 
