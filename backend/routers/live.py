@@ -5,9 +5,15 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, Optional
+
+# Per-frame transport timing in the log (detect/draw/enc breakdown). Opt-in
+# via PYFEAT_LIVE_PROFILE=1 — it logs one INFO line per frame, far too noisy
+# for normal runs. Read once at import; set the env before starting the sidecar.
+_LIVE_PROFILE = os.environ.get("PYFEAT_LIVE_PROFILE") == "1"
 
 import av
 import numpy as np
@@ -67,17 +73,25 @@ async def upload_frame(request: Request) -> Response:
     body = await request.body()
     if not body:
         raise HTTPException(400, "empty body")
-    try:
-        img = Image.open(io.BytesIO(body)).convert("RGB")
-    except Exception as exc:
-        raise HTTPException(400, f"could not decode image: {exc}") from exc
 
     # --- maybe-launch decoupled detection (no await) ---------------
     # Detection takes the just-uploaded frame; when it completes it
     # bakes overlay onto that same frame and caches the JPEG bytes,
     # so display always matches the detected positions exactly.
+    #
+    # Decode the uploaded JPEG ONLY on the frames we actually detect on.
+    # The client polls far faster than detection completes (it loops at
+    # ~100+ fps to fetch the latest baked frame), so most uploads just
+    # return the cached frame below — decoding every body wasted a PIL
+    # Image.open().convert() on the event loop per upload and starved the
+    # detection task. Decoding ~1-in-N frames frees the loop to finish
+    # detections sooner, which is what the displayed fps tracks.
     now = time.perf_counter()
     if not live._detection_in_flight and now >= live._next_detection_at:
+        try:
+            img = Image.open(io.BytesIO(body)).convert("RGB")
+        except Exception as exc:
+            raise HTTPException(400, f"could not decode image: {exc}") from exc
         live._detection_in_flight = True
         loop = asyncio.get_running_loop()
         loop.create_task(_run_detection(live, img))
@@ -289,16 +303,21 @@ def _detect_and_bake(
     ``display_view`` so the live overlay/meta show just the 20 classic AUs
     and 7 display emotions.
     """
+    _t = time.perf_counter
+    _t0 = _t()
     det_img, scale_x, scale_y = _detection_input(img, detection_size)
+    _t_input = (_t() - _t0) * 1000.0; _m = _t()
     if tracker is not None:
         fex = detect_pil_images_v2_tracked(detector, [det_img], tracker)
     else:
         fex = detect_pil_images(detector, [det_img])
+    _t_detect = (_t() - _m) * 1000.0; _m = _t()
     # Scale detector pixel coords back to source space (no-op when equal).
     if fex is not None and len(fex) > 0 and (scale_x != 1.0 or scale_y != 1.0):
         fex = _scale_fex_coords(fex, scale_x, scale_y)
     # Bake overlay onto a copy of the source-resolution frame.
     frame_arr = np.asarray(img).copy()
+    _t_prep = (_t() - _m) * 1000.0; _m = _t()
     if fex is not None and len(fex) > 0:
         draw_overlays(
             frame_arr, display_view(fex), toggles,
@@ -306,11 +325,24 @@ def _detect_and_bake(
             landmark_style=landmark_style, gaze_convention=gaze_convention,
             overlay_style=overlay_style,
         )
+    _t_draw = (_t() - _m) * 1000.0; _m = _t()
     # JPEG q=95 for the live feed: ~19ms/frame faster than PNG and visually
     # indistinguishable for a real-time video stream (the overlay thin lines
     # / dots survive cleanly at this quality). Use PNG only for archival.
     jpeg = encode_jpeg(frame_arr, quality=95)
-    return jpeg, fex, (frame_arr.shape[1], frame_arr.shape[0]), frame_arr
+    _t_encode = (_t() - _m) * 1000.0
+    # Transport breakdown (captured in the log buffer): where the per-frame
+    # time goes OUTSIDE the model. detect is the detect_pil_images* call;
+    # draw=overlay bake, enc=JPEG encode — these + the HTTP round-trip are
+    # what caps displayed fps once detection is cheap (tracked frames).
+    h, w = frame_arr.shape[0], frame_arr.shape[1]
+    if _LIVE_PROFILE:
+        logging.getLogger(__name__).info(
+            "bake %dx%d input=%.1f detect=%.1f prep=%.1f draw=%.1f enc=%.1f total=%.1fms",
+            w, h, _t_input, _t_detect, _t_prep, _t_draw, _t_encode,
+            (_t() - _t0) * 1000.0,
+        )
+    return jpeg, fex, (w, h), frame_arr
 
 
 def _detection_input(

@@ -14,6 +14,7 @@ notebooks, or CLI scripts.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from typing import TYPE_CHECKING
 
@@ -408,16 +409,18 @@ def detect_pil_images_v2_tracked(
         tracker.note_detect(meshes, frame_w, frame_h)
     else:
         tracker.note_track(meshes, frame_w, frame_h)
-    # Per-frame diagnostic (visible in the log drawer): which path ran, the
-    # detector-call ms, and the scene-motion value vs its threshold so a
-    # too-sensitive gate (always re-detecting) is obvious. mode=DETECT means
-    # RetinaFace ran; mode=TRACK means it was skipped.
-    logger.info(
-        "live-track mode=%s reason=%s motion=%.1f/%.1f fsd=%d n=%d call=%.0fms total=%.0fms",
-        "DETECT" if do_detect else "TRACK", tracker.last_reason or "-",
-        tracker.last_motion, SCENE_MOTION_THRESH, tracker._frames_since_detect,
-        len(meshes), _t_call, (_time.perf_counter() - _t0) * 1000.0,
-    )
+    # Per-frame diagnostic (opt-in via PYFEAT_LIVE_PROFILE=1; one INFO line
+    # per frame, too noisy otherwise): which path ran, the detector-call ms,
+    # and the scene-motion value vs its threshold so a too-sensitive gate
+    # (always re-detecting) is obvious. mode=DETECT = RetinaFace ran;
+    # mode=TRACK = it was skipped.
+    if os.environ.get("PYFEAT_LIVE_PROFILE") == "1":
+        logger.info(
+            "live-track mode=%s reason=%s motion=%.1f/%.1f fsd=%d n=%d call=%.0fms total=%.0fms",
+            "DETECT" if do_detect else "TRACK", tracker.last_reason or "-",
+            tracker.last_motion, SCENE_MOTION_THRESH, tracker._frames_since_detect,
+            len(meshes), _t_call, (_time.perf_counter() - _t0) * 1000.0,
+        )
     return fex
 
 
