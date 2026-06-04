@@ -548,11 +548,14 @@ def _draw_pose(
     cr, sr = np.cos(r), np.sin(r)
     cy_, sy_ = np.cos(yw), np.sin(yw)
     # Rotated X/Y/Z unit axes (columns of R); only the in-plane (x, y) parts.
-    x1 = cx + size * (cy_ * cr)
+    # Axes are baked then displayed selfie-mirrored (scaleX(-1)); negate the
+    # x-offset so the on-screen axis rotation matches the reported Yaw/Roll
+    # signs. (Confirmed on-camera.)
+    x1 = cx - size * (cy_ * cr)
     y1 = cy - size * (sy_ * cr)
-    x2 = cx + size * (cy_ * sr * sp - sy_ * cp)
+    x2 = cx - size * (cy_ * sr * sp - sy_ * cp)
     y2 = cy - size * (sy_ * sr * sp + cy_ * cp)
-    x3 = cx + size * (cy_ * sr * cp + sy_ * sp)
+    x3 = cx - size * (cy_ * sr * cp + sy_ * sp)
     y3 = cy - size * (sy_ * sr * cp - cy_ * sp)
 
     drw.line([cx, cy, x1, y1], fill=(255, 60, 60, 255), width=3 * scale)
@@ -604,13 +607,15 @@ def _draw_gaze(
     gp_rad = float(gp)
     gy_rad = float(gy)
     if gaze_convention == "multitask":
-        # Detectorv2's multitask gaze head. The v2.4 model (py-feat
-        # v0.7-dev HEAD) emits gaze with BOTH axes inverted relative to
-        # the older v2.3 head we first tuned against — empirically, a
-        # subject looking up/right produced an arrow pointing down/left.
-        # Negate both components to match what the camera shows.
-        dir_x = -float(np.sin(gy_rad) * np.cos(gp_rad))
-        dir_y = float(np.sin(gp_rad))
+        # Detectorv2's multitask gaze head. The arrow is baked in source-frame
+        # then the canvas is displayed selfie-mirrored (scaleX(-1)), so the
+        # horizontal the user sees is the negation of dir_x. Empirically the
+        # arrow read reversed left/right; use +sin(yaw) so "look to your right"
+        # points to your right in the mirrored view. Pitch: look up → image-Y
+        # up (negative). (These signs are confirmed on-camera; adjust if a
+        # later model revision flips them.)
+        dir_x = float(np.sin(gy_rad) * np.cos(gp_rad))
+        dir_y = -float(np.sin(gp_rad))
     else:
         # L2CS (classic Detector / MPDetector) — yaw sign hand-tuned.
         dir_x = -float(np.sin(gy_rad))
