@@ -18,6 +18,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from pyfeatlive_core.live_tracker import LiveTracker
+
 
 @dataclass
 class LiveSession:
@@ -34,6 +36,11 @@ class LiveSession:
     # Temporal bbox stabilization (EMA) to reduce overlay jitter on a still
     # face. On by default; toggled from the overlay-settings modal.
     smooth: bool = True
+    # Fast tracking: skip RetinaFace on most frames by tracking each face's
+    # ROI from its previous mesh (Detectorv2 only). On by default; toggled
+    # from the overlay-settings modal. See pyfeatlive_core/live_tracker.py.
+    track: bool = True
+    tracker: LiveTracker = field(default_factory=LiveTracker)
     mp_landmarks: bool = True
     # The active detector kind string (e.g. "MPDetector"). Set by
     # /configure and read by /recording/start so the recorder can
@@ -125,3 +132,4 @@ class LiveSession:
         # check sees the next baked frame as "new" even if the count
         # of detections-so-far happens to land on the same value.
         self._detection_generation += 1
+        self.tracker.reset()

@@ -16,7 +16,9 @@ from PIL import Image
 from pydantic import BaseModel
 
 from pyfeatlive_core.capabilities import capabilities_for
-from pyfeatlive_core.detect import detect_pil_images, display_view
+from pyfeatlive_core.detect import (
+    detect_pil_images, detect_pil_images_v2_tracked, display_view,
+)
 from pyfeatlive_core.detector import DetectorConfig, DetectorType, build_detector
 from pyfeatlive_core.jpeg import encode_jpeg
 from pyfeatlive_core.overlay_render import draw_overlays
@@ -208,6 +210,11 @@ async def _run_detection(live, img: Image.Image) -> None:
             # detect_faces (no-op on other detectors). Set per detection so a
             # mid-stream toggle takes effect without a detector rebuild.
             setattr(detector, "bbox_smoothing_alpha", 0.35 if live.smooth else 0.0)
+            from feat import Detectorv2
+            use_tracker = (
+                live.track and isinstance(detector, Detectorv2)
+            )
+            tracker = live.tracker if use_tracker else None
             detection_size = live.detection_size
             toggles = live.toggles or {}
             mp_landmarks = live.mp_landmarks
@@ -221,7 +228,7 @@ async def _run_detection(live, img: Image.Image) -> None:
                 _detect_and_bake,
                 detector, img, detection_size,
                 toggles, mp_landmarks, landmark_style, overlay_kind,
-                gaze_convention, overlay_style,
+                gaze_convention, overlay_style, tracker,
             )
             dur = time.perf_counter() - t0
         print(f"detect+bake: {dims[0]}x{dims[1]} dur={dur*1000:.0f}ms")
@@ -268,6 +275,7 @@ def _detect_and_bake(
     overlay_kind: str = "dlib68_polygons",
     gaze_convention: str = "l2cs",
     overlay_style: Optional[dict] = None,
+    tracker=None,
 ):
     """Full per-frame pipeline, run in the detection worker thread:
     detect → scale coords to source space → bake overlay → PNG-encode.
@@ -282,7 +290,10 @@ def _detect_and_bake(
     and 7 display emotions.
     """
     det_img, scale_x, scale_y = _detection_input(img, detection_size)
-    fex = detect_pil_images(detector, [det_img])
+    if tracker is not None:
+        fex = detect_pil_images_v2_tracked(detector, [det_img], tracker)
+    else:
+        fex = detect_pil_images(detector, [det_img])
     # Scale detector pixel coords back to source space (no-op when equal).
     if fex is not None and len(fex) > 0 and (scale_x != 1.0 or scale_y != 1.0):
         fex = _scale_fex_coords(fex, scale_x, scale_y)
@@ -376,6 +387,7 @@ class ConfigureRequest(BaseModel):
     landmark_style: Optional[str] = None
     style: Optional[dict] = None
     smooth: Optional[bool] = None
+    track: Optional[bool] = None
     detection_res: Optional[dict[str, int]] = None  # {w, h}
 
 
@@ -422,6 +434,8 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
             live.style = req.style
         if req.smooth is not None:
             live.smooth = req.smooth
+        if req.track is not None:
+            live.track = req.track
         if req.detection_res is not None:
             live.detection_size = (
                 int(req.detection_res["w"]), int(req.detection_res["h"]),
@@ -436,6 +450,7 @@ class HintsRequest(BaseModel):
     landmark_style: Optional[str] = None
     style: Optional[dict] = None
     smooth: Optional[bool] = None
+    track: Optional[bool] = None
     detection_res: Optional[dict[str, int]] = None
 
 
@@ -457,6 +472,8 @@ async def hints(req: HintsRequest, request: Request) -> dict:
         live.style = req.style
     if req.smooth is not None:
         live.smooth = req.smooth
+    if req.track is not None:
+        live.track = req.track
     if req.detection_res is not None:
         live.detection_size = (
             int(req.detection_res["w"]), int(req.detection_res["h"]),
