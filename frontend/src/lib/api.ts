@@ -129,7 +129,8 @@ export interface LiveHints {
 export interface LiveFace {
   // Source-frame (non-mirrored) face bounding box: [x, y, w, h]
   bbox: [number, number, number, number];
-  // Top-3 [emotion_name, prob]
+  // All emotions present, each as [emotion_name, prob]. The frontend
+  // reorders into a fixed canonical order (EmotionBars.svelte).
   emo?: [string, number][];
   // Pose in degrees
   pose?: { p: number; y: number; r: number };

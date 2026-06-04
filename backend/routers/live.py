@@ -157,14 +157,17 @@ def _live_meta_header(fex, frame_dims=None) -> Optional[str]:
             ]
         except (KeyError, TypeError, ValueError):
             continue  # no bbox → can't position overlays for this face
-        # Top-5 emotions
+        # All emotions present (frontend reorders into a fixed canonical
+        # order and renders one bar each — see EmotionBars.svelte).
         present = [c for c in emo_cols
                    if c in row.index and not pd.isna(row[c])]
         if present:
-            face["emo"] = sorted(
-                ((c, round(float(row[c]), 3)) for c in present),
-                key=lambda t: -t[1],
-            )[:5]
+            try:
+                face["emo"] = [
+                    (c, round(float(row[c]), 3)) for c in present
+                ]
+            except (TypeError, ValueError):
+                pass
         # Valence/Arousal (Detectorv2 only) — continuous, each in [-1, 1].
         if "valence" in row.index and "arousal" in row.index:
             try:
