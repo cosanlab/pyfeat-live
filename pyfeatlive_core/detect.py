@@ -48,7 +48,7 @@ from feat.utils.image_operations import convert_image_to_tensor
 
 from pyfeatlive_core.capabilities import DETECTORV2_EMOTION_RENAME
 from pyfeatlive_core.live_tracker import (
-    LiveTracker, downscale_gray, SCENE_MOTION_THRESH,
+    LiveTracker, downscale_gray, roi_from_mesh, SCENE_MOTION_THRESH,
 )
 
 if TYPE_CHECKING:
@@ -438,6 +438,26 @@ def detect_pil_images_v2_tracked(
                 batch_data["Image"], face_detection_threshold=0.5,
             )
             df = detector.forward(faces_data, batch_data)
+            # Second pass: re-crop each detected face from its mesh-derived ROI
+            # (the same derivation track frames use) and re-run forward, so the
+            # detect-frame mesh comes out at the SAME scale as the surrounding
+            # track frames. Without this, the RetinaFace-crop vs mesh-ROI-crop
+            # scale difference makes the whole mesh (and the mesh-anchored box)
+            # pulse slightly every MAX_TRACK_INTERVAL frames — a ~1Hz flicker.
+            # Only when every detected face has a valid mesh, so the re-crop
+            # boxes line up 1:1 with the forward rows.
+            meshes0 = _meshes_from_fex(df)
+            if meshes0 and all(m.shape[0] for m in meshes0):
+                rois = [roi_from_mesh(m, frame_w, frame_h) for m in meshes0]
+                try:
+                    boxes = torch.tensor(rois, dtype=torch.float32)
+                    faces_data2 = detector.crop_faces_from_boxes(
+                        batch_data["Image"], boxes,
+                    )
+                    df = detector.forward(faces_data2, batch_data)
+                    faces_data = faces_data2
+                except (ValueError, RuntimeError) as exc:
+                    logger.warning("detect re-crop pass failed (%s); using raw detect", exc)
             _t_call = (_time.perf_counter() - _tc) * 1000.0
     finally:
         _GPU_LOCK.release()
