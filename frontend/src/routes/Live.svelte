@@ -524,8 +524,7 @@
          the video — not the full-width toolbar below. -->
     <div class="flex-1 flex min-h-0">
     <div
-      class="relative bg-black flex items-start justify-start overflow-hidden flex-1 min-w-0"
-      style="resize: vertical; height: 45vh; min-height: 200px;"
+      class="relative bg-black flex items-start justify-start overflow-hidden flex-1 min-w-0 min-h-0"
     >
       <div
         class="relative bg-black h-full"
@@ -584,11 +583,11 @@
             {@const vaOn = !!(toggles.valenceArousal && face.valence_arousal)}
             {@const poseOn = !!(toggles.poses && face.pose)}
             {@const anyOn = emoOn || vaOn || poseOn}
-            {@const emoH = emoOn ? (face.emo!.length * overlayStyle.emotions.fontSize * 1.4 + 16) : 0}
-            {@const vaH = vaOn ? 92 : 0}
-            {@const poseH = poseOn ? 64 : 0}
+            {@const emoH = emoOn ? (face.emo!.length * overlayStyle.emotions.fontSize * 1.35 + 10) : 0}
+            {@const vaH = vaOn ? 76 : 0}
+            {@const poseH = poseOn ? 54 : 0}
             {@const nOn = (emoOn ? 1 : 0) + (vaOn ? 1 : 0) + (poseOn ? 1 : 0)}
-            {@const stackW = 160}
+            {@const stackW = 136}
             {@const stackH = emoH + vaH + poseH + (nOn > 1 ? (nOn - 1) * 6 : 0)}
             {@const faceRect = { x: face.bbox[0], y: face.bbox[1], w: face.bbox[2], h: face.bbox[3] }}
             {@const others = liveMeta.faces.filter((_, j) => j !== fi).map((o) => ({ x: o.bbox[0], y: o.bbox[1], w: o.bbox[2], h: o.bbox[3] }))}
@@ -597,12 +596,12 @@
             {@const cssTop = (pos.top / srcH * 100).toFixed(2)}
             {#if anyOn}
               <div
-                class="absolute flex flex-col gap-1.5 pointer-events-none"
+                class="absolute flex flex-col gap-1 pointer-events-none"
                 style="left: {cssLeft}%; top: {cssTop}%; width: {stackW}px;"
               >
                 {#if emoOn}
                   <div
-                    class="px-3 py-2 rounded-md bg-black/70 whitespace-nowrap font-mono leading-snug"
+                    class="px-2.5 py-1.5 rounded-md bg-black/70 whitespace-nowrap font-mono leading-snug"
                     style="color: {overlayStyle.emotions.color}; opacity: {overlayStyle.emotions.opacity}; font-size: {overlayStyle.emotions.fontSize}px;"
                   >
                     {#each face.emo! as [name, val]}
@@ -612,8 +611,8 @@
                 {/if}
                 {#if vaOn}
                   {@const va = face.valence_arousal!}
-                  <div class="px-2 py-1.5 rounded-md bg-black/70 text-zinc-200">
-                    <svg width="56" height="56" viewBox="0 0 56 56" class="block">
+                  <div class="px-2 py-1 rounded-md bg-black/70 text-zinc-200">
+                    <svg width="44" height="44" viewBox="0 0 56 56" class="block">
                       <rect x="2" y="2" width="52" height="52" rx="3" fill="none" stroke="#52525b" stroke-width="1" />
                       <line x1="28" y1="2" x2="28" y2="54" stroke="#3f3f46" stroke-width="1" />
                       <line x1="2" y1="28" x2="54" y2="28" stroke="#3f3f46" stroke-width="1" />
@@ -625,7 +624,7 @@
                   </div>
                 {/if}
                 {#if poseOn}
-                  <div class="px-3 py-2 rounded-md bg-black/70 text-white text-[13px] leading-snug font-mono whitespace-nowrap">
+                  <div class="px-2.5 py-1.5 rounded-md bg-black/70 text-white text-[12px] leading-snug font-mono whitespace-nowrap">
                     <div>Pitch  {face.pose!.p.toFixed(1)}°</div>
                     <div>Yaw    {face.pose!.y.toFixed(1)}°</div>
                     <div>Roll   {face.pose!.r.toFixed(1)}°</div>

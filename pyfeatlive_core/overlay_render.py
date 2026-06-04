@@ -544,19 +544,23 @@ def _draw_pose(
     # offset by π to bring "facing camera" back to 0. MPDetector needs none.
     p, r = float(pitch), float(roll)
     yw = float(yaw) + (0.0 if mp_landmarks else np.pi)
+    # Match py-feat's canonical pose-axis projection (feat/plotting.py
+    # draw_facepose): negate yaw, then project the rotated unit axes. py-feat
+    # computes in image (top-left) space and flips y only for its plotly
+    # renderer; here we draw directly with y = cy − dy so the green Y-axis
+    # points visually up. X→right (red), Y→up (green), Z→out-of-screen (blue).
+    # Drawn in source coords like the mesh, so the display selfie-mirror
+    # applies uniformly and the axes track the head exactly as the mesh does.
+    yw = -yw
     cp, sp = np.cos(p), np.sin(p)
     cr, sr = np.cos(r), np.sin(r)
-    cy_, sy_ = np.cos(yw), np.sin(yw)
-    # Rotated X/Y/Z unit axes (columns of R); only the in-plane (x, y) parts.
-    # Axes are baked then displayed selfie-mirrored (scaleX(-1)); negate the
-    # x-offset so the on-screen axis rotation matches the reported Yaw/Roll
-    # signs. (Confirmed on-camera.)
-    x1 = cx - size * (cy_ * cr)
-    y1 = cy - size * (sy_ * cr)
-    x2 = cx - size * (cy_ * sr * sp - sy_ * cp)
-    y2 = cy - size * (sy_ * sr * sp + cy_ * cp)
-    x3 = cx - size * (cy_ * sr * cp + sy_ * sp)
-    y3 = cy - size * (sy_ * sr * cp - cy_ * sp)
+    cyw, syw = np.cos(yw), np.sin(yw)
+    x1 = cx + size * (cyw * cr)
+    y1 = cy - size * (cp * sr + cr * sp * syw)
+    x2 = cx + size * (-cyw * sr)
+    y2 = cy - size * (cp * cr - sp * syw * sr)
+    x3 = cx + size * (syw)
+    y3 = cy - size * (-cyw * sp)
 
     drw.line([cx, cy, x1, y1], fill=(255, 60, 60, 255), width=3 * scale)
     drw.line([cx, cy, x2, y2], fill=(60, 255, 60, 255), width=3 * scale)
