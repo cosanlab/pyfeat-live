@@ -135,7 +135,7 @@ def draw_overlays(
                             style=landmark_style, n_landmarks=n_landmarks,
                             scale=SCALE, ostyle=ostyle)
         if toggles.get("poses"):
-            _draw_pose(drw, row, font_small, mp_landmarks=mp_landmarks, scale=SCALE, ostyle=ostyle)
+            _draw_pose(drw, row, font_small, mp_landmarks=mp_landmarks, scale=SCALE, ostyle=ostyle, gaze_convention=gaze_convention)
         if toggles.get("gaze"):
             _draw_gaze(drw, row, mp_landmarks=mp_landmarks, scale=SCALE,
                        gaze_convention=gaze_convention, ostyle=ostyle)
@@ -514,6 +514,7 @@ def _draw_landmarks(
 def _draw_pose(
     drw: ImageDraw.ImageDraw, row: pd.Series, font_small: ImageFont.FreeTypeFont,
     *, mp_landmarks: bool = True, scale: int = 1, ostyle=None,
+    gaze_convention: str = "l2cs",
 ) -> None:
     """Three-axis pose indicator (RGB for pitch/roll/yaw) + numeric readout."""
     x = float(row["FaceRectX"])
@@ -542,19 +543,27 @@ def _draw_pose(
     # points down, so the y-component is negated.
     # Classic Detector (img2pose) reports a forward-facing head as yaw ≈ ±π;
     # offset by π to bring "facing camera" back to 0. MPDetector needs none.
-    # py-feat's draw_facepose projection (feat/plotting.py), adapted for
-    # Detectorv2 + our mirrored display. py-feat computes in image (top-left)
-    # space and flips y only for plotly; we draw directly with y = cy − dy so
-    # the green Y-axis points visually up. X→right (red), Y→up (green),
-    # Z→out-of-screen (blue). Detectorv2's multitask Euler angles report pitch
-    # and roll with the OPPOSITE sign to img2pose (which py-feat's formula was
-    # written for), so negate both here (verified on-camera: nodding/tilting
-    # the head now rotates the axes the matching way). Yaw keeps py-feat's
-    # negation; the axes are drawn in source coords like the mesh, so the
-    # display selfie-mirror applies to both uniformly.
-    p = -float(pitch)
-    r = -float(roll)
-    yw = -(float(yaw) + (0.0 if mp_landmarks else np.pi))
+    # py-feat's draw_facepose projection (feat/plotting.py). py-feat computes in
+    # image (top-left) space and flips y only for plotly; we draw directly with
+    # y = cy − dy so the green Y-axis points visually up. X→right (red),
+    # Y→up (green), Z→out-of-screen (blue). Drawn in source coords like the
+    # mesh, so the display selfie-mirror applies to both uniformly.
+    if gaze_convention == "multitask":
+        # Detectorv2's multitask pose head reports yaw and pitch SWAPPED
+        # relative to the convention py-feat's projection assumes (the model
+        # emits [yaw, pitch, roll] but they're physically transposed): a
+        # lateral head-turn drives the "Pitch" value and a nod drives the
+        # "Yaw" value. Feed Fex Yaw as the projection's pitch and Fex Pitch as
+        # its yaw so the axes track the head (verified on-camera).
+        p = float(yaw)
+        r = float(roll)
+        yw = -float(pitch)
+    else:
+        # Classic Detector (img2pose) / MPDetector: py-feat's native
+        # convention. img2pose reports a forward face as yaw ≈ ±π — offset it.
+        p = float(pitch)
+        r = float(roll)
+        yw = -(float(yaw) + (0.0 if mp_landmarks else np.pi))
     cp, sp = np.cos(p), np.sin(p)
     cr, sr = np.cos(r), np.sin(r)
     cyw, syw = np.cos(yw), np.sin(yw)
