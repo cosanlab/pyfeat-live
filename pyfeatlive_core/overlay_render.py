@@ -97,14 +97,19 @@ def draw_overlays(
         mp_landmarks = overlay_kind == "mesh478_muscle"
     if fex is None or len(fex) == 0:
         return
-    # 2x super-sample for antialiasing. PIL's ImageDraw.line() / .ellipse()
-    # don't antialias natively, so diagonal mesh edges and tiny landmark
-    # dots look stair-stepped at source resolution. Drawing at 2x then
-    # downsampling with LANCZOS gives clean antialiased edges for free.
-    # Costs ~5-15 ms per detection at 1280x720 — fine, we have headroom.
-    SCALE = 2
     img = Image.fromarray(frame, "RGB")
     W, H = img.size
+    # Adaptive super-sample for antialiasing. PIL's ImageDraw.line()/.ellipse()
+    # don't antialias natively, so diagonal mesh edges and tiny landmark dots
+    # look stair-stepped when drawn at a LOW source resolution — drawing at 2x
+    # then downsampling smooths them for free. But the super-sample canvas is
+    # (W*SCALE)x(H*SCALE), so its draw + alpha-composite + downsample cost is
+    # quadratic in SCALE: at a 1280x720 bake the 2x canvas is 2560x1440 and the
+    # bake balloons to ~17 ms, the dominant non-model cost. At >=960px wide the
+    # frame is already high-res enough that lines read crisp WITHOUT the 2x, so
+    # drop to SCALE=1 there — recovering ~12 ms/frame — and keep 2x only for
+    # small bakes where the antialiasing actually matters.
+    SCALE = 1 if W >= 960 else 2
     transparent = Image.new("RGBA", (W * SCALE, H * SCALE), (0, 0, 0, 0))
     drw = ImageDraw.Draw(transparent, "RGBA")
 
@@ -142,11 +147,12 @@ def draw_overlays(
         if toggles.get("emotions"):
             _draw_emotions(drw, row, font_label, scale=SCALE)
 
-    # Downsample the 2x super-sampled canvas back to source resolution.
-    # BOX is the exact 2:1 box filter (each output pixel = mean of its 2x2
-    # source block) — mathematically correct for integer halving and
-    # ~2.5x faster than LANCZOS with no visible difference at this ratio.
-    overlay = transparent.resize((W, H), Image.BOX)
+    # Downsample the super-sampled canvas back to source resolution. BOX is the
+    # exact 2:1 box filter (each output pixel = mean of its 2x2 source block) —
+    # mathematically correct for integer halving and ~2.5x faster than LANCZOS
+    # with no visible difference at this ratio. When SCALE==1 the canvas is
+    # already at source resolution, so skip the resize entirely.
+    overlay = transparent if SCALE == 1 else transparent.resize((W, H), Image.BOX)
 
     # Alpha-composite onto original and copy pixels back.
     out = Image.alpha_composite(img.convert("RGBA"), overlay)
