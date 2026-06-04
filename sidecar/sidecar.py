@@ -106,6 +106,12 @@ def main() -> None:
         host=args.address,
         port=args.port,
         log_level="info",
+        # Per-request access logs off: the Live page POSTs /api/live/frame at
+        # ~100+ req/s, so access logging added a logging record per upload —
+        # event-loop overhead that competed with detection, and it flooded the
+        # in-app log buffer (drowning the useful lines). App-level logs still
+        # flow; only uvicorn's per-request access line is suppressed.
+        access_log=False,
         # Reload off in prod — the bundle is read-only and reload's
         # watcher fights the watch_parent thread.
         reload=False,
