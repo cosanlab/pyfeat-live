@@ -554,9 +554,10 @@ def _draw_pose(
         # emits [yaw, pitch, roll] but they're physically transposed): a
         # lateral head-turn drives the "Pitch" value and a nod drives the
         # "Yaw" value. Feed Fex Yaw as the projection's pitch and Fex Pitch as
-        # its yaw so the axes track the head (verified on-camera).
+        # its yaw so the axes track the head. Roll is also reported with the
+        # opposite sign, so negate it. (All verified on-camera.)
         p = float(yaw)
-        r = float(roll)
+        r = -float(roll)
         yw = -float(pitch)
     else:
         # Classic Detector (img2pose) / MPDetector: py-feat's native
