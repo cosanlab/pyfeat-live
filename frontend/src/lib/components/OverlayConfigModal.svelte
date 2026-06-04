@@ -16,11 +16,14 @@
     // Live-only: temporal bbox stabilization toggle. Omitted by the Viewer.
     smooth?: boolean;
     onSmoothChange?: (v: boolean) => void;
+    // Live-only: fast detect/track toggle (Detectorv2). Omitted by the Viewer.
+    track?: boolean;
+    onTrackChange?: (v: boolean) => void;
   };
   let {
     style, toggles, hasValenceArousal = false,
     onStyleChange, onToggle, onReset, onClose,
-    smooth, onSmoothChange,
+    smooth, onSmoothChange, track, onTrackChange,
   }: Props = $props();
 
   // Patch one section of the style object and emit the new whole.
@@ -86,6 +89,19 @@
         />
         <span class="text-[12px] font-medium text-zinc-100">Stabilize overlays</span>
         <span class="text-[10px] text-zinc-500">— smooth the face box to reduce jitter</span>
+      </label>
+    {/if}
+
+    {#if onTrackChange}
+      <label class="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/70 cursor-pointer">
+        <input
+          type="checkbox"
+          class="accent-green-500 w-3.5 h-3.5"
+          checked={track}
+          onchange={(e) => onTrackChange?.((e.target as HTMLInputElement).checked)}
+        />
+        <span class="text-[12px] font-medium text-zinc-100">Fast tracking</span>
+        <span class="text-[10px] text-zinc-500">— skip face detection between frames (Detectorv2)</span>
       </label>
     {/if}
 

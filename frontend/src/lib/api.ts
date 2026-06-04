@@ -100,6 +100,7 @@ export interface LiveConfigure {
   detection_res?: { w: number; h: number };
   style?: OverlayStyleConfig;
   smooth?: boolean;
+  track?: boolean;
 }
 
 // Mid-stream hint updates that don't require a detector rebuild.
@@ -109,6 +110,7 @@ export interface LiveHints {
   detection_res?: { w: number; h: number };
   style?: OverlayStyleConfig;
   smooth?: boolean;
+  track?: boolean;
 }
 
 // Compact metadata for HTML overlays (emotion + pose panels) rendered

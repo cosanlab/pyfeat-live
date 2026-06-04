@@ -71,6 +71,12 @@
     smooth = v;
     if (isStreaming) pushOverlayHints();
   }
+  // Fast detect/track (Detectorv2 only). On by default.
+  let track = $state(true);
+  function onTrackChange(v: boolean) {
+    track = v;
+    if (isStreaming) pushOverlayHints();
+  }
 
   let toggles: OverlayToggles = $state({
     rects: true, landmarks: true, poses: false,
@@ -194,6 +200,7 @@
         detection_res: { w: WIDTH, h: HEIGHT },
         style: overlayStyle,
         smooth,
+        track,
       });
       apiError = null;
     } catch (e: any) {
@@ -214,6 +221,7 @@
         detection_res: { w: WIDTH, h: HEIGHT },
         style: overlayStyle,
         smooth,
+        track,
       });
     } catch (e: any) {
       apiError = `Overlay hints failed: ${e?.message ?? e}`;
@@ -634,6 +642,8 @@
     {toggles}
     {smooth}
     {onSmoothChange}
+    {track}
+    {onTrackChange}
     hasValenceArousal={config.detector_type === 'Detectorv2'}
     {onStyleChange}
     onToggle={(key) => onToggleChange(key, !toggles[key])}
