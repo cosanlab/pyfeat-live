@@ -572,11 +572,19 @@
              a right anchor. -->
         {#if isStreaming && liveMeta}
           {#each liveMeta.faces as face}
-            {#if toggles.emotions && face.emo && face.emo.length > 0}
-              <!-- Place the panel fully ABOVE the face when there's room,
-                   else BELOW it — never overlapping the facebox. -->
-              {@const emoH = face.emo.length * overlayStyle.emotions.fontSize * 1.4 + 22}
-              {@const emoTop = face.bbox[1] - emoH >= 4 ? face.bbox[1] - emoH : face.bbox[1] + face.bbox[3] + 6}
+            <!-- Stack emotion + V/A so they NEVER overlap: emotion goes fully
+                 ABOVE the face when there's room, else BELOW it; V/A goes below
+                 the face, or below the emotion panel when emotion was forced
+                 below (so the two never share the same slot). -->
+            {@const emoLen = face.emo?.length ?? 0}
+            {@const emoShown = toggles.emotions && emoLen > 0}
+            {@const emoH = emoLen * overlayStyle.emotions.fontSize * 1.4 + 22}
+            {@const emoAbove = face.bbox[1] - emoH >= 4}
+            {@const emoTop = emoAbove ? face.bbox[1] - emoH : face.bbox[1] + face.bbox[3] + 6}
+            {@const vaTop = emoShown && !emoAbove
+              ? emoTop + emoH + 6
+              : face.bbox[1] + face.bbox[3] + 6}
+            {#if emoShown}
               <div
                 class="absolute px-3.5 py-2 rounded-md bg-black/70 pointer-events-none whitespace-nowrap font-mono leading-snug"
                 style="right: {((face.bbox[0]) / srcW * 100).toFixed(2)}%; top: {(emoTop / srcH * 100).toFixed(2)}%; color: {overlayStyle.emotions.color}; opacity: {overlayStyle.emotions.opacity}; font-size: {overlayStyle.emotions.fontSize}px;"
@@ -587,14 +595,13 @@
               </div>
             {/if}
             {#if toggles.valenceArousal && face.valence_arousal}
-              <!-- Valence/Arousal two-axis indicator. Anchored top-right of
-                   the face bbox, below the emotions panel. The plot itself is
-                   not mirrored (it's a sibling of the canvas), so no flip
-                   compensation is needed beyond the right-anchor positioning. -->
+              <!-- Valence/Arousal two-axis indicator. Anchored top-right of the
+                   face bbox at vaTop (below the emotion panel when present), so
+                   it never overlaps the emotions box. -->
               {@const va = face.valence_arousal}
               <div
                 class="absolute px-2 py-1.5 rounded-md bg-black/70 text-zinc-200 pointer-events-none"
-                style="right: {((face.bbox[0]) / srcW * 100).toFixed(2)}%; top: {Math.min(96, (face.bbox[1] + face.bbox[3] + 6) / srcH * 100).toFixed(2)}%;"
+                style="right: {((face.bbox[0]) / srcW * 100).toFixed(2)}%; top: {Math.min(96, vaTop / srcH * 100).toFixed(2)}%;"
               >
                 <svg width="56" height="56" viewBox="0 0 56 56" class="block">
                   <rect x="2" y="2" width="52" height="52" rx="3"
