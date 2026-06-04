@@ -376,37 +376,46 @@ def _stabilize_facebox_from_meshes(fex, meshes: list, frame_w, frame_h) -> None:
     fex.loc[:, "FaceRectHeight"] = hs
 
 
-def _write_meshes_to_fex(fex, meshes: list, detector):
-    """Return a Fex with smoothed [478,2] meshes written into its mesh_x_/
-    mesh_y_ columns (row order == ``meshes`` order); faces without a full
-    478-point mesh keep their original mesh.
+# Per-face feature columns the live display stabilizer EMAs (gated on the
+# "Stabilize overlays" strength). Smoothing these damps jitter in every
+# overlay that reads them: the 478 mesh + box, the pose axes, the gaze arrow,
+# the AU heatmap, and the emotion / valence-arousal HTML panels (which read
+# the same fex via the meta header). Excludes identity embeddings, FaceScore,
+# frame metadata, and FaceRect (recomputed from the smoothed mesh).
+_POSE_COLS = ("Pitch", "Roll", "Yaw", "X", "Y", "Z")
+_GAZE_COLS = ("gaze_pitch", "gaze_yaw", "gaze_angle")
+_VA_COLS = ("valence", "arousal")
+_EMOTION_COLS = ("anger", "disgust", "fear", "happiness", "sadness",
+                 "surprise", "neutral", "contempt")
 
-    Replaces the mesh block via a split-and-concat (drop the ~956 mesh
-    columns, rebuild them from one numpy block, concat back) — ~0.7ms vs the
-    ~10ms a pandas ``fex.loc[:, cols] = ...`` wide assignment costs every
-    frame. Re-wraps as a Fex (concat would otherwise drop the subclass), the
-    same pattern _finalize_fex uses. Returns the original fex unchanged when
-    no face has a writable mesh."""
-    n = len(fex)
-    if n == 0:
+
+def _smoothable_columns(fex) -> list:
+    """The per-face feature columns to EMA for display stabilization: the 478
+    mesh (x/y), 6D pose, gaze, AUs, emotions, and valence/arousal."""
+    out = []
+    for c in fex.columns:
+        if (c.startswith("mesh_x_") or c.startswith("mesh_y_")
+                or c.startswith("AU")
+                or c in _POSE_COLS or c in _GAZE_COLS
+                or c in _VA_COLS or c in _EMOTION_COLS):
+            out.append(c)
+    return out
+
+
+def _write_columns_to_fex(fex, cols: list, values: np.ndarray, detector):
+    """Return a Fex with ``values`` (``[n_rows, len(cols)]``) written into
+    ``cols`` via split-and-concat — drop those columns, rebuild them from one
+    numpy block, concat back — ~1ms vs the ~10ms a wide pandas
+    ``fex.loc[:, cols] = ...`` assignment costs every frame. Re-wraps as a Fex
+    (concat would otherwise drop the subclass). Consumers read by name, so the
+    column reordering the concat introduces is irrelevant."""
+    if not cols or len(fex) == 0:
         return fex
-    xs = [f"mesh_x_{i}" for i in range(478)]
-    ys = [f"mesh_y_{i}" for i in range(478)]
-    mx = fex.reindex(columns=xs).to_numpy(dtype=np.float32).copy()
-    my = fex.reindex(columns=ys).to_numpy(dtype=np.float32).copy()
-    changed = False
-    for i, m in enumerate(meshes):
-        if i < n and m.shape[0] == 478:
-            mx[i] = m[:, 0]
-            my[i] = m[:, 1]
-            changed = True
-    if not changed:
-        return fex
-    rest = fex.drop(columns=xs + ys)
-    mesh_df = pd.DataFrame(
-        np.concatenate([mx, my], axis=1), columns=xs + ys, index=fex.index,
+    rest = fex.drop(columns=cols)
+    block = pd.DataFrame(
+        np.asarray(values, dtype=np.float32), columns=cols, index=fex.index,
     )
-    return Fex(pd.concat([rest, mesh_df], axis=1), **_fex_wrap_kwargs(detector))
+    return Fex(pd.concat([rest, block], axis=1), **_fex_wrap_kwargs(detector))
 
 
 def _build_v2_batch(frames: "list[Image.Image]"):
@@ -507,15 +516,20 @@ def detect_pil_images_v2_tracked(
         tracker.note_detect(meshes, frame_w, frame_h)
     else:
         tracker.note_track(meshes, frame_w, frame_h)
-    # Display smoothing, gated on the same "Stabilize overlays" alpha as the
-    # bbox EMA (bbox_smoothing_alpha is set per-frame by the live router).
-    # The tracker decisions above used the RAW mesh; here we EMA only what is
-    # SHOWN — the mesh and the mesh-anchored facebox — to damp residual
-    # per-frame jitter and the small once-per-interval detect-frame blip.
+    # Display smoothing, gated on the "Stabilize overlays" strength (the
+    # router maps the slider to bbox_smoothing_alpha per frame). EMA the full
+    # per-face feature block — mesh, pose, gaze, AUs, emotions, V/A — so EVERY
+    # overlay reading those (baked mesh/box/pose/gaze/AU + the emotion & V/A
+    # HTML panels) is stabilized. The tracker decisions above used the RAW
+    # mesh; only what is SHOWN is smoothed.
     alpha = float(getattr(detector, "bbox_smoothing_alpha", 0.0) or 0.0)
-    if alpha > 0.0:
-        meshes = tracker.smooth_meshes(meshes, alpha)
-        fex = _write_meshes_to_fex(fex, meshes, detector)
+    if alpha > 0.0 and len(fex) > 0:
+        cols = _smoothable_columns(fex)
+        vals = tracker.smooth_columns(
+            fex.reindex(columns=cols).to_numpy(dtype=np.float32), alpha,
+        )
+        fex = _write_columns_to_fex(fex, cols, vals, detector)
+        meshes = _meshes_from_fex(fex)  # re-extract the smoothed mesh
     # Anchor the displayed facebox to the (now-smoothed) mesh on BOTH detect
     # and track frames, so it doesn't pop every re-detect (the raw FaceRect is
     # the crop box, which differs between the RetinaFace and mesh-ROI paths).

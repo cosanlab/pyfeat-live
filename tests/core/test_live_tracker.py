@@ -131,20 +131,23 @@ def test_reset_clears_state():
     assert t.should_detect(g) is True
 
 
-def test_smooth_meshes_emas_toward_previous():
+def test_smooth_columns_emas_toward_previous():
     t = LiveTracker()
-    m0 = _square_mesh(100, 100)
-    out0 = t.smooth_meshes([m0], 0.5)
-    assert np.allclose(out0[0], m0)  # first frame passes through (no prev)
-    m1 = _square_mesh(110, 100)      # jumped +10px in x
-    out1 = t.smooth_meshes([m1], 0.5)
-    assert np.allclose(out1[0], 0.5 * m1 + 0.5 * m0)  # EMA halfway
+    v0 = np.array([[1.0, 2.0, 3.0]], np.float32)
+    assert np.allclose(t.smooth_columns(v0, 0.5), v0)  # first frame passthrough
+    v1 = np.array([[3.0, 2.0, 3.0]], np.float32)
+    assert np.allclose(t.smooth_columns(v1, 0.5), [[2.0, 2.0, 3.0]])  # EMA
 
 
-def test_smooth_meshes_passthrough_empty_and_reset():
+def test_smooth_columns_nan_handling_and_shape_reset():
     t = LiveTracker()
-    t.smooth_meshes([_square_mesh(100, 100)], 0.5)
-    out = t.smooth_meshes([np.empty((0, 2), float)], 0.5)  # empty → passthrough
-    assert out[0].shape[0] == 0
+    t.smooth_columns(np.array([[1.0, 2.0]], np.float32), 0.5)
+    # NaN in the current value passes through; the other slot EMAs normally.
+    out = t.smooth_columns(np.array([[np.nan, 4.0]], np.float32), 0.5)
+    assert np.isnan(out[0, 0])
+    assert out[0, 1] == pytest.approx(3.0)  # 0.5*4 + 0.5*2
+    # A changed face count (shape mismatch) resets the buffer → passthrough.
+    v = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], np.float32)
+    assert np.allclose(t.smooth_columns(v, 0.5), v)
     t.reset()
-    assert t._smooth_meshes == []
+    assert t._smooth_buf is None

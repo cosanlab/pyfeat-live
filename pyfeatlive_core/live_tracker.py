@@ -113,36 +113,39 @@ class LiveTracker:
         self._cur_gray: np.ndarray | None = None
         self._frames_since_detect = 0
         self._force_detect = True  # first frame must detect
-        # Per-face EMA buffer for the DISPLAYED mesh (separate from the raw
-        # meshes that drive tracking decisions). See smooth_meshes().
-        self._smooth_meshes: list[np.ndarray] = []
+        # EMA buffer ([F, K] array) for the DISPLAYED feature columns (mesh +
+        # pose/gaze/AU/emotion/VA), separate from the raw mesh that drives
+        # tracking decisions. See smooth_columns().
+        self._smooth_buf: np.ndarray | None = None
         # Diagnostics (read by the live log line): last frame's scene-motion
         # value and why we decided to detect ("" when we tracked).
         self.last_motion: float = float("nan")
         self.last_reason: str = "init"
 
-    def smooth_meshes(self, meshes: list, alpha: float) -> list:
-        """Exponential-moving-average each face's DISPLAYED mesh against the
-        previous displayed mesh (per-face, matched by list index).
+    def smooth_columns(self, values: np.ndarray, alpha: float) -> np.ndarray:
+        """Exponential-moving-average a per-face feature block (``[F, K]``
+        float array) against the previous frame's block, matched by row index.
 
-        ``alpha`` is the weight on the current frame (lower = smoother, more
-        lag). Used to damp the residual per-frame jitter and the small
-        once-per-``MAX_TRACK_INTERVAL`` mesh blip when a detect frame re-bases
-        its ROI. A new face, a changed point-count, or an empty mesh passes
-        through unsmoothed so re-acquisition introduces no lag. This is a
-        display concern only — the raw meshes still drive the tracker's
-        ROI/decision logic; only the returned (and shown) mesh is smoothed.
+        ``alpha`` weights the current frame (lower = smoother/laggier). NaNs
+        are handled element-wise: a NaN current value passes through, and a
+        previously-NaN slot adopts the current value (so a feature that begins
+        producing values isn't dragged up from NaN). A changed face count
+        (shape mismatch) resets the buffer, so re-acquisition adds no lag.
+
+        Display-only: the raw mesh still drives the tracker's ROI/decision
+        logic; only the returned (shown) values are smoothed.
         """
-        prev = self._smooth_meshes
-        out = []
-        for i, m in enumerate(meshes):
-            m = np.asarray(m, float)
-            if (m.shape[0] == 0 or i >= len(prev)
-                    or prev[i] is None or prev[i].shape != m.shape):
-                out.append(m)
-            else:
-                out.append(alpha * m + (1.0 - alpha) * prev[i])
-        self._smooth_meshes = [a.copy() for a in out]
+        values = np.asarray(values, dtype=np.float32)
+        prev = self._smooth_buf
+        if prev is None or prev.shape != values.shape:
+            self._smooth_buf = values.copy()
+            return values
+        blended = alpha * values + (1.0 - alpha) * prev
+        out = np.where(
+            np.isnan(values), values,
+            np.where(np.isnan(prev), values, blended),
+        ).astype(np.float32)
+        self._smooth_buf = out.copy()
         return out
 
     # -- decision (before running the model) --
