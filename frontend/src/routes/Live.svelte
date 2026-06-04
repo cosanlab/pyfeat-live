@@ -538,7 +538,7 @@
              carry non-mirrored camera frames and Gaze360 convention. -->
         <canvas
           bind:this={displayCanvas}
-          class="absolute inset-0 w-full h-full object-contain"
+          class="absolute inset-0 w-full h-full object-contain object-right"
           style="transform: scaleX(-1);"
         ></canvas>
 

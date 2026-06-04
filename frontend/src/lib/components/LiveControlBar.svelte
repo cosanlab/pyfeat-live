@@ -68,7 +68,7 @@
 
 <div class="flex items-center gap-2 px-4 py-2.5 bg-zinc-950 border-t border-zinc-900">
   <!-- overlay chips -->
-  <div class="flex gap-1.5 flex-wrap">
+  <div class="flex gap-1.5 flex-nowrap">
     {#each visibleChips as chip}
       {@const dim = unavailable(chip)}
       <button

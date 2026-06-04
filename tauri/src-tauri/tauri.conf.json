@@ -10,7 +10,16 @@
     "beforeBuildCommand": "cd ../frontend && pnpm install && pnpm build"
   },
   "app": {
-    "windows": [],
+    "windows": [
+      {
+        "title": "Py-feat Live",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "resizable": true
+      }
+    ],
     "security": {
       "csp": null
     },
