@@ -81,10 +81,10 @@
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-<!-- Overlay docked to the top-right at the camera-feed height (45vh) so it
-     never extends down over the controls. Resizable from the left edge. -->
+<!-- Docked logs panel: sits beside the video inside the Live layout and
+     shrinks the video when open (not an overlay). Resizable from the left edge. -->
 <aside
-  class="absolute top-0 right-0 z-20 h-[45vh] min-h-[200px] flex flex-col bg-zinc-950 border-l border-zinc-900 shadow-xl"
+  class="relative h-full shrink-0 flex flex-col bg-zinc-950 border-l border-zinc-900"
   style="width: {width}px;"
 >
   <!-- left-edge resize handle -->

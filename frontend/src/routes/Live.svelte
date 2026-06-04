@@ -10,7 +10,11 @@
   import LiveSidebar from '../lib/components/LiveSidebar.svelte';
   import LiveControlBar from '../lib/components/LiveControlBar.svelte';
   import OverlayConfigModal from '../lib/components/OverlayConfigModal.svelte';
+  import LogsDrawer from '../lib/components/LogsDrawer.svelte';
   import { placeMetaStack } from '../lib/overlay/metaStack';
+
+  type Props = { showLogs?: boolean; onCloseLogs?: () => void };
+  let { showLogs = false, onCloseLogs = () => {} }: Props = $props();
 
   // Display dimensions — always render at this size regardless of what
   // resolution detection runs at. The backend bakes overlays onto the
@@ -515,9 +519,12 @@
 
     <!-- Video stage. The hidden <video> only holds the MediaStream for
          capture; the visible image is displayCanvas, painted from
-         backend-baked JPEGs so frame + overlay update together. -->
+         backend-baked JPEGs so frame + overlay update together. The logs
+         panel (when open) sits beside the video in this row so it shrinks
+         the video — not the full-width toolbar below. -->
+    <div class="flex-1 flex min-h-0">
     <div
-      class="relative bg-black flex items-start justify-center overflow-hidden shrink-0"
+      class="relative bg-black flex items-start justify-start overflow-hidden flex-1 min-w-0"
       style="resize: vertical; height: 45vh; min-height: 200px;"
     >
       <div
@@ -629,6 +636,10 @@
           {/each}
         {/if}
       </div>
+    </div>
+      {#if showLogs}
+        <LogsDrawer onClose={onCloseLogs} />
+      {/if}
     </div>
 
     <LiveControlBar
