@@ -10,6 +10,7 @@
   import LiveSidebar from '../lib/components/LiveSidebar.svelte';
   import LiveControlBar from '../lib/components/LiveControlBar.svelte';
   import OverlayConfigModal from '../lib/components/OverlayConfigModal.svelte';
+  import { placeMetaStack } from '../lib/overlay/metaStack';
 
   // Display dimensions — always render at this size regardless of what
   // resolution detection runs at. The backend bakes overlays onto the
@@ -571,61 +572,58 @@
              we mirror-compensate horizontally via (100% - x/W)% using
              a right anchor. -->
         {#if isStreaming && liveMeta}
-          {#each liveMeta.faces as face}
-            <!-- Stack emotion + V/A so they NEVER overlap: emotion goes fully
-                 ABOVE the face when there's room, else BELOW it; V/A goes below
-                 the face, or below the emotion panel when emotion was forced
-                 below (so the two never share the same slot). -->
-            {@const emoLen = face.emo?.length ?? 0}
-            {@const emoShown = toggles.emotions && emoLen > 0}
-            {@const emoH = emoLen * overlayStyle.emotions.fontSize * 1.4 + 22}
-            {@const emoAbove = face.bbox[1] - emoH >= 4}
-            {@const emoTop = emoAbove ? face.bbox[1] - emoH : face.bbox[1] + face.bbox[3] + 6}
-            {@const vaTop = emoShown && !emoAbove
-              ? emoTop + emoH + 6
-              : face.bbox[1] + face.bbox[3] + 6}
-            {#if emoShown}
+          {#each liveMeta.faces as face, fi}
+            {@const emoOn = !!(toggles.emotions && face.emo?.length)}
+            {@const vaOn = !!(toggles.valenceArousal && face.valence_arousal)}
+            {@const poseOn = !!(toggles.poses && face.pose)}
+            {@const anyOn = emoOn || vaOn || poseOn}
+            {@const emoH = emoOn ? (face.emo!.length * overlayStyle.emotions.fontSize * 1.4 + 16) : 0}
+            {@const vaH = vaOn ? 92 : 0}
+            {@const poseH = poseOn ? 64 : 0}
+            {@const nOn = (emoOn ? 1 : 0) + (vaOn ? 1 : 0) + (poseOn ? 1 : 0)}
+            {@const stackW = 160}
+            {@const stackH = emoH + vaH + poseH + (nOn > 1 ? (nOn - 1) * 6 : 0)}
+            {@const faceRect = { x: face.bbox[0], y: face.bbox[1], w: face.bbox[2], h: face.bbox[3] }}
+            {@const others = liveMeta.faces.filter((_, j) => j !== fi).map((o) => ({ x: o.bbox[0], y: o.bbox[1], w: o.bbox[2], h: o.bbox[3] }))}
+            {@const pos = placeMetaStack(faceRect, others, stackW, stackH, srcW, srcH)}
+            {@const cssLeft = ((srcW - pos.left - stackW) / srcW * 100).toFixed(2)}
+            {@const cssTop = (pos.top / srcH * 100).toFixed(2)}
+            {#if anyOn}
               <div
-                class="absolute px-3.5 py-2 rounded-md bg-black/70 pointer-events-none whitespace-nowrap font-mono leading-snug"
-                style="right: {((face.bbox[0]) / srcW * 100).toFixed(2)}%; top: {(emoTop / srcH * 100).toFixed(2)}%; color: {overlayStyle.emotions.color}; opacity: {overlayStyle.emotions.opacity}; font-size: {overlayStyle.emotions.fontSize}px;"
+                class="absolute flex flex-col gap-1.5 pointer-events-none"
+                style="left: {cssLeft}%; top: {cssTop}%; width: {stackW}px;"
               >
-                {#each face.emo as [name, val]}
-                  <div>{name.charAt(0).toUpperCase() + name.slice(1)}  {val.toFixed(2)}</div>
-                {/each}
-              </div>
-            {/if}
-            {#if toggles.valenceArousal && face.valence_arousal}
-              <!-- Valence/Arousal two-axis indicator. Anchored top-right of the
-                   face bbox at vaTop (below the emotion panel when present), so
-                   it never overlaps the emotions box. -->
-              {@const va = face.valence_arousal}
-              <div
-                class="absolute px-2 py-1.5 rounded-md bg-black/70 text-zinc-200 pointer-events-none"
-                style="right: {((face.bbox[0]) / srcW * 100).toFixed(2)}%; top: {Math.min(96, vaTop / srcH * 100).toFixed(2)}%;"
-              >
-                <svg width="56" height="56" viewBox="0 0 56 56" class="block">
-                  <rect x="2" y="2" width="52" height="52" rx="3"
-                    fill="none" stroke="#52525b" stroke-width="1" />
-                  <line x1="28" y1="2" x2="28" y2="54" stroke="#3f3f46" stroke-width="1" />
-                  <line x1="2" y1="28" x2="54" y2="28" stroke="#3f3f46" stroke-width="1" />
-                  <circle
-                    cx={28 + va.valence * 26}
-                    cy={28 - va.arousal * 26}
-                    r="3.5" fill="#22c55e" />
-                </svg>
-                <div class="mt-1 text-[10px] font-mono text-zinc-300 leading-none whitespace-nowrap">
-                  V {va.valence.toFixed(2)}&nbsp; A {va.arousal.toFixed(2)}
-                </div>
-              </div>
-            {/if}
-            {#if toggles.poses && face.pose}
-              <div
-                class="absolute px-3.5 py-2 rounded-md bg-black/70 text-white text-[15px] leading-snug font-mono pointer-events-none whitespace-nowrap"
-                style="left: {((face.bbox[0] - 110) / srcW * 100).toFixed(2)}%; top: {((face.bbox[1] + face.bbox[3] - 76) / srcH * 100).toFixed(2)}%;"
-              >
-                <div>Pitch  {face.pose.p.toFixed(1)}°</div>
-                <div>Yaw    {face.pose.y.toFixed(1)}°</div>
-                <div>Roll   {face.pose.r.toFixed(1)}°</div>
+                {#if emoOn}
+                  <div
+                    class="px-3 py-2 rounded-md bg-black/70 whitespace-nowrap font-mono leading-snug"
+                    style="color: {overlayStyle.emotions.color}; opacity: {overlayStyle.emotions.opacity}; font-size: {overlayStyle.emotions.fontSize}px;"
+                  >
+                    {#each face.emo! as [name, val]}
+                      <div>{name.charAt(0).toUpperCase() + name.slice(1)}  {val.toFixed(2)}</div>
+                    {/each}
+                  </div>
+                {/if}
+                {#if vaOn}
+                  {@const va = face.valence_arousal!}
+                  <div class="px-2 py-1.5 rounded-md bg-black/70 text-zinc-200">
+                    <svg width="56" height="56" viewBox="0 0 56 56" class="block">
+                      <rect x="2" y="2" width="52" height="52" rx="3" fill="none" stroke="#52525b" stroke-width="1" />
+                      <line x1="28" y1="2" x2="28" y2="54" stroke="#3f3f46" stroke-width="1" />
+                      <line x1="2" y1="28" x2="54" y2="28" stroke="#3f3f46" stroke-width="1" />
+                      <circle cx={28 + va.valence * 26} cy={28 - va.arousal * 26} r="3.5" fill="#22c55e" />
+                    </svg>
+                    <div class="mt-1 text-[10px] font-mono text-zinc-300 leading-none whitespace-nowrap">
+                      V {va.valence.toFixed(2)}&nbsp; A {va.arousal.toFixed(2)}
+                    </div>
+                  </div>
+                {/if}
+                {#if poseOn}
+                  <div class="px-3 py-2 rounded-md bg-black/70 text-white text-[13px] leading-snug font-mono whitespace-nowrap">
+                    <div>Pitch  {face.pose!.p.toFixed(1)}°</div>
+                    <div>Yaw    {face.pose!.y.toFixed(1)}°</div>
+                    <div>Roll   {face.pose!.r.toFixed(1)}°</div>
+                  </div>
+                {/if}
               </div>
             {/if}
           {/each}
