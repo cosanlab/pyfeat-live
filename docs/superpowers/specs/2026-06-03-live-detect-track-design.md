@@ -19,7 +19,8 @@ RetinaFace is a large fraction of the per-frame GPU budget. MediaPipe avoids it 
 ## Architecture — policy in pyfeatlive, primitive in py-feat
 
 **py-feat (minimal, reusable primitive):**
-- Add `Detectorv2.crop_faces_from_boxes(images, boxes)` — runs *only* the crop step (the existing `extract_face_from_bbox_torch` with `EXPAND_BBOX`/`self.face_size`) on caller-supplied boxes, returning the **same** `faces_data` structure (`faces`/`boxes`/`new_boxes`/`scores`, `scores` = 1.0 placeholders since detection was skipped). This is `detect_faces` **without** RetinaFace. `forward()` is unchanged.
+- Add `Detectorv2.crop_faces_from_boxes(images, boxes)` — runs *only* the crop step on caller-supplied boxes, returning the **same** `faces_data` structure (`faces`/`boxes`/`new_boxes`/`scores`, `scores` = 1.0 placeholders since detection was skipped). This is `detect_faces` **without** RetinaFace; `forward()` is unchanged.
+- It must wrap the **same batched, on-GPU crop** `detect_faces` uses — `extract_face_from_bbox_torch(frames, boxes, face_size=self.face_size, expand_bbox=EXPAND_BBOX, frame_idx=...)` (`image_operations.py:1120`) — so the 256-chip and the `new_boxes` used by the mesh transform are byte-for-byte consistent with the detect path. (Note: py-feat also has a `BBox` class with `extract_from_image` at `image_operations.py:436`, but that's a *single-box, CPU* crop — NOT the batched multi-face torch path — so it is not the right primitive here.)
 
 **pyfeatlive (the policy/brain):**
 - New `pyfeatlive_core/live_tracker.py::LiveTracker`, held on the `LiveSession`. It owns the detect-vs-track decision and per-face ROI state.
