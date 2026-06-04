@@ -129,3 +129,22 @@ def test_reset_clears_state():
     t.reset()
     assert t.roi_boxes() == []
     assert t.should_detect(g) is True
+
+
+def test_smooth_meshes_emas_toward_previous():
+    t = LiveTracker()
+    m0 = _square_mesh(100, 100)
+    out0 = t.smooth_meshes([m0], 0.5)
+    assert np.allclose(out0[0], m0)  # first frame passes through (no prev)
+    m1 = _square_mesh(110, 100)      # jumped +10px in x
+    out1 = t.smooth_meshes([m1], 0.5)
+    assert np.allclose(out1[0], 0.5 * m1 + 0.5 * m0)  # EMA halfway
+
+
+def test_smooth_meshes_passthrough_empty_and_reset():
+    t = LiveTracker()
+    t.smooth_meshes([_square_mesh(100, 100)], 0.5)
+    out = t.smooth_meshes([np.empty((0, 2), float)], 0.5)  # empty → passthrough
+    assert out[0].shape[0] == 0
+    t.reset()
+    assert t._smooth_meshes == []

@@ -113,10 +113,37 @@ class LiveTracker:
         self._cur_gray: np.ndarray | None = None
         self._frames_since_detect = 0
         self._force_detect = True  # first frame must detect
+        # Per-face EMA buffer for the DISPLAYED mesh (separate from the raw
+        # meshes that drive tracking decisions). See smooth_meshes().
+        self._smooth_meshes: list[np.ndarray] = []
         # Diagnostics (read by the live log line): last frame's scene-motion
         # value and why we decided to detect ("" when we tracked).
         self.last_motion: float = float("nan")
         self.last_reason: str = "init"
+
+    def smooth_meshes(self, meshes: list, alpha: float) -> list:
+        """Exponential-moving-average each face's DISPLAYED mesh against the
+        previous displayed mesh (per-face, matched by list index).
+
+        ``alpha`` is the weight on the current frame (lower = smoother, more
+        lag). Used to damp the residual per-frame jitter and the small
+        once-per-``MAX_TRACK_INTERVAL`` mesh blip when a detect frame re-bases
+        its ROI. A new face, a changed point-count, or an empty mesh passes
+        through unsmoothed so re-acquisition introduces no lag. This is a
+        display concern only — the raw meshes still drive the tracker's
+        ROI/decision logic; only the returned (and shown) mesh is smoothed.
+        """
+        prev = self._smooth_meshes
+        out = []
+        for i, m in enumerate(meshes):
+            m = np.asarray(m, float)
+            if (m.shape[0] == 0 or i >= len(prev)
+                    or prev[i] is None or prev[i].shape != m.shape):
+                out.append(m)
+            else:
+                out.append(alpha * m + (1.0 - alpha) * prev[i])
+        self._smooth_meshes = [a.copy() for a in out]
+        return out
 
     # -- decision (before running the model) --
     def should_detect(self, cur_gray: np.ndarray) -> bool:

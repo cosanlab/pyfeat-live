@@ -376,6 +376,39 @@ def _stabilize_facebox_from_meshes(fex, meshes: list, frame_w, frame_h) -> None:
     fex.loc[:, "FaceRectHeight"] = hs
 
 
+def _write_meshes_to_fex(fex, meshes: list, detector):
+    """Return a Fex with smoothed [478,2] meshes written into its mesh_x_/
+    mesh_y_ columns (row order == ``meshes`` order); faces without a full
+    478-point mesh keep their original mesh.
+
+    Replaces the mesh block via a split-and-concat (drop the ~956 mesh
+    columns, rebuild them from one numpy block, concat back) — ~0.7ms vs the
+    ~10ms a pandas ``fex.loc[:, cols] = ...`` wide assignment costs every
+    frame. Re-wraps as a Fex (concat would otherwise drop the subclass), the
+    same pattern _finalize_fex uses. Returns the original fex unchanged when
+    no face has a writable mesh."""
+    n = len(fex)
+    if n == 0:
+        return fex
+    xs = [f"mesh_x_{i}" for i in range(478)]
+    ys = [f"mesh_y_{i}" for i in range(478)]
+    mx = fex.reindex(columns=xs).to_numpy(dtype=np.float32).copy()
+    my = fex.reindex(columns=ys).to_numpy(dtype=np.float32).copy()
+    changed = False
+    for i, m in enumerate(meshes):
+        if i < n and m.shape[0] == 478:
+            mx[i] = m[:, 0]
+            my[i] = m[:, 1]
+            changed = True
+    if not changed:
+        return fex
+    rest = fex.drop(columns=xs + ys)
+    mesh_df = pd.DataFrame(
+        np.concatenate([mx, my], axis=1), columns=xs + ys, index=fex.index,
+    )
+    return Fex(pd.concat([rest, mesh_df], axis=1), **_fex_wrap_kwargs(detector))
+
+
 def _build_v2_batch(frames: "list[Image.Image]"):
     """Build (image_tensor, batch_data) for Detectorv2, matching
     detect_pil_images' construction."""
@@ -468,16 +501,25 @@ def detect_pil_images_v2_tracked(
     # stored ROIs; a shrunk count there just forces a re-detect next frame
     # (safe — a marginal crop re-acquires via RetinaFace rather than mis-tracks).
     meshes = _meshes_from_fex(fex)
-    # Anchor the displayed facebox to the (stable) mesh on BOTH detect and
-    # track frames, so it doesn't pop every re-detect (the raw FaceRect is the
-    # crop box, which differs between the RetinaFace and mesh-ROI paths).
-    _stabilize_facebox_from_meshes(fex, meshes, frame_w, frame_h)
     if do_detect:
         # do_detect may have flipped False→True via the track-path fallback
         # above; record this frame as a detect (not a track) either way.
         tracker.note_detect(meshes, frame_w, frame_h)
     else:
         tracker.note_track(meshes, frame_w, frame_h)
+    # Display smoothing, gated on the same "Stabilize overlays" alpha as the
+    # bbox EMA (bbox_smoothing_alpha is set per-frame by the live router).
+    # The tracker decisions above used the RAW mesh; here we EMA only what is
+    # SHOWN — the mesh and the mesh-anchored facebox — to damp residual
+    # per-frame jitter and the small once-per-interval detect-frame blip.
+    alpha = float(getattr(detector, "bbox_smoothing_alpha", 0.0) or 0.0)
+    if alpha > 0.0:
+        meshes = tracker.smooth_meshes(meshes, alpha)
+        fex = _write_meshes_to_fex(fex, meshes, detector)
+    # Anchor the displayed facebox to the (now-smoothed) mesh on BOTH detect
+    # and track frames, so it doesn't pop every re-detect (the raw FaceRect is
+    # the crop box, which differs between the RetinaFace and mesh-ROI paths).
+    _stabilize_facebox_from_meshes(fex, meshes, frame_w, frame_h)
     # Per-frame diagnostic (opt-in via PYFEAT_LIVE_PROFILE=1; one INFO line
     # per frame, too noisy otherwise): which path ran, the detector-call ms,
     # and the scene-motion value vs its threshold so a too-sensitive gate
