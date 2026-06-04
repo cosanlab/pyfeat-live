@@ -65,10 +65,17 @@
     try { localStorage.setItem(OVERLAY_STYLE_KEY, JSON.stringify(overlayStyle)); } catch { /* noop */ }
   });
   let showOverlayConfig = $state(false);
-  // Temporal bbox stabilization (reduces overlay jitter). On by default.
+  // Temporal stabilization (EMA on box + mesh; reduces jitter). On by default.
   let smooth = $state(true);
   function onSmoothChange(v: boolean) {
     smooth = v;
+    if (isStreaming) pushOverlayHints();
+  }
+  // Stabilization strength 0..1 (slider). Light by default so motion stays
+  // responsive; the user dials it up for more smoothing (more lag).
+  let smoothStrength = $state(0.3);
+  function onSmoothStrengthChange(v: number) {
+    smoothStrength = v;
     if (isStreaming) pushOverlayHints();
   }
   // Fast detect/track (Detectorv2 only). On by default.
@@ -200,6 +207,7 @@
         detection_res: { w: WIDTH, h: HEIGHT },
         style: overlayStyle,
         smooth,
+        smooth_strength: smoothStrength,
         track,
       });
       apiError = null;
@@ -221,6 +229,7 @@
         detection_res: { w: WIDTH, h: HEIGHT },
         style: overlayStyle,
         smooth,
+        smooth_strength: smoothStrength,
         track,
       });
     } catch (e: any) {
@@ -642,6 +651,8 @@
     {toggles}
     {smooth}
     {onSmoothChange}
+    {smoothStrength}
+    {onSmoothStrengthChange}
     {track}
     {onTrackChange}
     hasValenceArousal={config.detector_type === 'Detectorv2'}

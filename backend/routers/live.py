@@ -220,10 +220,16 @@ async def _run_detection(live, img: Image.Image) -> None:
         # ran on the loop, blocking uploads + the recorder feed.
         async with live.detector_lock:
             detector = live.detector
-            # Temporal bbox stabilization: Detectorv2 reads this attribute in
-            # detect_faces (no-op on other detectors). Set per detection so a
-            # mid-stream toggle takes effect without a detector rebuild.
-            setattr(detector, "bbox_smoothing_alpha", 0.35 if live.smooth else 0.0)
+            # Temporal stabilization: Detectorv2 reads bbox_smoothing_alpha in
+            # detect_faces, and detect_pil_images_v2_tracked reads the same
+            # attribute to EMA the displayed mesh (no-op on other detectors).
+            # Set per detection so a mid-stream slider change takes effect
+            # without a detector rebuild. alpha = weight on the CURRENT frame:
+            # higher alpha = less smoothing. Map the 0..1 strength slider so
+            # 0 ≈ no smoothing (alpha 1.0) and 1 = heavy (alpha 0.1); 0 disables.
+            _strength = live.smooth_strength if live.smooth else 0.0
+            _alpha = (1.0 - 0.9 * max(0.0, min(1.0, _strength))) if _strength > 0 else 0.0
+            setattr(detector, "bbox_smoothing_alpha", _alpha)
             from feat import Detectorv2
             use_tracker = (
                 live.track and isinstance(detector, Detectorv2)
@@ -419,6 +425,7 @@ class ConfigureRequest(BaseModel):
     landmark_style: Optional[str] = None
     style: Optional[dict] = None
     smooth: Optional[bool] = None
+    smooth_strength: Optional[float] = None
     track: Optional[bool] = None
     detection_res: Optional[dict[str, int]] = None  # {w, h}
 
@@ -466,6 +473,8 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
             live.style = req.style
         if req.smooth is not None:
             live.smooth = req.smooth
+        if req.smooth_strength is not None:
+            live.smooth_strength = req.smooth_strength
         if req.track is not None:
             live.track = req.track
         if req.detection_res is not None:
@@ -482,6 +491,7 @@ class HintsRequest(BaseModel):
     landmark_style: Optional[str] = None
     style: Optional[dict] = None
     smooth: Optional[bool] = None
+    smooth_strength: Optional[float] = None
     track: Optional[bool] = None
     detection_res: Optional[dict[str, int]] = None
 
@@ -504,6 +514,8 @@ async def hints(req: HintsRequest, request: Request) -> dict:
         live.style = req.style
     if req.smooth is not None:
         live.smooth = req.smooth
+    if req.smooth_strength is not None:
+        live.smooth_strength = req.smooth_strength
     # Turning fast-tracking on, or changing the detection resolution (which
     # changes the det_img pixel space the tracker's ROIs live in), invalidates
     # the tracker's accumulated ROIs/prev-frame state. Detect the actual

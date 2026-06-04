@@ -105,6 +105,8 @@ export interface LiveConfigure {
   detection_res?: { w: number; h: number };
   style?: OverlayStyleConfig;
   smooth?: boolean;
+  // Stabilization strength 0..1 (slider). 0 ≈ no smoothing, 1 = heavy.
+  smooth_strength?: number;
   track?: boolean;
 }
 
@@ -115,6 +117,8 @@ export interface LiveHints {
   detection_res?: { w: number; h: number };
   style?: OverlayStyleConfig;
   smooth?: boolean;
+  // Stabilization strength 0..1 (slider). 0 ≈ no smoothing, 1 = heavy.
+  smooth_strength?: number;
   track?: boolean;
 }
 

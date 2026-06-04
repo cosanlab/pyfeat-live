@@ -33,9 +33,15 @@ class LiveSession:
     toggles: dict[str, bool] = field(default_factory=dict)
     landmark_style: str = "mesh"
     style: dict | None = None
-    # Temporal bbox stabilization (EMA) to reduce overlay jitter on a still
-    # face. On by default; toggled from the overlay-settings modal.
+    # Temporal stabilization (EMA on the bbox + displayed mesh) to reduce
+    # overlay jitter on a still face. On by default; toggled from the
+    # overlay-settings modal.
     smooth: bool = True
+    # Stabilization strength in [0, 1] (slider in the overlay-settings modal):
+    # 0 = barely smoothed (most responsive), 1 = heavily smoothed (laggiest).
+    # Mapped to the EMA weight-on-current-frame alpha in live.py. Light by
+    # default so motion stays responsive.
+    smooth_strength: float = 0.3
     # Fast tracking: skip RetinaFace on most frames by tracking each face's
     # ROI from its previous mesh (Detectorv2 only). On by default; toggled
     # from the overlay-settings modal. See pyfeatlive_core/live_tracker.py.

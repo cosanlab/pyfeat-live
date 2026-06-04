@@ -13,9 +13,11 @@
     onToggle: (key: keyof OverlayToggles) => void;
     onReset: () => void;
     onClose: () => void;
-    // Live-only: temporal bbox stabilization toggle. Omitted by the Viewer.
+    // Live-only: temporal stabilization toggle + strength. Omitted by Viewer.
     smooth?: boolean;
     onSmoothChange?: (v: boolean) => void;
+    smoothStrength?: number;
+    onSmoothStrengthChange?: (v: number) => void;
     // Live-only: fast detect/track toggle (Detectorv2). Omitted by the Viewer.
     track?: boolean;
     onTrackChange?: (v: boolean) => void;
@@ -23,7 +25,8 @@
   let {
     style, toggles, hasValenceArousal = false,
     onStyleChange, onToggle, onReset, onClose,
-    smooth, onSmoothChange, track, onTrackChange,
+    smooth, onSmoothChange, smoothStrength = 0.3, onSmoothStrengthChange,
+    track, onTrackChange,
   }: Props = $props();
 
   // Patch one section of the style object and emit the new whole.
@@ -80,16 +83,29 @@
     </div>
 
     {#if onSmoothChange}
-      <label class="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/70 cursor-pointer">
-        <input
-          type="checkbox"
-          class="accent-green-500 w-3.5 h-3.5"
-          checked={smooth}
-          onchange={(e) => onSmoothChange?.((e.target as HTMLInputElement).checked)}
-        />
-        <span class="text-[12px] font-medium text-zinc-100">Stabilize overlays</span>
-        <span class="text-[10px] text-zinc-500">— smooth the face box to reduce jitter</span>
-      </label>
+      <div class="px-4 py-2.5 border-b border-zinc-800/70">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            class="accent-green-500 w-3.5 h-3.5"
+            checked={smooth}
+            onchange={(e) => onSmoothChange?.((e.target as HTMLInputElement).checked)}
+          />
+          <span class="text-[12px] font-medium text-zinc-100">Stabilize overlays</span>
+          <span class="text-[10px] text-zinc-500">— EMA the box + mesh to reduce jitter</span>
+        </label>
+        {#if onSmoothStrengthChange}
+          <label class="flex items-center gap-2 mt-2 pl-5.5 text-[11px] text-zinc-400" class:opacity-40={!smooth}>
+            strength
+            <input
+              type="range" min="0" max="1" step="0.05" class="accent-green-500 w-32"
+              value={smoothStrength} disabled={!smooth}
+              oninput={(e) => onSmoothStrengthChange?.(+(e.target as HTMLInputElement).value)} />
+            <span class="font-mono text-zinc-300 w-8">{Math.round(smoothStrength * 100)}%</span>
+            <span class="text-[10px] text-zinc-600">more = smoother, laggier</span>
+          </label>
+        {/if}
+      </div>
     {/if}
 
     {#if onTrackChange}
