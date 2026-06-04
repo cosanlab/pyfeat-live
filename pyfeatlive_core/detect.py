@@ -334,6 +334,48 @@ def _meshes_from_fex(fex) -> list:
     return out
 
 
+# Facebox padding to approximate RetinaFace's framing from the mesh extent
+# (the 478-mesh is roughly the landmark hull; RetinaFace's box adds
+# forehead/chin margin). Calibrated so a typical face's mesh-derived box
+# matches its RetinaFace box to within a few px.
+_FACEBOX_W_PAD = 1.2
+_FACEBOX_H_PAD = 1.4
+
+
+def _stabilize_facebox_from_meshes(fex, meshes: list, frame_w, frame_h) -> None:
+    """Overwrite FaceRect{X,Y,Width,Height} with a box derived from each
+    face's 478-mesh, in place.
+
+    The raw FaceRect forward() emits is the *crop box*, which differs between
+    the RetinaFace box (detect frames) and the mesh-ROI box (track frames) —
+    a ~100px width pop every re-detect (MAX_TRACK_INTERVAL). The mesh itself
+    is stable across both paths, so anchoring the displayed box to the mesh
+    removes the periodic flicker. Rows with an empty/NaN mesh are left as-is.
+    """
+    if len(fex) != len(meshes):
+        return
+    xs, ys, ws, hs = [], [], [], []
+    for m in meshes:
+        if m.shape[0] == 0:
+            xs.append(np.nan); ys.append(np.nan)
+            ws.append(np.nan); hs.append(np.nan)
+            continue
+        x1, y1 = float(m[:, 0].min()), float(m[:, 1].min())
+        x2, y2 = float(m[:, 0].max()), float(m[:, 1].max())
+        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        w = (x2 - x1) * _FACEBOX_W_PAD
+        h = (y2 - y1) * _FACEBOX_H_PAD
+        nx1 = max(0.0, cx - w / 2.0); ny1 = max(0.0, cy - h / 2.0)
+        nx2 = min(float(frame_w), cx + w / 2.0)
+        ny2 = min(float(frame_h), cy + h / 2.0)
+        xs.append(nx1); ys.append(ny1)
+        ws.append(nx2 - nx1); hs.append(ny2 - ny1)
+    fex.loc[:, "FaceRectX"] = xs
+    fex.loc[:, "FaceRectY"] = ys
+    fex.loc[:, "FaceRectWidth"] = ws
+    fex.loc[:, "FaceRectHeight"] = hs
+
+
 def _build_v2_batch(frames: "list[Image.Image]"):
     """Build (image_tensor, batch_data) for Detectorv2, matching
     detect_pil_images' construction."""
@@ -406,6 +448,10 @@ def detect_pil_images_v2_tracked(
     # stored ROIs; a shrunk count there just forces a re-detect next frame
     # (safe — a marginal crop re-acquires via RetinaFace rather than mis-tracks).
     meshes = _meshes_from_fex(fex)
+    # Anchor the displayed facebox to the (stable) mesh on BOTH detect and
+    # track frames, so it doesn't pop every re-detect (the raw FaceRect is the
+    # crop box, which differs between the RetinaFace and mesh-ROI paths).
+    _stabilize_facebox_from_meshes(fex, meshes, frame_w, frame_h)
     if do_detect:
         # do_detect may have flipped False→True via the track-path fallback
         # above; record this frame as a detect (not a track) either way.

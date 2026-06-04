@@ -63,6 +63,39 @@ def test_mpdetector_native_aus_and_pose_on_real_face():
         )
 
 
+def test_stabilize_facebox_from_meshes():
+    """Facebox is recomputed from the mesh extent, padded W*1.2 / H*1.4
+    about the mesh centre and clamped to the frame."""
+    import numpy as np
+    import pandas as pd
+    from pyfeatlive_core.detect import _stabilize_facebox_from_meshes
+
+    # 100x100 square mesh spanning (200,150)-(300,250); centre (250,200).
+    mesh = np.array([[200, 150], [300, 150], [200, 250], [300, 250]], float)
+    df = pd.DataFrame({
+        "FaceRectX": [0.0], "FaceRectY": [0.0],
+        "FaceRectWidth": [0.0], "FaceRectHeight": [0.0],
+    })
+    _stabilize_facebox_from_meshes(df, [mesh], frame_w=640, frame_h=480)
+    assert df["FaceRectWidth"].iloc[0] == pytest.approx(120.0)   # 100*1.2
+    assert df["FaceRectHeight"].iloc[0] == pytest.approx(140.0)  # 100*1.4
+    assert df["FaceRectX"].iloc[0] == pytest.approx(190.0)       # 250-60
+    assert df["FaceRectY"].iloc[0] == pytest.approx(130.0)       # 200-70
+
+
+def test_stabilize_facebox_empty_mesh_left_nan():
+    """A face with no mesh (empty array) leaves its facebox untouched-as-NaN."""
+    import numpy as np
+    import pandas as pd
+    from pyfeatlive_core.detect import _stabilize_facebox_from_meshes
+    df = pd.DataFrame({
+        "FaceRectX": [5.0], "FaceRectY": [5.0],
+        "FaceRectWidth": [5.0], "FaceRectHeight": [5.0],
+    })
+    _stabilize_facebox_from_meshes(df, [np.empty((0, 2), float)], 640, 480)
+    assert np.isnan(df["FaceRectWidth"].iloc[0])
+
+
 def test_project_display_columns_drops_v2_extras():
     import pandas as pd
     from pyfeatlive_core.detect import display_view

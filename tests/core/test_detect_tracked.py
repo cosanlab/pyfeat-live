@@ -39,6 +39,22 @@ def test_detect_then_track_consistent_mesh():
 
 @pytest.mark.slow
 @pytest.mark.timeout(600)
+def test_facebox_stable_across_detect_and_track():
+    """The displayed facebox is mesh-anchored, so it stays consistent between
+    the periodic detect frame and the track frames (no ~100px flicker)."""
+    detector = build_detector(DetectorConfig(detector_type="Detectorv2", device="cpu"))
+    img = Image.open(FACE_FIXTURE).convert("RGB")
+    tracker = LiveTracker()
+    cols = ["FaceRectX", "FaceRectY", "FaceRectWidth", "FaceRectHeight"]
+    fex_d = detect_pil_images_v2_tracked(detector, [img], tracker)  # DETECT
+    fex_t = detect_pil_images_v2_tracked(detector, [img], tracker)  # TRACK
+    d = fex_d[cols].iloc[0].to_numpy(float)
+    t = fex_t[cols].iloc[0].to_numpy(float)
+    assert np.allclose(d, t, atol=15.0), f"facebox popped: detect={d} track={t}"
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(600)
 def test_tracked_path_skips_retinaface_on_track_frame(monkeypatch):
     detector = build_detector(DetectorConfig(detector_type="Detectorv2", device="cpu"))
     img = Image.open(FACE_FIXTURE).convert("RGB")
