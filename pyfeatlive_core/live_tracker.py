@@ -113,17 +113,28 @@ class LiveTracker:
         self._cur_gray: np.ndarray | None = None
         self._frames_since_detect = 0
         self._force_detect = True  # first frame must detect
+        # Diagnostics (read by the live log line): last frame's scene-motion
+        # value and why we decided to detect ("" when we tracked).
+        self.last_motion: float = float("nan")
+        self.last_reason: str = "init"
 
     # -- decision (before running the model) --
     def should_detect(self, cur_gray: np.ndarray) -> bool:
         self._cur_gray = cur_gray
+        self.last_motion = (
+            scene_motion(self._prev_gray, cur_gray)
+            if self._prev_gray is not None else float("nan")
+        )
         if self._force_detect or not self._rois:
+            self.last_reason = "forced/empty"
             return True
         if self._frames_since_detect >= MAX_TRACK_INTERVAL - 1:
+            self.last_reason = "interval"
             return True
-        if self._prev_gray is not None:
-            if scene_motion(self._prev_gray, cur_gray) > SCENE_MOTION_THRESH:
-                return True
+        if self._prev_gray is not None and self.last_motion > SCENE_MOTION_THRESH:
+            self.last_reason = "motion"
+            return True
+        self.last_reason = ""
         return False
 
     def roi_boxes(self) -> list[tuple[float, float, float, float]]:

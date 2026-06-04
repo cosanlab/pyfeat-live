@@ -46,7 +46,9 @@ from feat.utils import (
 from feat.utils.image_operations import convert_image_to_tensor
 
 from pyfeatlive_core.capabilities import DETECTORV2_EMOTION_RENAME
-from pyfeatlive_core.live_tracker import LiveTracker, downscale_gray
+from pyfeatlive_core.live_tracker import (
+    LiveTracker, downscale_gray, SCENE_MOTION_THRESH,
+)
 
 if TYPE_CHECKING:
     from PIL import Image
@@ -368,22 +370,29 @@ def detect_pil_images_v2_tracked(
 
     image_tensor, batch_data = _build_v2_batch(frames)
 
+    import time as _time
+    _t0 = _time.perf_counter()
+    _t_call = 0.0
     _GPU_LOCK.acquire()
     try:
         do_detect = tracker.should_detect(cur_gray)
         if not do_detect:
             try:
                 boxes = torch.tensor(tracker.roi_boxes(), dtype=torch.float32)
+                _tc = _time.perf_counter()
                 faces_data = detector.crop_faces_from_boxes(batch_data["Image"], boxes)
                 df = detector.forward(faces_data, batch_data)
+                _t_call = (_time.perf_counter() - _tc) * 1000.0
             except (ValueError, RuntimeError) as exc:
                 logger.warning("track path failed (%s); falling back to detect", exc)
                 do_detect = True
         if do_detect:
+            _tc = _time.perf_counter()
             faces_data = detector.detect_faces(
                 batch_data["Image"], face_detection_threshold=0.5,
             )
             df = detector.forward(faces_data, batch_data)
+            _t_call = (_time.perf_counter() - _tc) * 1000.0
     finally:
         _GPU_LOCK.release()
 
@@ -399,6 +408,16 @@ def detect_pil_images_v2_tracked(
         tracker.note_detect(meshes, frame_w, frame_h)
     else:
         tracker.note_track(meshes, frame_w, frame_h)
+    # Per-frame diagnostic (visible in the log drawer): which path ran, the
+    # detector-call ms, and the scene-motion value vs its threshold so a
+    # too-sensitive gate (always re-detecting) is obvious. mode=DETECT means
+    # RetinaFace ran; mode=TRACK means it was skipped.
+    logger.info(
+        "live-track mode=%s reason=%s motion=%.1f/%.1f fsd=%d n=%d call=%.0fms total=%.0fms",
+        "DETECT" if do_detect else "TRACK", tracker.last_reason or "-",
+        tracker.last_motion, SCENE_MOTION_THRESH, tracker._frames_since_detect,
+        len(meshes), _t_call, (_time.perf_counter() - _t0) * 1000.0,
+    )
     return fex
 
 
