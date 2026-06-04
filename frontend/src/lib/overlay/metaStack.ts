@@ -16,9 +16,11 @@ function clamp(v: number, lo: number, hi: number): number {
 
 /**
  * Place a `stackW × stackH` panel stack beside `face`, vertically centered on
- * it. Prefers the side with more horizontal room; flips to the other side if
- * the preferred side would run off-screen or overlap another face's bbox; then
- * clamps fully on-screen.
+ * it. Defaults to `defaultSide` and only flips to the other side when the
+ * default side is occluded — i.e. it would run off-screen or overlap another
+ * face's bbox — and the other side is clear. This "sticky side" avoids the
+ * stack jumping left/right as the face drifts across the frame. Always clamped
+ * fully on-screen.
  */
 export function placeMetaStack(
   face: Rect,
@@ -28,14 +30,14 @@ export function placeMetaStack(
   srcW: number,
   srcH: number,
   gap = 8,
+  defaultSide: 'left' | 'right' = 'right',
 ): StackPlacement {
   const faceRight = face.x + face.w;
-  const roomRight = srcW - faceRight;
-  const roomLeft = face.x;
 
   // Candidate left-edge x for placing the stack on each side.
   const rightLeft = faceRight + gap;
   const leftLeft = face.x - gap - stackW;
+  const leftFor = (s: 'left' | 'right') => (s === 'right' ? rightLeft : leftLeft);
 
   // Vertically centered on the face, clamped on-screen.
   const top = clamp(face.y + face.h / 2 - stackH / 2, 0, Math.max(0, srcH - stackH));
@@ -44,16 +46,13 @@ export function placeMetaStack(
   const clean = (left: number) =>
     fits(left) && !others.some((o) => overlaps(left, top, stackW, stackH, o));
 
-  // Prefer the side with more room; flip if it isn't clean and the other is.
-  const preferRight = roomRight >= roomLeft;
-  let side: 'left' | 'right';
-  if (preferRight) {
-    side = clean(rightLeft) || !clean(leftLeft) ? 'right' : 'left';
-  } else {
-    side = clean(leftLeft) || !clean(rightLeft) ? 'left' : 'right';
+  // Stick to the default side; flip ONLY if it's occluded and the other is clear.
+  const other: 'left' | 'right' = defaultSide === 'right' ? 'left' : 'right';
+  let side = defaultSide;
+  if (!clean(leftFor(defaultSide)) && clean(leftFor(other))) {
+    side = other;
   }
 
-  const rawLeft = side === 'right' ? rightLeft : leftLeft;
-  const left = clamp(rawLeft, 0, Math.max(0, srcW - stackW));
+  const left = clamp(leftFor(side), 0, Math.max(0, srcW - stackW));
   return { left, top, side };
 }
