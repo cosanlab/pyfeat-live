@@ -472,12 +472,25 @@ async def hints(req: HintsRequest, request: Request) -> dict:
         live.style = req.style
     if req.smooth is not None:
         live.smooth = req.smooth
+    # Turning fast-tracking on, or changing the detection resolution (which
+    # changes the det_img pixel space the tracker's ROIs live in), invalidates
+    # the tracker's accumulated ROIs/prev-frame state. Detect the actual
+    # transition BEFORE assigning, then reset under the detector lock (the same
+    # serialization /configure uses) so an in-flight detection finishes first
+    # and the re-enable starts clean instead of resuming from stale ROIs.
+    track_turned_on = req.track is True and not live.track
+    res_changed = req.detection_res is not None and live.detection_size != (
+        int(req.detection_res["w"]), int(req.detection_res["h"]),
+    )
     if req.track is not None:
         live.track = req.track
     if req.detection_res is not None:
         live.detection_size = (
             int(req.detection_res["w"]), int(req.detection_res["h"]),
         )
+    if track_turned_on or res_changed:
+        async with live.detector_lock:
+            live.tracker.reset()
     return req.model_dump()
 
 
