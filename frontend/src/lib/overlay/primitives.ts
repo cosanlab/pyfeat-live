@@ -488,7 +488,7 @@ export function drawAuMeshHeatmap(
   face: Face,
   table: AuMeshTable,
   tessTris?: [number, number, number][] | null,
-  opts?: { mode?: 'heatmap' | 'points'; lut?: Lut; radius?: number; opacity?: number },
+  opts?: { mode?: 'heatmap' | 'points'; lut?: Lut; radius?: number; opacity?: number; gamma?: number },
 ): void {
   const lm = face.lm;
   const aus = face.aus;
@@ -497,6 +497,7 @@ export function drawAuMeshHeatmap(
   const mode = opts?.mode ?? 'heatmap';
   const lut: Lut = (opts?.lut ?? table.lut) as Lut;
   const opacity = opts?.opacity ?? 1.0;
+  const gamma = opts?.gamma ?? HEATMAP_GAMMA;
 
   if (mode === 'heatmap' && tessTris && tessTris.length > 0) {
     // --- Filled triangle heatmap (port of backend _draw_au_mesh_heatmap) ---
@@ -518,7 +519,7 @@ export function drawAuMeshHeatmap(
     for (const [a, b, c] of tessTris) {
       const m = (vint[a]! + vint[b]! + vint[c]!) / 3.0;
       if (m < HEATMAP_THRESH) continue;
-      const disp = Math.pow(m, HEATMAP_GAMMA);
+      const disp = Math.pow(m, gamma);
 
       const ax = lm[a * 2], ay = lm[a * 2 + 1];
       const bx = lm[b * 2], by = lm[b * 2 + 1];
@@ -548,7 +549,8 @@ export function drawAuMeshHeatmap(
     for (const [au, verts] of Object.entries(table.auToVertices)) {
       const raw = aus[au];
       if (raw == null || (raw as number) <= 0) continue;
-      const rgb = lut[Math.min(255, Math.max(0, Math.round((raw as number) * 255)))];
+      const disp = Math.pow(raw as number, gamma);
+      const rgb = lut[Math.min(255, Math.max(0, Math.round(disp * 255)))];
       if (!rgb) continue;
       ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
       for (const vi of verts) {

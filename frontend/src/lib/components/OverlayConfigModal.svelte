@@ -216,6 +216,11 @@
                 <input type="range" min="0.1" max="1" step="0.05" class="accent-green-500 w-20" value={style.aus.opacity}
                   oninput={(e) => upd('aus', { opacity: +(e.target as HTMLInputElement).value })} />
               </label>
+              <label class="flex items-center gap-1.5">gamma
+                <input type="range" min="0.5" max="4" step="0.1" class="accent-green-500 w-20" value={style.aus.gamma ?? 2.2}
+                  oninput={(e) => upd('aus', { gamma: +(e.target as HTMLInputElement).value })} />
+                <span class="font-mono text-zinc-400 w-7">{(style.aus.gamma ?? 2.2).toFixed(1)}</span>
+              </label>
 
             {:else if s.key === 'emotions'}
               <label class="flex items-center gap-1.5">color

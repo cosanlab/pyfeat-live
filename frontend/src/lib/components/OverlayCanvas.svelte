@@ -102,7 +102,7 @@
             ctx, face, auMeshTable,
             auMode === 'heatmap' ? (tessTris ?? null) : null,
             style
-              ? { mode: auMode, lut: auLut ?? undefined, opacity: style.aus.opacity }
+              ? { mode: auMode, lut: auLut ?? undefined, opacity: style.aus.opacity, gamma: style.aus.gamma }
               : { mode: auMode },
           );
         } else {
