@@ -68,13 +68,10 @@
     ctx.setTransform(bw / width, 0, 0, bh / height, 0, 0);
     ctx.clearRect(0, 0, width, height);
     for (const face of faces) {
+      // Draw order matches the validated baked overlay (overlay_render.py):
+      // rect → AU heatmap → landmarks → pose → gaze → emotions, so the AU
+      // heatmap sits UNDER the mesh and gaze instead of covering them.
       if (toggles.rects) O.drawRect(ctx, face.rect, style?.faceboxes);
-      if (toggles.landmarks) {
-        const useEdges = lmStyle === 'points' ? undefined : edges;
-        O.drawLandmarks(ctx, face.lm, lmStyle, useEdges, style?.landmarks);
-      }
-      if (toggles.poses) O.drawPose(ctx, face.rect, face.pose, { ...style?.pose, yawOffset: mpLandmarks ? 0 : Math.PI });
-      if (toggles.gaze) O.drawGaze(ctx, face, mpLandmarks, width, height, { ...(style?.gaze ?? {}), convention: gazeConvention });
       if (toggles.aus) {
         if (mpLandmarks && auMeshTable) {
           // Mesh detectors (Detectorv2, MPDetector): colour the 478-mesh
@@ -86,6 +83,12 @@
             style ? { lut: auLut ?? undefined, opacity: style.aus.opacity } : undefined);
         }
       }
+      if (toggles.landmarks) {
+        const useEdges = lmStyle === 'points' ? undefined : edges;
+        O.drawLandmarks(ctx, face.lm, lmStyle, useEdges, style?.landmarks);
+      }
+      if (toggles.poses) O.drawPose(ctx, face.rect, face.pose, { ...style?.pose, yawOffset: mpLandmarks ? 0 : Math.PI });
+      if (toggles.gaze) O.drawGaze(ctx, face, mpLandmarks, width, height, { ...(style?.gaze ?? {}), convention: gazeConvention });
       if (toggles.emotions) O.drawEmotions(ctx, face.rect, face.emotions, style?.emotions);
     }
   });
