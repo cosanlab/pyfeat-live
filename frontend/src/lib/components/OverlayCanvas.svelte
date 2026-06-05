@@ -20,11 +20,15 @@
     // primitives fall back to their built-in defaults. The Viewer passes a
     // user-configured style from its overlay-settings modal.
     style?: OverlayStyleConfig | null;
+    // Gaze direction convention: Detectorv2's multitask gaze head needs a
+    // different yaw mapping than L2CS (classic Detector / MPDetector).
+    gazeConvention?: 'l2cs' | 'multitask';
   };
   let {
     faces, mpLandmarks, width, height, toggles,
     landmarkStyle = 'mesh', edges,
     auTable = null, mpToDlib68 = null, style = null,
+    gazeConvention = 'l2cs',
   }: Props = $props();
 
   // Style takes precedence over the landmarkStyle prop when provided.
@@ -45,7 +49,7 @@
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
     // Supersample on top of dpr for extra-crisp thin mesh lines.
-    const SS = 2;
+    const SS = 1.5;
     // Size the backing store from the canvas's ACTUAL on-screen size, NOT the
     // logical width/height coord space. The logical space can be much smaller
     // than the display (live detection runs at 640 but the stage is ~1300px
@@ -70,7 +74,7 @@
         O.drawLandmarks(ctx, face.lm, lmStyle, useEdges, style?.landmarks);
       }
       if (toggles.poses) O.drawPose(ctx, face.rect, face.pose, { ...style?.pose, yawOffset: mpLandmarks ? 0 : Math.PI });
-      if (toggles.gaze) O.drawGaze(ctx, face, mpLandmarks, width, height, style?.gaze);
+      if (toggles.gaze) O.drawGaze(ctx, face, mpLandmarks, width, height, { ...(style?.gaze ?? {}), convention: gazeConvention });
       if (toggles.aus) {
         if (mpLandmarks && auMeshTable) {
           // Mesh detectors (Detectorv2, MPDetector): colour the 478-mesh

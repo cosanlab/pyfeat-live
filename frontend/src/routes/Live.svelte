@@ -517,6 +517,7 @@
             edges={overlayEdges ? (overlayStyle.landmarks.style === 'lines' ? overlayEdges.mp_contours : overlayEdges.mp_tess) : undefined}
             mpToDlib68={mpToDlib68}
             style={overlayStyle}
+            gazeConvention={config.detector_type === 'Detectorv2' ? 'multitask' : 'l2cs'}
           />
         </div>
 

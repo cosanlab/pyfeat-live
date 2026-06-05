@@ -104,7 +104,7 @@ export function gazeOrigin(
 export function drawGaze(
   ctx: CanvasRenderingContext2D,
   face: Face, mpLandmarks: boolean, canvasW: number, canvasH: number,
-  opts?: { color?: string; lineWidth?: number; opacity?: number },
+  opts?: { color?: string; lineWidth?: number; opacity?: number; convention?: 'l2cs' | 'multitask' },
 ): void {
   if (!face.gaze) return;
   const [pitch, yaw] = face.gaze;
@@ -116,27 +116,52 @@ export function drawGaze(
   const lw = opts?.lineWidth ?? 2;
   ctx.save();
   ctx.globalAlpha = opts?.opacity ?? 1;
-  // gaze_pitch / gaze_yaw are in RADIANS (py-feat / L2CS). Mirror the
-  // baked-overlay mapping in overlay_render.py:_draw_gaze — both axes use
-  // -sin(); yaw is empirically inverted from py-feat's docstring. Arrow
-  // length scales to the face so it reads at any face size.
+  // gaze_pitch / gaze_yaw are in RADIANS. Port of overlay_render.py:_draw_gaze
+  // (the validated baked mapping). Both are drawn in source coords then the
+  // stage is selfie-mirrored, so the signs are tuned for the mirrored view.
+  // Detectorv2's multitask gaze head needs +sin(yaw)·cos(pitch); L2CS (classic
+  // Detector / MPDetector) uses -sin(yaw). Pitch is -sin() either way.
   let length = Math.max(canvasW, canvasH) / 12;
   if (face.rect) {
     const [, , w, h] = face.rect;
     if (w != null && h != null) length = Math.min(w, h) * 0.9;
   }
-  const dx = -Math.sin(yaw) * length;
-  const dy = -Math.sin(pitch) * length;
+  const dirX = opts?.convention === 'multitask'
+    ? Math.sin(yaw) * Math.cos(pitch)
+    : -Math.sin(yaw);
+  const dirY = -Math.sin(pitch);
+  const endX = ox + dirX * length;
+  const endY = oy + dirY * length;
   ctx.strokeStyle = color;
-  ctx.lineWidth = lw;
-  ctx.beginPath();
-  ctx.moveTo(ox, oy);
-  ctx.lineTo(ox + dx, oy + dy);
-  ctx.stroke();
-  // Origin disc
   ctx.fillStyle = color;
+  ctx.lineWidth = lw;
+  const norm = Math.hypot(dirX, dirY);
+  if (norm > 1e-3) {
+    // Shaft ends at the arrowhead base; filled triangle head (matches backend).
+    const nx = dirX / norm, ny = dirY / norm;
+    const px = -ny, py = nx;
+    const headLen = Math.max(8, length * 0.22);
+    const headW = Math.max(5, length * 0.14);
+    const bx = endX - nx * headLen, by = endY - ny * headLen;
+    ctx.beginPath();
+    ctx.moveTo(ox, oy);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(endX, endY);
+    ctx.lineTo(bx + px * headW, by + py * headW);
+    ctx.lineTo(bx - px * headW, by - py * headW);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    // Centered gaze — small disc.
+    ctx.beginPath();
+    ctx.arc(ox, oy, Math.max(4, lw + 2), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Origin marker.
   ctx.beginPath();
-  ctx.arc(ox, oy, Math.max(2, lw + 1), 0, Math.PI * 2);
+  ctx.arc(ox, oy, Math.max(2, lw * 0.75), 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
