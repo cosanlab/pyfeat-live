@@ -49,7 +49,7 @@ def test_start_then_stop_creates_session_folder(live_client_recording):
     # Detection is launched fire-and-forget per upload (gated by an in-flight
     # flag), and only the detection worker offers frames to the recorder, so
     # one POST is not enough: we post repeatedly until a detection has
-    # completed (X-Detection-Generation advances), guaranteeing the recorder
+    # completed (body["generation"] advances), guaranteeing the recorder
     # received at least one frame before we stop.
     with open(FIXTURE, "rb") as f:
         body = f.read()
@@ -62,7 +62,7 @@ def test_start_then_stop_creates_session_folder(live_client_recording):
             headers={"Content-Type": "image/jpeg"},
         )
         assert fr.status_code == 200
-        if int(fr.headers.get("X-Detection-Generation", "0")) > 0:
+        if fr.json().get("generation", 0) > 0:
             detected = True
             break
         time.sleep(0.1)

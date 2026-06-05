@@ -34,6 +34,8 @@ from pyfeatlive_core.recorder import (
     default_sessions_root,
 )
 
+from backend.serialization import serialize_faces
+
 
 router = APIRouter(prefix="/api/live", tags=["live"])
 
@@ -51,20 +53,17 @@ _DETECTION_EXECUTOR = ThreadPoolExecutor(
 
 @router.post("/frame")
 async def upload_frame(request: Request) -> Response:
-    """Return the cached locked-to-detection display frame.
+    """Schedule async detection on ~1-in-N frames and return latest cached result.
 
-    Each upload may schedule a new detection (gated by the adaptive
-    throttle). The displayed image is whatever frame detection most
-    recently ran on, with overlay pixels baked onto it — so the face
-    image and the overlay positions are temporally identical and
-    there is zero overlay drift. The cost is that display rate
-    equals detection rate (~10 Hz). First-frame fallback: if no
-    detection has completed yet, the source upload is echoed so the
-    user sees their video immediately.
-
-    Recording is independent of display — the recorder gets every
-    uploaded frame (60 fps live source, no waiting on detection) so
-    the recorded MP4 is smooth.
+    Launches a detection task on the uploaded frame when none is already in
+    flight and the adaptive throttle allows it; otherwise returns immediately.
+    Tracks which frame id detection last ran on and returns JSON
+    ``{id, generation, frame, faces}`` where ``faces`` is the serialized
+    per-face detection result (rect, landmarks, pose, gaze, emotions, AUs,
+    valence/arousal). The overlay is rendered client-side from these coords.
+    Server-side overlay baking runs only when recording with
+    ``video_mode=="overlay"`` (for the recorded file). The recorder is fed at
+    detection rate from ``_run_detection``, not per-upload.
     """
     live = request.app.state.live
     if live.detector is None:
@@ -76,16 +75,17 @@ async def upload_frame(request: Request) -> Response:
 
     # --- maybe-launch decoupled detection (no await) ---------------
     # Detection takes the just-uploaded frame; when it completes it
-    # bakes overlay onto that same frame and caches the JPEG bytes,
-    # so display always matches the detected positions exactly.
+    # caches the fex and frame dimensions so the JSON response always
+    # matches the detected positions exactly.
     #
     # Decode the uploaded JPEG ONLY on the frames we actually detect on.
     # The client polls far faster than detection completes (it loops at
-    # ~100+ fps to fetch the latest baked frame), so most uploads just
-    # return the cached frame below — decoding every body wasted a PIL
+    # ~100+ fps to fetch the latest result), so most uploads just return
+    # the cached JSON below — decoding every body wasted a PIL
     # Image.open().convert() on the event loop per upload and starved the
     # detection task. Decoding ~1-in-N frames frees the loop to finish
     # detections sooner, which is what the displayed fps tracks.
+    frame_id = int(request.headers.get("X-Frame-Id", "-1"))
     now = time.perf_counter()
     if not live._detection_in_flight and now >= live._next_detection_at:
         try:
@@ -94,121 +94,37 @@ async def upload_frame(request: Request) -> Response:
             raise HTTPException(400, f"could not decode image: {exc}") from exc
         live._detection_in_flight = True
         loop = asyncio.get_running_loop()
-        loop.create_task(_run_detection(live, img))
+        loop.create_task(_run_detection(live, img, frame_id))
 
-    # Snapshot the cached fex once for the response-header meta dump.
     # NOTE: the recorder is fed from _run_detection (at detection rate),
     # NOT here per-upload — feeding every uploaded frame saturated the
     # event loop and starved detection to ~1 fps while recording.
-    cached_fex = live._cached_fex
 
-    # --- return cached locked frame (or echo source on first call) -
-    headers = {"X-Detection-Generation": str(live._detection_generation)}
-    meta_json = _live_meta_header(cached_fex, live._cached_frame_dims)
-    if meta_json is not None:
-        headers["X-Live-Meta"] = meta_json
-    if live._cached_baked_jpeg is not None:
-        return Response(
-            content=live._cached_baked_jpeg,
-            media_type="image/jpeg",
-            headers=headers,
-        )
-    # First-frame echo: body is whatever the frontend sent (JPEG).
-    return Response(
-        content=body, media_type="image/jpeg", headers=headers,
-    )
+    # --- return JSON face coords (serialize_faces returns [] when no detection yet) -
+    mp = bool(getattr(live, "mp_landmarks", True))
+    faces = serialize_faces(live._cached_fex, mp_landmarks=mp)
+    dims = live._cached_frame_dims or [640, 360]
+    return {
+        "id": live._cached_frame_id,
+        "generation": live._detection_generation,
+        "frame": [int(dims[0]), int(dims[1])],
+        "faces": faces,
+    }
 
 
-def _live_meta_header(fex, frame_dims=None) -> Optional[str]:
-    """Compact JSON for the frontend HTML overlays (emotions panel,
-    pose readout, face bbox). Rendered as DOM on top of the canvas so
-    text stays legible under the canvas's selfie-mirror CSS transform.
 
-    Returns None when there's no detection to show. Header bytes stay
-    well under 1 KB even with all fields populated.
-    """
-    if fex is None or len(fex) == 0:
-        return None
-    import json
-    import pandas as pd
-    meta: dict = {}
-    # Use the TRUE bake dimensions (source upload size) the caller passed
-    # in. The fex's FrameWidth/FrameHeight reflect the DETECTION input
-    # size, which differs from the bake size when detection_size
-    # downscaling is active — using those would mis-position the HTML
-    # overlays by the downscale factor.
-    if frame_dims is not None:
-        meta["frame"] = [int(frame_dims[0]), int(frame_dims[1])]
-
-    emo_cols = ("anger", "disgust", "fear", "happiness",
-                "sadness", "surprise", "neutral")
-
-    # One entry per detected face so the frontend can render emotion /
-    # valence-arousal / pose panels for ALL faces simultaneously (not
-    # just the first). Header bytes stay small — a few hundred per face.
-    faces: list[dict] = []
-    for _, row in fex.iterrows():
-        face: dict = {}
-        # Face bbox in source-frame coords (non-mirrored).
-        try:
-            face["bbox"] = [
-                float(row["FaceRectX"]), float(row["FaceRectY"]),
-                float(row["FaceRectWidth"]), float(row["FaceRectHeight"]),
-            ]
-        except (KeyError, TypeError, ValueError):
-            continue  # no bbox → can't position overlays for this face
-        # All emotions present (frontend reorders into a fixed canonical
-        # order and renders one bar each — see EmotionBars.svelte).
-        present = [c for c in emo_cols
-                   if c in row.index and not pd.isna(row[c])]
-        if present:
-            try:
-                face["emo"] = [
-                    (c, round(float(row[c]), 3)) for c in present
-                ]
-            except (TypeError, ValueError):
-                pass
-        # Valence/Arousal (Detectorv2 only) — continuous, each in [-1, 1].
-        if "valence" in row.index and "arousal" in row.index:
-            try:
-                v, a = float(row["valence"]), float(row["arousal"])
-                if not pd.isna(v) and not pd.isna(a):
-                    face["valence_arousal"] = {
-                        "valence": round(v, 3), "arousal": round(a, 3),
-                    }
-            except (TypeError, ValueError):
-                pass
-        # Pose readout (degrees)
-        if all(c in row.index for c in ("Pitch", "Yaw", "Roll")):
-            try:
-                p, y, r = (float(row["Pitch"]), float(row["Yaw"]),
-                           float(row["Roll"]))
-                if not any(pd.isna(v) for v in (p, y, r)):
-                    # Pitch/Yaw/Roll are in RADIANS; the frontend readout
-                    # labels them "°", so convert to degrees here.
-                    face["pose"] = {
-                        "p": round(float(np.degrees(p)), 1),
-                        "y": round(float(np.degrees(y)), 1),
-                        "r": round(float(np.degrees(r)), 1),
-                    }
-            except (TypeError, ValueError):
-                pass
-        faces.append(face)
-
-    if not faces:
-        return None
-    meta["faces"] = faces
-    return json.dumps(meta, separators=(",", ":"))
-
-
-async def _run_detection(live, img: Image.Image) -> None:
-    """Detect on a (possibly downscaled) copy of ``img``, bake overlay
-    onto the SOURCE-resolution frame, cache encoded bytes.
+async def _run_detection(live, img: Image.Image, frame_id: int = -1) -> None:
+    """Detect on a (possibly downscaled) copy of ``img``, cache fex + dims.
 
     Splitting detection-input resolution from bake/display resolution
     is what makes ``live.detection_size`` a pure speed knob — the
     overlay always lands at source pixel density, no matter how
     coarse the detector ran.
+
+    Baking (draw_overlays + encode_jpeg) is skipped unless the recorder
+    needs an overlay MP4 — the live response now returns JSON coords
+    instead of a baked image, so baking on the non-recording path was
+    wasted CPU. The fps win is the point.
 
     Wrapped in try/finally so a single bad detection doesn't leave
     ``_detection_in_flight`` stuck True.
@@ -217,10 +133,10 @@ async def _run_detection(live, img: Image.Image) -> None:
     try:
         # Snapshot the render config on the loop (under the detector lock,
         # which also guards against a /configure rebuild mid-detection), then
-        # run the entire detect → bake → PNG-encode pipeline in the dedicated
-        # worker thread. Keeping ALL of it off the loop (not just detect) is
-        # the point: draw_overlays + encode_png are CPU-heavy and previously
-        # ran on the loop, blocking uploads + the recorder feed.
+        # run the detect pipeline (+ optional bake) in the dedicated worker
+        # thread. Keeping ALL of it off the loop (not just detect) is the
+        # point: draw_overlays + encode_jpeg are CPU-heavy and previously ran
+        # on the loop, blocking uploads + the recorder feed.
         async with live.detector_lock:
             detector = live.detector
             # Temporal stabilization: Detectorv2 reads bbox_smoothing_alpha in
@@ -245,22 +161,28 @@ async def _run_detection(live, img: Image.Image) -> None:
             overlay_kind = getattr(live, "overlay_kind", "dlib68_polygons")
             gaze_convention = getattr(live, "gaze_convention", "l2cs")
             overlay_style = live.style
+            # Bake only when a recorder in overlay mode needs it.
+            # The live JSON response uses fex coords directly, so baking
+            # is pure waste on the non-recording path.
+            rec = live.recorder
+            need_bake = rec is not None and rec.config.video_mode == "overlay"
             t0 = time.perf_counter()
             png, fex, dims, baked_arr = await loop.run_in_executor(
                 _DETECTION_EXECUTOR,
                 _detect_and_bake,
                 detector, img, detection_size,
                 toggles, mp_landmarks, landmark_style, overlay_kind,
-                gaze_convention, overlay_style, tracker,
+                gaze_convention, overlay_style, tracker, need_bake,
             )
             dur = time.perf_counter() - t0
-        print(f"detect+bake: {dims[0]}x{dims[1]} dur={dur*1000:.0f}ms")
+        print(f"detect: {dims[0]}x{dims[1]} dur={dur*1000:.0f}ms bake={need_bake}")
 
-        live._cached_baked_jpeg = png
+        live._cached_baked_jpeg = png  # None when not baking; kept for compat
         live._cached_fex = fex
-        # dims = the TRUE bake resolution (source upload size) — what the
-        # overlay coords are in, NOT the detection input size.
+        # dims = the TRUE source resolution — what the overlay coords are in,
+        # NOT the detection input size.
         live._cached_frame_dims = dims
+        live._cached_frame_id = frame_id
         live._detection_generation += 1
         # No cooldown — _detection_in_flight alone prevents queueing.
         live._next_detection_at = 0.0
@@ -299,13 +221,18 @@ def _detect_and_bake(
     gaze_convention: str = "l2cs",
     overlay_style: Optional[dict] = None,
     tracker=None,
+    bake: bool = True,
 ):
-    """Full per-frame pipeline, run in the detection worker thread:
-    detect → scale coords to source space → bake overlay → PNG-encode.
+    """Per-frame pipeline, run in the detection worker thread:
+    detect → scale coords to source space → (optionally) bake overlay + encode.
 
-    Returns ``(png_bytes, fex, (width, height))``. Pure function over its
-    arguments (no shared ``live`` state), so it's safe off the loop; the
-    caller assigns the results back on the loop.
+    When ``bake`` is False, skips draw_overlays and encode_jpeg and returns
+    ``(None, fex, (width, height), None)``. Detection + coord scaling still
+    run so ``fex`` is always valid. The live JSON response reads ``fex``
+    directly, so baking is only needed when the recorder wants an overlay MP4.
+
+    Pure function over its arguments (no shared ``live`` state), so it's safe
+    off the loop; the caller assigns the results back on the loop.
 
     NOTE: the ``fex`` RETURNED here is the full native frame (used by the
     recorder). Only the COPY passed to ``draw_overlays`` is run through
@@ -324,6 +251,19 @@ def _detect_and_bake(
     # Scale detector pixel coords back to source space (no-op when equal).
     if fex is not None and len(fex) > 0 and (scale_x != 1.0 or scale_y != 1.0):
         fex = _scale_fex_coords(fex, scale_x, scale_y)
+    # Determine source frame dimensions without copying the array.
+    h_src, w_src = img.height, img.width
+
+    if not bake:
+        # Fast path: detect-only (no draw, no encode). The live JSON response
+        # reads fex coords directly; baking is skipped to save CPU.
+        if _LIVE_PROFILE:
+            logging.getLogger(__name__).info(
+                "detect-only %dx%d input=%.1f detect=%.1f total=%.1fms",
+                w_src, h_src, _t_input, _t_detect, (_t() - _t0) * 1000.0,
+            )
+        return None, fex, (w_src, h_src), None
+
     # Bake overlay onto a copy of the source-resolution frame.
     frame_arr = np.asarray(img).copy()
     _t_prep = (_t() - _m) * 1000.0; _m = _t()
@@ -335,15 +275,13 @@ def _detect_and_bake(
             overlay_style=overlay_style,
         )
     _t_draw = (_t() - _m) * 1000.0; _m = _t()
-    # JPEG q=95 for the live feed: ~19ms/frame faster than PNG and visually
-    # indistinguishable for a real-time video stream (the overlay thin lines
-    # / dots survive cleanly at this quality). Use PNG only for archival.
+    # JPEG q=95 for baked frames destined for the recorder: visually
+    # indistinguishable and ~19ms/frame faster than PNG.
     jpeg = encode_jpeg(frame_arr, quality=95)
     _t_encode = (_t() - _m) * 1000.0
     # Transport breakdown (captured in the log buffer): where the per-frame
     # time goes OUTSIDE the model. detect is the detect_pil_images* call;
-    # draw=overlay bake, enc=JPEG encode — these + the HTTP round-trip are
-    # what caps displayed fps once detection is cheap (tracked frames).
+    # draw=overlay bake, enc=JPEG encode.
     h, w = frame_arr.shape[0], frame_arr.shape[1]
     if _LIVE_PROFILE:
         logging.getLogger(__name__).info(

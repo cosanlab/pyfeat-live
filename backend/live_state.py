@@ -82,23 +82,20 @@ class LiveSession:
     _cached_fex: object = None
     _next_detection_at: float = 0.0
     _detection_in_flight: bool = False
-    # Pre-baked + JPEG-encoded display frame. Detection writes this
-    # when it completes (bake overlay onto the frame detection ran
-    # on, then encode). /api/live/frame returns these bytes verbatim
-    # so display is perfectly locked: the displayed face IS the same
-    # frame whose positions the overlay was computed on. Display
-    # rate = detection rate (~10 Hz) but overlay drift is zero.
+    # Pre-baked + JPEG-encoded display frame. Kept for the recorder
+    # overlay path; the live response no longer uses it.
     _cached_baked_jpeg: bytes | None = None
     # (width, height) of the frame the overlay was actually baked onto
     # — i.e. the source upload resolution, which is NOT the detection
-    # input size when detection_size downscaling is active. The
-    # X-Live-Meta header reports these so the frontend's HTML overlays
-    # position correctly. None until the first detection completes.
+    # input size when detection_size downscaling is active.
+    # None until the first detection completes.
     _cached_frame_dims: tuple[int, int] | None = None
-    # Monotonic counter incremented each time _cached_baked_jpeg is
-    # replaced (i.e., each completed detection). Sent back to the
-    # frontend via the X-Detection-Generation header so the UI can
-    # distinguish "new locked frame" from "same frame served again."
+    # The X-Frame-Id value the client sent with the most recently
+    # detected frame. None until the first detection completes.
+    _cached_frame_id: int | None = None
+    # Monotonic counter incremented on each completed detection. Returned
+    # in the JSON response body so the frontend can distinguish a new
+    # detection result from a repeated one.
     _detection_generation: int = 0
     _state: dict = field(default_factory=lambda: {
         "frame_index": -1,
@@ -132,6 +129,7 @@ class LiveSession:
         self._cached_fex = None
         self._cached_baked_jpeg = None
         self._cached_frame_dims = None
+        self._cached_frame_id = None
         self._next_detection_at = 0.0
         self._detection_in_flight = False
         # Bump generation so the frontend's X-Detection-Generation

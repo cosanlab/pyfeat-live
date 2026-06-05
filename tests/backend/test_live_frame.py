@@ -1,12 +1,9 @@
-"""POST /api/live/frame bakes overlays and returns an image.
+"""POST /api/live/frame returns JSON face coordinates.
 
-The handler accepts JPEG body, schedules detection in a background
-executor task (rate-limited), bakes overlays with the cached fex,
-and returns the baked frame. Display is locked to the detection
-frame: response is image/png (lossless) once detection has cached
-a baked frame, otherwise echoes the source body (image/jpeg).
-Detection is decoupled from display so the upload loop never
-blocks on the detector.
+The handler accepts a JPEG body, schedules detection in a background
+executor task (rate-limited), and returns a JSON dict with id,
+generation, frame dimensions, and serialised face data. Detection is
+decoupled from display so the upload loop never blocks on the detector.
 """
 
 import io
@@ -40,11 +37,8 @@ def _patch_detect(monkeypatch):
     )
 
 
-def test_frame_upload_returns_image(client):
-    """First upload before detection completes echoes the source JPEG;
-    after detection completes the response is the baked PNG. Either
-    way it's a valid decodable image at the source resolution.
-    """
+def test_frame_upload_returns_json(client):
+    """Frame upload returns a JSON dict with the required top-level keys."""
     client.app.state.live.detector = _StubDetector()
     arr = np.full((120, 160, 3), 80, dtype=np.uint8)
     resp = client.post(
@@ -53,11 +47,12 @@ def test_frame_upload_returns_image(client):
         headers={"Content-Type": "image/jpeg"},
     )
     assert resp.status_code == 200
-    assert resp.headers["content-type"] in ("image/jpeg", "image/png")
-    # JPEG SOI marker (0xFFD8) or PNG signature (0x89 'P' 'N' 'G').
-    assert resp.content[:2] == b"\xff\xd8" or resp.content[:4] == b"\x89PNG"
-    decoded = Image.open(io.BytesIO(resp.content))
-    assert decoded.size == (160, 120)
+    body = resp.json()
+    assert set(body) >= {"id", "generation", "frame", "faces"}
+    assert isinstance(body["faces"], list)
+    # frame dimensions must be two positive ints
+    assert len(body["frame"]) == 2
+    assert all(isinstance(d, int) and d > 0 for d in body["frame"])
 
 
 def test_frame_upload_503_when_no_detector(client):

@@ -1,10 +1,16 @@
-import json
-import numpy as np
+"""Emotion serialisation via serialize_faces (replaces the old _live_meta_header test).
+
+_live_meta_header was removed when the /api/live/frame handler switched from
+returning a baked JPEG with JSON in an X-Live-Meta header to returning a JSON
+body via serialize_faces.  This file retains the emotion-coverage assertion
+against the new path.
+"""
+
 import pandas as pd
-from backend.routers.live import _live_meta_header
+from backend.serialization import serialize_faces
 
 
-def _row_with_all_emotions():
+def _fex_with_all_emotions():
     # One face row carrying a bbox + all 7 py-feat emotion columns.
     data = {
         "FaceRectX": 10.0, "FaceRectY": 20.0,
@@ -15,13 +21,13 @@ def _row_with_all_emotions():
     return pd.DataFrame([data])
 
 
-def test_meta_header_emits_all_seven_emotions():
-    fex = _row_with_all_emotions()
-    header = _live_meta_header(fex, frame_dims=(640, 360))
-    meta = json.loads(header)
-    emo = meta["faces"][0]["emo"]
-    names = {name for name, _ in emo}
-    assert names == {
+def test_serialize_faces_emits_all_seven_emotions():
+    """serialize_faces must include all 7 canonical emotions in face["emotions"]."""
+    fex = _fex_with_all_emotions()
+    faces = serialize_faces(fex, mp_landmarks=False)
+    assert len(faces) == 1
+    emo = faces[0]["emotions"]
+    assert set(emo.keys()) == {
         "anger", "disgust", "fear", "happiness",
         "sadness", "surprise", "neutral",
     }
