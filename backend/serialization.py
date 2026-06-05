@@ -58,6 +58,7 @@ def serialize_faces(
     )
     has_pose = all(c in cols for c in ("Pitch", "Roll", "Yaw"))
     has_gaze = all(c in cols for c in ("gaze_pitch", "gaze_yaw"))
+    has_va = "valence" in cols and "arousal" in cols
     emotion_cols = [c for c in _EMOTION_COLS if c in cols]
     au_cols = [c for c in fex.columns if c.startswith("AU")]
 
@@ -96,5 +97,10 @@ def serialize_faces(
             face["emotions"] = {c: _clean(row.get(c)) for c in emotion_cols}
         if au_cols:
             face["aus"] = {c: _clean(row.get(c)) for c in au_cols}
+        if has_va:
+            v = _clean(row.get("valence"))
+            a = _clean(row.get("arousal"))
+            if v is not None and a is not None:
+                face["valence_arousal"] = {"valence": v, "arousal": a}
         out.append(face)
     return out
