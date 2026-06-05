@@ -11,6 +11,9 @@
   import LiveControlBar from '../lib/components/LiveControlBar.svelte';
   import OverlayConfigModal from '../lib/components/OverlayConfigModal.svelte';
   import LogsDrawer from '../lib/components/LogsDrawer.svelte';
+  import EmotionBars from '../lib/components/EmotionBars.svelte';
+  import ValenceArousalPlot from '../lib/components/ValenceArousalPlot.svelte';
+  import PoseCube from '../lib/components/PoseCube.svelte';
   import { placeMetaStack } from '../lib/overlay/metaStack';
 
   type Props = { showLogs?: boolean; onCloseLogs?: () => void };
@@ -614,50 +617,44 @@
               {@const vaOn = !!(toggles.valenceArousal && face.valence_arousal)}
               {@const poseOn = !!(toggles.poses && face.pose)}
               {@const anyOn = emoOn || vaOn || poseOn}
-              {@const emoH = emoOn ? (face.emo!.length * overlayStyle.emotions.fontSize * 1.35 + 8) : 0}
-              {@const vaH = vaOn ? 66 : 0}
-              {@const poseH = poseOn ? 50 : 0}
+              <!-- Fixed panel heights (source px) so placeMetaStack centers/flips consistently -->
+              {@const emoH = emoOn ? 64 : 0}
+              {@const vaH = vaOn ? 70 : 0}
+              {@const poseH = poseOn ? 48 : 0}
               {@const nOn = (emoOn ? 1 : 0) + (vaOn ? 1 : 0) + (poseOn ? 1 : 0)}
-              {@const stackW = 118}
+              {@const stackW = 96}
               {@const stackH = emoH + vaH + poseH + (nOn > 1 ? (nOn - 1) * 4 : 0)}
               {@const faceRect = { x: face.bbox[0] * sx, y: face.bbox[1] * sy, w: face.bbox[2] * sx, h: face.bbox[3] * sy }}
               {@const others = liveMeta.faces.filter((_, j) => j !== fi).map((o) => ({ x: o.bbox[0] * sx, y: o.bbox[1] * sy, w: o.bbox[2] * sx, h: o.bbox[3] * sy }))}
               {@const pos = placeMetaStack(faceRect, others, stackW, stackH, WIDTH, HEIGHT)}
               {#if anyOn}
                 <div
-                  class="absolute flex flex-col gap-0.5 pointer-events-none"
+                  class="absolute flex flex-col gap-1 pointer-events-none"
                   style="left: {WIDTH - pos.left - stackW}px; top: {pos.top}px; width: {stackW}px;"
                 >
                   {#if emoOn}
-                    <div
-                      class="px-2 py-1 rounded bg-black/70 whitespace-nowrap font-mono leading-tight"
-                      style="color: {overlayStyle.emotions.color}; opacity: {overlayStyle.emotions.opacity}; font-size: {overlayStyle.emotions.fontSize}px;"
-                    >
-                      {#each face.emo! as [name, val]}
-                        <div>{name.charAt(0).toUpperCase() + name.slice(1)}  {val.toFixed(2)}</div>
-                      {/each}
-                    </div>
+                    <EmotionBars
+                      values={Object.fromEntries(face.emo!)}
+                      {smooth}
+                      {smoothStrength}
+                    />
                   {/if}
                   {#if vaOn}
-                    {@const va = face.valence_arousal!}
-                    <div class="px-2 py-1 rounded bg-black/70 text-zinc-200">
-                      <svg width="40" height="40" viewBox="0 0 56 56" class="block">
-                        <rect x="2" y="2" width="52" height="52" rx="3" fill="none" stroke="#52525b" stroke-width="1" />
-                        <line x1="28" y1="2" x2="28" y2="54" stroke="#3f3f46" stroke-width="1" />
-                        <line x1="2" y1="28" x2="54" y2="28" stroke="#3f3f46" stroke-width="1" />
-                        <circle cx={28 + va.valence * 26} cy={28 - va.arousal * 26} r="3.5" fill="#22c55e" />
-                      </svg>
-                      <div class="mt-0.5 text-[10px] font-mono text-zinc-300 leading-none whitespace-nowrap">
-                        V {va.valence.toFixed(2)}&nbsp; A {va.arousal.toFixed(2)}
-                      </div>
-                    </div>
+                    <ValenceArousalPlot
+                      valence={face.valence_arousal!.valence}
+                      arousal={face.valence_arousal!.arousal}
+                      {smooth}
+                      {smoothStrength}
+                    />
                   {/if}
                   {#if poseOn}
-                    <div class="px-2 py-1 rounded bg-black/70 text-white text-[12px] leading-tight font-mono whitespace-nowrap">
-                      <div>Pitch  {face.pose!.p.toFixed(1)}°</div>
-                      <div>Yaw    {face.pose!.y.toFixed(1)}°</div>
-                      <div>Roll   {face.pose!.r.toFixed(1)}°</div>
-                    </div>
+                    <PoseCube
+                      pitch={face.pose!.p}
+                      yaw={face.pose!.y}
+                      roll={face.pose!.r}
+                      {smooth}
+                      {smoothStrength}
+                    />
                   {/if}
                 </div>
               {/if}
