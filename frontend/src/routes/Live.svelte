@@ -512,7 +512,7 @@
             mpLandmarks={true}
             width={frameW}
             height={frameH}
-            toggles={{ ...toggles, emotions: false }}
+            toggles={{ ...toggles, emotions: false, poses: false }}
             landmarkStyle={landmarkStyle}
             edges={overlayEdges ? (landmarkStyle === 'lines' ? overlayEdges.mp_contours : overlayEdges.mp_tess) : undefined}
             mpToDlib68={mpToDlib68}
