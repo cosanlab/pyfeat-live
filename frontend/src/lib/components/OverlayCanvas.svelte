@@ -34,6 +34,9 @@
   // Style takes precedence over the landmarkStyle prop when provided.
   const lmStyle = $derived(style?.landmarks.style ?? landmarkStyle);
   const auLut = $derived(style ? colormapLut(style.aus.colormap) : null);
+  // AU render mode: fall back to 'heatmap' if absent (persisted styles
+  // predating this field won't have it).
+  const auMode = $derived(style?.aus.mode ?? 'heatmap');
 
   let canvas: HTMLCanvasElement | null = $state(null);
 
@@ -41,8 +44,27 @@
   // detectors (Detectorv2, MPDetector) where mpLandmarks is true; the
   // classic Detector keeps the dlib-68 polygon heatmap below.
   let auMeshTable: AuMeshTable | null = $state(null);
+  // MP tessellation triangles for the filled heatmap. Reconstructed from the
+  // mp_tess edge list using the same consecutive-triple rule as the backend
+  // _mesh_au_topology: edges[i] closes the triangle (edges[i][0], edges[i][1],
+  // edges[i+1][1]) for i = 0, 3, 6, ... (every group of 3 edges is one tri).
+  let tessTris: [number, number, number][] | null = $state(null);
+
   onMount(async () => {
-    auMeshTable = await systemApi.auMeshTable().catch(() => null);
+    const [meshTable, overlayEdges] = await Promise.all([
+      systemApi.auMeshTable().catch(() => null),
+      systemApi.overlayEdges().catch(() => null),
+    ]);
+    auMeshTable = meshTable;
+    if (overlayEdges?.mp_tess) {
+      const E = overlayEdges.mp_tess;
+      const tris: [number, number, number][] = [];
+      for (let i = 0; i + 2 < E.length; i += 3) {
+        const ea = E[i], eb = E[i + 1];
+        if (ea && eb) tris.push([ea[0]!, ea[1]!, eb[1]!]);
+      }
+      tessTris = tris;
+    }
   });
 
   $effect(() => {
@@ -74,10 +96,15 @@
       if (toggles.rects) O.drawRect(ctx, face.rect, style?.faceboxes);
       if (toggles.aus) {
         if (mpLandmarks && auMeshTable) {
-          // Mesh detectors (Detectorv2, MPDetector): colour the 478-mesh
-          // vertices each AU drives, reading from the full mesh in face.lm.
-          O.drawAuMeshHeatmap(ctx, face, auMeshTable,
-            style ? { opacity: style.aus.opacity } : undefined);
+          // Mesh detectors (Detectorv2, MPDetector): filled triangle heatmap
+          // (default) or vertex dots, depending on aus.mode from the style.
+          O.drawAuMeshHeatmap(
+            ctx, face, auMeshTable,
+            auMode === 'heatmap' ? (tessTris ?? null) : null,
+            style
+              ? { mode: auMode, lut: auLut ?? undefined, opacity: style.aus.opacity }
+              : { mode: auMode },
+          );
         } else {
           O.drawAuHeatmap(ctx, face, auTable ?? null, mpLandmarks, mpToDlib68 ?? null,
             style ? { lut: auLut ?? undefined, opacity: style.aus.opacity } : undefined);

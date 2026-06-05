@@ -196,6 +196,14 @@
               </label>
 
             {:else if s.key === 'aus'}
+              <label class="flex items-center gap-1.5">mode
+                <select class="px-1.5 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-zinc-200"
+                  value={style.aus.mode ?? 'heatmap'}
+                  onchange={(e) => upd('aus', { mode: (e.target as HTMLSelectElement).value as 'heatmap' | 'points' })}>
+                  <option value="heatmap">Heatmap</option>
+                  <option value="points">Points</option>
+                </select>
+              </label>
               <label class="flex items-center gap-1.5">colormap
                 <select class="px-1.5 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-zinc-200"
                   value={style.aus.colormap}

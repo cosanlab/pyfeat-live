@@ -41,7 +41,14 @@ export interface OverlayStyleConfig {
   landmarks: { style: LandmarkStyle; color: string; opacity: number; size: number };
   pose: { sizeScale: number };           // axis length as fraction of face; XYZ colors fixed
   gaze: { color: string; opacity: number; lineWidth: number };
-  aus: { colormap: import('./colormaps').ColormapName; opacity: number };
+  aus: {
+    colormap: import('./colormaps').ColormapName;
+    opacity: number;
+    /** Render mode for the 478-mesh AU heatmap (mesh detectors only).
+     *  'heatmap' (default): filled triangle regions coloured by AU intensity.
+     *  'points': small dots at the mesh vertices each AU drives. */
+    mode?: 'heatmap' | 'points';
+  };
   emotions: { color: string; opacity: number; fontSize: number };
 }
 
@@ -51,7 +58,7 @@ export function defaultOverlayStyle(): OverlayStyleConfig {
     landmarks: { style: 'mesh', color: '#ffffff', opacity: 1, size: 1.2 },
     pose: { sizeScale: 0.5 },
     gaze: { color: '#22c55e', opacity: 1, lineWidth: 2 },
-    aus: { colormap: 'Blues', opacity: 0.55 },
+    aus: { colormap: 'Blues', opacity: 0.55, mode: 'heatmap' },
     emotions: { color: '#ffffff', opacity: 1, fontSize: 12 },
   };
 }

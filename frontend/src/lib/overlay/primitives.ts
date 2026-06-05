@@ -448,49 +448,118 @@ export function drawAuHeatmap(
 }
 
 // ---------------------------------------------------------------------------
-// AU 478-mesh vertex heatmap (Detectorv2 / MPDetector).
+// AU 478-mesh heatmap (Detectorv2 / MPDetector).
 //
-// Unlike drawAuHeatmap (which fills dlib-68 muscle polygons), the mesh
-// detectors expose a full 478-point landmark mesh in face.lm, and the
-// au-mesh-table maps each AU to the specific mesh vertices it drives. We
-// colour those vertices by AU intensity.
+// Two render modes:
+//   'heatmap' (default) — filled triangle regions from the MediaPipe
+//     tessellation, coloured by AU intensity. Ports the backend's
+//     _draw_au_mesh_heatmap algorithm (overlay_render.py): per-vertex
+//     intensity = max AU value driving that vertex, per-triangle mean
+//     intensity → gamma-corrected → Blues LUT colour, alpha scaled by
+//     intensity so a resting face fades out.
+//   'points' — small dots at the mesh vertices each AU drives (original
+//     behaviour).
 //
-// Coordinate handling matches drawAuHeatmap: face.lm is consumed in raw
-// logical (width/height) space with no scaling/offset. The OverlayCanvas
-// context already carries the device-pixel-ratio transform via
-// ctx.setTransform(dpr,...), so drawing in lm coords lands correctly on the
-// CSS-scaled video — same as every other primitive here.
+// Coordinate handling: face.lm is consumed in raw logical pixel space.
+// The OverlayCanvas context already carries the DPR×SS transform, so
+// drawing in lm coords lands correctly — same as every other primitive.
 // ---------------------------------------------------------------------------
 
-/** Colour the 478-mesh vertices driven by each AU by AU intensity.
- *  Uses face.lm (flat [x0,y0,x1,y1,...], 478 points for mesh detectors)
- *  and face.aus (AU name → intensity). */
+// Gamma and threshold constants match the backend _draw_au_mesh_heatmap.
+const HEATMAP_GAMMA = 2.2;
+const HEATMAP_THRESH = 0.08;
+
+/**
+ * Draw the AU heatmap for 478-mesh detectors (Detectorv2, MPDetector).
+ *
+ * @param table      AuMeshTable from systemApi.auMeshTable()
+ * @param tessTris   Optional MP-478 tessellation triangles as [[a,b,c], ...].
+ *                   Required for mode='heatmap'. Derived from the mp_tess
+ *                   edge list (consecutive triples close each triangle, same
+ *                   as the backend _mesh_au_topology reconstruction). When
+ *                   absent or empty the renderer falls back to 'points'.
+ * @param opts.mode  'heatmap' (filled triangles, default) | 'points' (dots)
+ * @param opts.lut   Override colormap LUT (falls back to table.lut)
+ * @param opts.opacity  Overall opacity multiplier (0–1)
+ * @param opts.radius   Dot radius for 'points' mode (default 2)
+ */
 export function drawAuMeshHeatmap(
   ctx: CanvasRenderingContext2D,
   face: Face,
   table: AuMeshTable,
-  opts?: { radius?: number; opacity?: number },
+  tessTris?: [number, number, number][] | null,
+  opts?: { mode?: 'heatmap' | 'points'; lut?: Lut; radius?: number; opacity?: number },
 ): void {
   const lm = face.lm;
   const aus = face.aus;
   if (!lm || !aus) return;
-  const radius = opts?.radius ?? 2;
-  ctx.save();
-  if (opts?.opacity != null) ctx.globalAlpha = opts.opacity;
-  for (const [au, verts] of Object.entries(table.auToVertices)) {
-    const v = aus[au];
-    if (v == null || v <= 0) continue;
-    const rgb = table.lut[Math.min(255, Math.max(0, Math.round(v * 255)))];
-    if (!rgb) continue;
-    ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-    for (const vi of verts) {
-      const x = lm[vi * 2];
-      const y = lm[vi * 2 + 1];
-      if (x == null || y == null) continue;
+
+  const mode = opts?.mode ?? 'heatmap';
+  const lut: Lut = (opts?.lut ?? table.lut) as Lut;
+  const opacity = opts?.opacity ?? 1.0;
+
+  if (mode === 'heatmap' && tessTris && tessTris.length > 0) {
+    // --- Filled triangle heatmap (port of backend _draw_au_mesh_heatmap) ---
+    //
+    // 1. Build per-vertex intensity: max over all AUs that drive each vertex.
+    const vint = new Float32Array(478);
+    for (const [au, verts] of Object.entries(table.auToVertices)) {
+      const raw = aus[au];
+      if (raw == null) continue;
+      const v = typeof raw === 'number' && Number.isFinite(raw) ? raw : 0;
+      if (v <= 0) continue;
+      for (const vi of verts) {
+        if (vi < 478 && v > vint[vi]!) vint[vi] = v;
+      }
+    }
+
+    // 2. Render each tessellation triangle.
+    ctx.save();
+    for (const [a, b, c] of tessTris) {
+      const m = (vint[a]! + vint[b]! + vint[c]!) / 3.0;
+      if (m < HEATMAP_THRESH) continue;
+      const disp = Math.pow(m, HEATMAP_GAMMA);
+
+      const ax = lm[a * 2], ay = lm[a * 2 + 1];
+      const bx = lm[b * 2], by = lm[b * 2 + 1];
+      const cx = lm[c * 2], cy = lm[c * 2 + 1];
+      if (ax == null || ay == null || bx == null || by == null || cx == null || cy == null) continue;
+
+      const lutIdx = Math.min(255, Math.max(0, Math.round(disp * 255)));
+      const rgb = lut[lutIdx];
+      if (!rgb) continue;
+
+      // Alpha: faint at rest, strong when active — matches the backend formula.
+      const alpha = Math.min(185, disp * 240) * opacity / 255;
+      ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(3)})`;
       ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.lineTo(cx, cy);
+      ctx.closePath();
       ctx.fill();
     }
+    ctx.restore();
+  } else {
+    // --- Dots fallback (original 'points' behaviour) ---
+    const radius = opts?.radius ?? 2;
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    for (const [au, verts] of Object.entries(table.auToVertices)) {
+      const raw = aus[au];
+      if (raw == null || (raw as number) <= 0) continue;
+      const rgb = lut[Math.min(255, Math.max(0, Math.round((raw as number) * 255)))];
+      if (!rgb) continue;
+      ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+      for (const vi of verts) {
+        const x = lm[vi * 2];
+        const y = lm[vi * 2 + 1];
+        if (x == null || y == null) continue;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
   }
-  ctx.restore();
 }
