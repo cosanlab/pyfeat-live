@@ -42,7 +42,7 @@
     </div>
   </div>
   <!-- TEMP calibration readout: raw Fex Pitch/Yaw/Roll (deg). -->
-  <div class="text-[8px] font-mono text-zinc-300 leading-tight text-center">
+  <div class="text-[11px] font-mono text-white leading-tight text-center whitespace-nowrap">
     P {pitch.toFixed(0)} Y {yaw.toFixed(0)} R {roll.toFixed(0)}
   </div>
 </div>
