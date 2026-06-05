@@ -52,59 +52,70 @@
 
   const opts = $derived(MODEL_OPTIONS[config.detector_type]);
 
-  // Detectorv2 is a built-in multitask model — its Landmark/Action-units
-  // sub-model pickers don't apply, so hide those two rows for it.
-  // The Face row is also hidden: for the classic Detector the face_model is
-  // derived from facepose_model (img2pose vs retinaface), so the Pose row
-  // drives it; for the others it's fixed anyway.
+  // Rows shown per detector type. Face is always first.
+  // Detectorv2: only Face + Identity (everything else is fixed in the multitask model).
+  // MPDetector: Face, AU, Emotion, Identity.
+  // Detector (classic): all rows.
   const modelRows = $derived(
-    (
-      [
-        ['Pose', 'facepose_model'],
-        ['Face', 'face_model'],
-        ['Landmark', 'landmark_model'],
-        ['Action units', 'au_model'],
-        ['Emotion', 'emotion_model'],
-        ['Identity', 'identity_model'],
-        ['Gaze', 'gaze_model'],
-      ] as [string, string][]
-    ).filter(
-      ([, key]) =>
-        // Hide Face row entirely — it's derived from the Pose selection for
-        // classic Detector and fixed/irrelevant for the others.
-        key !== 'face_model' &&
-        (config.detector_type !== 'Detectorv2' ||
-          (key !== 'landmark_model' && key !== 'au_model')),
-    ),
+    config.detector_type === 'Detectorv2'
+      ? ([
+          ['Face', 'face_model'],
+          ['Identity', 'identity_model'],
+        ] as [string, string][])
+      : config.detector_type === 'MPDetector'
+        ? ([
+            ['Face', 'face_model'],
+            ['Action units', 'au_model'],
+            ['Emotion', 'emotion_model'],
+            ['Identity', 'identity_model'],
+          ] as [string, string][])
+        : ([
+            ['Face', 'face_model'],
+            ['Pose', 'facepose_model'],
+            ['Landmark', 'landmark_model'],
+            ['Action units', 'au_model'],
+            ['Emotion', 'emotion_model'],
+            ['Identity', 'identity_model'],
+            ['Gaze', 'gaze_model'],
+          ] as [string, string][]),
   );
 
-  // Switching detector type must also reset the model fields, because
-  // e.g. landmark_model='mp_facemesh_v2' is invalid for the classic
-  // Detector. Mirrors v1's on_detector_type_change behavior.
+  // Dynamic Pose options for the classic Detector depend on face_model.
+  // img2pose drives pose natively → only option is 'img2pose'.
+  // retinaface → user can pick pose_mlp or pnp_dlt.
+  const poseOptions = $derived(
+    config.detector_type === 'Detector'
+      ? config.face_model === 'img2pose'
+        ? ['img2pose']
+        : ['pose_mlp', 'pnp_dlt']
+      : config.detector_type === 'Detectorv2'
+        ? ['multitask']
+        : ['pnp_dlt'],
+  );
+
+  // Switching detector type resets all sub-model fields to the first valid
+  // option for that detector. face_model and facepose_model are set directly
+  // from MODEL_OPTIONS — no derive-from-pose coupling.
   function switchDetectorType(type: LiveConfigure['detector_type']) {
     const d = MODEL_OPTIONS[type];
-    const newFacepose = d.facepose_model[0]!;
-    // Derive face_model from facepose_model for the classic Detector; others
-    // always use retinaface.
-    const newFaceModel = newFacepose === 'img2pose' ? 'img2pose' : 'retinaface';
     onConfigChange({
       ...config,
       detector_type: type,
-      face_model: newFaceModel,
+      face_model: d.face_model[0]!,
+      facepose_model: d.facepose_model[0]!,
       landmark_model: d.landmark_model[0]!,
       au_model: d.au_model[0]!,
       emotion_model: d.emotion_model[0],
       identity_model: d.identity_model[0],
       gaze_model: d.gaze_model[0],
-      facepose_model: newFacepose,
     });
   }
 
-  // When the user changes the Pose dropdown for the classic Detector, also
-  // update face_model so the backend builds the right face detector.
-  function onPoseChange(newPose: string) {
-    const newFaceModel = newPose === 'img2pose' ? 'img2pose' : 'retinaface';
-    onConfigChange({ ...config, facepose_model: newPose, face_model: newFaceModel });
+  // When the user changes Face, also reset facepose_model to the first valid
+  // option for that face model (img2pose → img2pose; retinaface → pose_mlp).
+  function onFaceChange(newFace: string) {
+    const newFacepose = newFace === 'img2pose' ? 'img2pose' : 'pose_mlp';
+    onConfigChange({ ...config, face_model: newFace, facepose_model: newFacepose });
   }
 </script>
 
@@ -160,14 +171,14 @@
             value={config[key as keyof LiveConfigure] ?? ''}
             onchange={(e) => {
               const val = (e.target as HTMLSelectElement).value || null;
-              if (key === 'facepose_model' && val) {
-                onPoseChange(val);
+              if (key === 'face_model' && val) {
+                onFaceChange(val);
               } else {
                 update(key as keyof LiveConfigure, val as any);
               }
             }}
           >
-            {#each (opts as any)[key] as opt}
+            {#each (key === 'facepose_model' ? poseOptions : (opts as any)[key]) as opt}
               <option value={opt ?? ''}>{opt ?? '(disabled)'}</option>
             {/each}
           </select>

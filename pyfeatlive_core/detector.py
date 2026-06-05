@@ -62,15 +62,9 @@ def build_detector(config: DetectorConfig):
             device=config.device,
         )
 
-    # For Detector and MPDetector, resolve the face_model from facepose_model.
-    # img2pose drives pose natively; all others use retinaface.
-    if config.facepose_model == "img2pose":
-        face_model = "img2pose"
-    else:
-        face_model = "retinaface"
-
+    # The Face dropdown is authoritative: use config.face_model directly.
     common_kwargs = dict(
-        face_model=face_model,
+        face_model=config.face_model,
         landmark_model=config.landmark_model,
         au_model=config.au_model,
         emotion_model=config.emotion_model,
@@ -81,9 +75,10 @@ def build_detector(config: DetectorConfig):
         # MPDetector doesn't take gaze_model; gaze comes from iris.
         return MPDetector(**common_kwargs)
 
-    # Classic Detector: build, then optionally force facepose_method so
-    # the forward() call skips (or keeps) the Pose-MLP.
+    # Classic Detector: build, then optionally force facepose_method when
+    # using retinaface so pose_mlp / pnp_dlt is applied correctly.
+    # When face_model == 'img2pose', pose is native to that model — no override needed.
     detector = Detector(gaze_model=config.gaze_model, **common_kwargs)
-    if config.facepose_model in ("pose_mlp", "pnp_dlt"):
+    if config.face_model == "retinaface" and config.facepose_model in ("pose_mlp", "pnp_dlt"):
         detector.facepose_method = config.facepose_model
     return detector
