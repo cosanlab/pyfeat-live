@@ -120,6 +120,12 @@
   let sourceVideo: HTMLVideoElement | null = $state(null);
   let displayCanvas: HTMLCanvasElement | null = $state(null);
   let captureCanvas: HTMLCanvasElement | null = null;
+  // Small canvas used to encode a detection-resolution JPEG for upload when NOT
+  // recording. Detection runs at WIDTH×HEIGHT, so uploading the full capture
+  // res just wastes a big main-thread JPEG encode each frame; the crisp display
+  // uses the cached full-res bitmap regardless. When recording, we upload full
+  // res so the recorder bakes onto a high-res frame.
+  let uploadCanvas: HTMLCanvasElement | null = null;
 
   let isStreaming = $state(false);
   let isPaused = $state(false);
@@ -285,9 +291,21 @@
       const bmp = await createImageBitmap(captureCanvas!);
       frameCache.put(id, bmp);
 
-      // 3. JPEG-encode. q=0.92: lower DCT noise → less bbox jitter.
+      // 3. JPEG-encode for upload. Detection only needs WIDTH×HEIGHT, so when
+      // NOT recording encode a downscaled frame — a full-res JPEG encode is the
+      // dominant per-frame main-thread cost and pure waste here. When recording,
+      // encode full res so the recorder bakes onto a high-res frame.
+      // q=0.92: lower DCT noise → less bbox jitter.
+      let encodeCanvas = captureCanvas!;
+      if (!isRecording) {
+        if (!uploadCanvas) uploadCanvas = document.createElement('canvas');
+        if (uploadCanvas.width !== WIDTH) uploadCanvas.width = WIDTH;
+        if (uploadCanvas.height !== HEIGHT) uploadCanvas.height = HEIGHT;
+        uploadCanvas.getContext('2d')!.drawImage(captureCanvas!, 0, 0, WIDTH, HEIGHT);
+        encodeCanvas = uploadCanvas;
+      }
       const blob: Blob | null = await new Promise((res) =>
-        captureCanvas!.toBlob((b) => res(b), 'image/jpeg', 0.92));
+        encodeCanvas.toBlob((b) => res(b), 'image/jpeg', 0.92));
       if (signal.aborted) return;
       if (!blob) { await new Promise((r) => setTimeout(r, 16)); continue; }
       const tEnc = profile ? performance.now() : 0;
