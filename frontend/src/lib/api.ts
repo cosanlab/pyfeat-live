@@ -96,6 +96,9 @@ export interface LiveConfigure {
   // Only classic Detector honors gaze_model. MPDetector derives gaze
   // from iris landmarks unconditionally.
   gaze_model: string | null;
+  // Head-pose backend for the classic Detector only ("pose_mlp", "pnp_dlt",
+  // "img2pose"). Ignored for Detectorv2 / MPDetector.
+  facepose_model?: string;
   device: 'cpu' | 'mps' | 'cuda';
   // Optional overlay/render hints. The backend bakes overlays onto the
   // returned frame using these — they're stored on the LiveSession and

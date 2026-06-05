@@ -359,6 +359,9 @@ class ConfigureRequest(BaseModel):
     # Only honored by classic Detector. MPDetector emits gaze
     # unconditionally from iris landmarks.
     gaze_model: Optional[str] = "l2cs"
+    # Head-pose backend for the classic Detector ("pose_mlp", "pnp_dlt",
+    # "img2pose"). Ignored for Detectorv2 / MPDetector.
+    facepose_model: Optional[str] = "pose_mlp"
     device: Literal["cpu", "mps", "cuda"] = "cpu"
     # Overlay/render hints — read by /api/live/frame on every uploaded
     # frame so the in-pipeline bake matches what the UI would have drawn.
@@ -383,7 +386,8 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
     # hints below are stored on ``live`` directly.
     detector_fields = {
         "detector_type", "face_model", "landmark_model", "au_model",
-        "emotion_model", "identity_model", "gaze_model", "device",
+        "emotion_model", "identity_model", "gaze_model", "facepose_model",
+        "device",
     }
     cfg = DetectorConfig(**{k: v for k, v in req.model_dump().items()
                             if k in detector_fields})
