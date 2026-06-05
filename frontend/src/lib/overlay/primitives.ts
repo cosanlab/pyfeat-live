@@ -140,8 +140,10 @@ export function drawGaze(
     // Shaft ends at the arrowhead base; filled triangle head (matches backend).
     const nx = dirX / norm, ny = dirY / norm;
     const px = -ny, py = nx;
-    const headLen = Math.max(8, length * 0.22);
-    const headW = Math.max(5, length * 0.14);
+    // Arrowhead scales with the LINE WIDTH (so it tracks the gaze style/size),
+    // clamped so it never overruns the shaft on a short gaze vector.
+    const headLen = Math.min(length * 0.45, Math.max(8, lw * 3.5));
+    const headW = Math.min(length * 0.32, Math.max(5, lw * 2.6));
     const bx = endX - nx * headLen, by = endY - ny * headLen;
     ctx.beginPath();
     ctx.moveTo(ox, oy);
