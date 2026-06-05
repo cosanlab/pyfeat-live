@@ -92,7 +92,7 @@
             onchange={(e) => onSmoothChange?.((e.target as HTMLInputElement).checked)}
           />
           <span class="text-[12px] font-medium text-zinc-100">Stabilize overlays</span>
-          <span class="text-[10px] text-zinc-500">— EMA the box + mesh to reduce jitter</span>
+          <span class="text-[10px] text-zinc-500">— EMA the box, mesh + readouts to reduce jitter</span>
         </label>
         {#if onSmoothStrengthChange}
           <label class="flex items-center gap-2 mt-2 pl-5.5 text-[11px] text-zinc-400" class:opacity-40={!smooth}>
