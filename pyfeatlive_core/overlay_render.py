@@ -118,7 +118,6 @@ def draw_overlays(
     # once here; primitives multiply their own widths/radii internally.
     fex_scaled = _scale_fex_coords_inplace(fex, SCALE) if SCALE != 1 else fex
     font_label = _overlay_font(14 * SCALE)
-    font_small = _overlay_font(12 * SCALE)
     n_landmarks = 478 if mp_landmarks else 68
 
     from pyfeatlive_core.overlay_style import OverlayStyle
@@ -139,8 +138,11 @@ def draw_overlays(
             _draw_landmarks(drw, row, mp_landmarks=mp_landmarks,
                             style=landmark_style, n_landmarks=n_landmarks,
                             scale=SCALE, ostyle=ostyle)
-        if toggles.get("poses"):
-            _draw_pose(drw, row, font_small, mp_landmarks=mp_landmarks, scale=SCALE, ostyle=ostyle, gaze_convention=gaze_convention)
+        # NOTE: the "poses" toggle no longer bakes 3D axis sticks here — the
+        # Live page renders head pose as a client-side rotating cube
+        # (PoseCube.svelte) instead. _draw_pose is kept (and unit-tested) for
+        # potential reuse but is intentionally not called in the live/recorder
+        # bake. The toggle now gates only the frontend cube panel.
         if toggles.get("gaze"):
             _draw_gaze(drw, row, mp_landmarks=mp_landmarks, scale=SCALE,
                        gaze_convention=gaze_convention, ostyle=ostyle)
