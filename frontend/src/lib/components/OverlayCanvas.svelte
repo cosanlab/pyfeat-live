@@ -43,16 +43,25 @@
 
   $effect(() => {
     if (!canvas) return;
-    // Render at device-pixel-ratio resolution so canvas text/lines stay
-    // crisp when the canvas is CSS-scaled larger than its logical size
-    // (the video stage stretches a 640x360 canvas to fit the container).
-    // Drawing coords stay in logical WIDTH/HEIGHT space via ctx.scale.
     const dpr = window.devicePixelRatio || 1;
-    if (canvas.width !== width * dpr) canvas.width = width * dpr;
-    if (canvas.height !== height * dpr) canvas.height = height * dpr;
+    // Supersample on top of dpr for extra-crisp thin mesh lines.
+    const SS = 2;
+    // Size the backing store from the canvas's ACTUAL on-screen size, NOT the
+    // logical width/height coord space. The logical space can be much smaller
+    // than the display (live detection runs at 640 but the stage is ~1300px
+    // wide); sizing off `width` would render small and CSS-upscale, blurring
+    // the overlay. clientWidth/Height is the real rendered size; we re-measure
+    // every frame so window resizes are picked up. Drawing coords stay in
+    // logical width×height space, mapped onto the backing via setTransform.
+    const cw = canvas.clientWidth || width;
+    const ch = canvas.clientHeight || height;
+    const bw = Math.round(cw * dpr * SS);
+    const bh = Math.round(ch * dpr * SS);
+    if (canvas.width !== bw) canvas.width = bw;
+    if (canvas.height !== bh) canvas.height = bh;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(bw / width, 0, 0, bh / height, 0, 0);
     ctx.clearRect(0, 0, width, height);
     for (const face of faces) {
       if (toggles.rects) O.drawRect(ctx, face.rect, style?.faceboxes);
