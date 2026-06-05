@@ -3,8 +3,9 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import { liveApi, systemApi } from '../lib/api';
-  import type { LiveConfigure, ComputeInfo, LiveMeta } from '../lib/api';
+  import type { LiveConfigure, ComputeInfo, OverlayEdgeSets } from '../lib/api';
   import type { OverlayToggles, OverlayStyleConfig } from '../lib/overlay/types';
+  import type { Face } from '../lib/overlay/types';
   import { defaultOverlayStyle } from '../lib/overlay/types';
   import { cameraStore, refreshDevices, startCamera, stopCamera } from '../lib/webrtc/useCamera.svelte';
   import LiveSidebar from '../lib/components/LiveSidebar.svelte';
@@ -14,42 +15,26 @@
   import EmotionBars from '../lib/components/EmotionBars.svelte';
   import ValenceArousalPlot from '../lib/components/ValenceArousalPlot.svelte';
   import PoseCube from '../lib/components/PoseCube.svelte';
+  import OverlayCanvas from '../lib/components/OverlayCanvas.svelte';
   import { placeMetaStack } from '../lib/overlay/metaStack';
+  import { FrameCache } from '../lib/overlay/frameCache';
 
   type Props = { showLogs?: boolean; onCloseLogs?: () => void };
   let { showLogs = false, onCloseLogs = () => {} }: Props = $props();
 
   // Display dimensions — always render at this size regardless of what
-  // resolution detection runs at. The backend bakes overlays onto the
-  // uploaded frame and returns it, so what we paint IS the frame
-  // detection ran on.
+  // resolution detection runs at.
   const WIDTH = 640, HEIGHT = 360;
-  // CAPTURE resolution — what we request from the camera and therefore the
-  // resolution the backend BAKES the overlay at (the baked frame is returned
-  // at its uploaded size). The display stage is wider than 640px, so a
-  // 640-wide bake gets CSS-upscaled and the mesh/lines look soft. Capturing
-  // at 720p means the browser DOWNscales to fit (crisp) instead. Detection
-  // still runs at WIDTH×HEIGHT via detection_res (a pure speed knob, scaled
-  // back up for the bake), so fps is unaffected — only sharpness improves.
-  // 16:9 matches WIDTH/HEIGHT, so the stage aspect-ratio is unchanged.
+  // CAPTURE resolution — what we request from the camera. 16:9 matches
+  // WIDTH/HEIGHT so the stage aspect-ratio is unchanged.
   const CAP_W = 1280, CAP_H = 720;
-
-  // Detection always runs at the display resolution now (the per-frame
-  // bake is fast enough that downscaling isn't needed — see the live
-  // coord-scaling vectorization), so there's no detection-size selector.
 
   let config: LiveConfigure = $state({
     detector_type: 'Detectorv2',
-    // Detectorv2 is a built-in multitask model; the backend ignores these
-    // sub-model fields. Values mirror LiveSidebar's Detectorv2 defaults so
-    // the initial config is internally consistent.
     face_model: 'retinaface',
     landmark_model: 'mp_facemesh_v2',
     au_model: 'mp_blendshapes',
     emotion_model: 'resmasknet',
-    // ArcFace identity is OFF by default on Detectorv2 — it runs ~13ms/
-    // frame (the old fps ceiling) and identity isn't shown live anyway.
-    // Enable it in the sidebar when recording for later identity clustering.
     identity_model: null,
     gaze_model: 'mp_iris (built-in)',
     device: 'mps',
@@ -60,15 +45,8 @@
   let apiError: string | null = $state(null);
 
   type LandmarkStyle = 'points' | 'lines' | 'mesh';
-  // Default depends on detector type — Detector's 68 landmarks form
-  // tidy face-part curves under 'lines'; MPDetector's 478-point mesh
-  // looks best as 'mesh'. Per-type default applied here for initial
-  // state and re-applied on switchDetectorType (see applyConfig
-  // wrapper in Live.svelte for that).
   let landmarkStyle: LandmarkStyle = $state(loadOverlayStyle().landmarks.style);
 
-  // Per-overlay visual style, shared with the Viewer via the same
-  // localStorage key so settings persist and stay in sync across pages.
   const OVERLAY_STYLE_KEY = 'pyfeatlive.overlayStyle';
   function loadOverlayStyle(): OverlayStyleConfig {
     try {
@@ -82,20 +60,16 @@
     try { localStorage.setItem(OVERLAY_STYLE_KEY, JSON.stringify(overlayStyle)); } catch { /* noop */ }
   });
   let showOverlayConfig = $state(false);
-  // Temporal stabilization (EMA on box + mesh; reduces jitter). On by default.
   let smooth = $state(true);
   function onSmoothChange(v: boolean) {
     smooth = v;
     if (isStreaming) pushOverlayHints();
   }
-  // Stabilization strength 0..1 (slider). Light by default so motion stays
-  // responsive; the user dials it up for more smoothing (more lag).
   let smoothStrength = $state(0.3);
   function onSmoothStrengthChange(v: number) {
     smoothStrength = v;
     if (isStreaming) pushOverlayHints();
   }
-  // Fast detect/track (Detectorv2 only). On by default.
   let track = $state(true);
   function onTrackChange(v: boolean) {
     track = v;
@@ -107,10 +81,19 @@
     gaze: false, aus: false, emotions: false, valenceArousal: false,
   });
 
+  // Live face data from the unified Face payload — drives both OverlayCanvas
+  // and the HTML meta panels. Reset on Stop.
+  let liveFaces = $state<Face[]>([]);
+  // Overlay static data (edge sets + AU→dlib68 mapping), fetched once.
+  let overlayEdges = $state<OverlayEdgeSets | null>(null);
+  let mpToDlib68 = $state<number[] | null>(null);
+  // Frame cache: keeps recently-captured bitmaps keyed by frame id so the
+  // display can paint the exact frame a detection ran on (lock-to-detection).
+  const frameCache = new FrameCache();
+  let nextFrameId = 0;
+  let lastPaintedId = -1;
 
-  // Capture the currently displayed frame (backend-baked frame + overlays)
-  // and download it as a PNG. Mirrored to match the on-screen selfie view.
-  // The button is only enabled while streaming.
+  // Capture the currently displayed frame and download it as a PNG.
   function captureFrame() {
     if (!displayCanvas || !isStreaming) return;
     const w = displayCanvas.width, h = displayCanvas.height;
@@ -134,15 +117,8 @@
     }, 'image/png');
   }
 
-  // Hidden <video> element — holds the camera MediaStream. We never
-  // display it directly; the visible frame is whatever the backend
-  // returns from /api/live/frame (so frame + overlay are temporally
-  // locked).
   let sourceVideo: HTMLVideoElement | null = $state(null);
-  // Visible canvas — paints the baked frame returned by the backend.
   let displayCanvas: HTMLCanvasElement | null = $state(null);
-  // Hidden canvas — drawImage(sourceVideo) → toBlob('image/jpeg') feeds
-  // the upload. Created lazily on first capture.
   let captureCanvas: HTMLCanvasElement | null = null;
 
   let isStreaming = $state(false);
@@ -150,61 +126,43 @@
   let isRecording = $state(false);
   let loopAbort: AbortController | null = null;
 
-  // Detection fps: how fast the backend is producing NEW locked
-  // frames (i.e., distinct detection results). Since display is
-  // locked to detection, this is also the meaningful "what you
-  // actually see refresh" rate. Counted via the X-Detection-
-  // Generation header — duplicate paints of the same baked frame
-  // don't count.
   let fps = $state(0);
   const fpsWindow: number[] = [];
   let lastGeneration = -1;
   let frameIndex = $state(0);
 
-  // Latest live-meta from the backend (emotion top-3 + pose + bbox).
-  // Rendered as HTML overlays on top of the (mirrored) canvas so
-  // text reads correctly. Reset on Stop.
-  let liveMeta = $state<LiveMeta | null>(null);
+  // Source-frame dimensions are always WIDTH×HEIGHT (detection runs at this
+  // resolution), so sx/sy are 1. Kept as deriveds so existing downstream code
+  // (placeMetaStack callers) needs no changes.
+  const srcW = WIDTH;
+  const srcH = HEIGHT;
+  const sx = 1;
+  const sy = 1;
 
-  // Actual source-frame dimensions for positioning HTML overlays.
-  // Prefer the X-Live-Meta backend value (most accurate); fall back
-  // to the layout constants if no frame has been received yet.
-  const srcW = $derived((liveMeta?.frame ?? [WIDTH, HEIGHT])[0]);
-  const srcH = $derived((liveMeta?.frame ?? [WIDTH, HEIGHT])[1]);
-
-  // Displayed width (px) of the video rect, measured from the aspect-ratio
-  // wrapper. The HTML meta overlays live in a fixed WIDTH×HEIGHT (640×360)
-  // coordinate layer scaled by displayScale, so the panels stay a consistent
-  // proportion of the video at any window size AND any camera resolution
-  // (face coords are normalized from source px into this reference below).
+  // Displayed width (px) of the video rect, for scaling HTML meta panels.
   let videoDisplayW = $state(0);
   const displayScale = $derived(videoDisplayW > 0 ? videoDisplayW / WIDTH : 1);
-  // Normalize source-frame face coords into the 640×360 overlay reference.
-  const sx = $derived(srcW > 0 ? WIDTH / srcW : 1);
-  const sy = $derived(srcH > 0 ? HEIGHT / srcH : 1);
 
   // 1) On mount: fetch compute info + enumerate cameras + configure detector
+  //    + fetch overlay statics (edge sets + AU table) for OverlayCanvas.
   onMount(async () => {
-    // Camera enumeration is purely browser-side; run it FIRST so a
-    // backend hiccup doesn't leave the sidebar with an empty camera
-    // picker. Each backend call is then guarded individually.
     await refreshDevices();
     try {
       compute = await systemApi.compute();
-      // GPU detection is serialised process-wide (see detect.py _GPU_LOCK),
-      // so MPS/CUDA are safe to auto-select for the speedup.
       if (compute.mps.available) config.device = 'mps';
       else if (compute.cuda.available) config.device = 'cuda';
       else config.device = 'cpu';
     } catch (e: any) {
       apiError = `Backend unreachable: ${e?.message ?? e}`;
-      return; // camera still works for picker UX
+      return;
     }
     try {
       await applyConfig(config);
     } catch (e: any) {
       apiError = `Detector config failed: ${e?.message ?? e}`;
     }
+    overlayEdges = await systemApi.overlayEdges().catch(() => null);
+    mpToDlib68 = (await systemApi.auTable().catch(() => null))?.mpToDlib68 ?? null;
   });
 
   onDestroy(() => {
@@ -212,15 +170,7 @@
     stopCamera();
   });
 
-  // Send detector + overlay/render hints to the backend. The bake handler
-  // reads toggles/landmark_style/detection_res off LiveSession on every
-  // /api/live/frame call, so changing any of these here takes effect on
-  // the next round trip.
   async function applyConfig(c: LiveConfigure) {
-    // Re-default landmark style on detector_type flip — Detector's 68
-    // anatomical landmarks look best as 'lines'; MPDetector's 478-
-    // point mesh looks best as 'mesh'. Only re-default on actual
-    // type change so the user can still override after the fact.
     if (c.detector_type !== config.detector_type) {
       const ls = c.detector_type === 'Detector' ? 'lines' : 'mesh';
       landmarkStyle = ls;
@@ -244,11 +194,6 @@
     }
   }
 
-  // Push overlay hints to the backend without rebuilding the detector.
-  // Called when the user toggles overlay chips, switches landmark style,
-  // or changes detection resolution mid-stream. Uses /api/live/hints
-  // which is a tiny field-update call — /api/live/configure is the
-  // multi-second detector-rebuild path and should NEVER be used here.
   async function pushOverlayHints() {
     try {
       await liveApi.hints({
@@ -288,8 +233,6 @@
       await applyConfig(config);
     } catch (e: any) {
       apiError = `Detector config failed: ${e?.message ?? e}`;
-      // Camera is up — surface error but let the loop run anyway so
-      // user sees the frame. Detection just won't happen.
     }
     isPaused = false;
     isStreaming = true;
@@ -297,14 +240,8 @@
     runCaptureLoop(loopAbort.signal);
   }
 
-  // Device the live stream is currently bound to. Plain (non-reactive)
-  // so the hot-swap effect below can update it without re-triggering.
   let streamingDeviceId: string | null = null;
 
-  // Hot-swap the camera mid-stream: when the sidebar selects a different
-  // device while we're live, re-acquire it (startCamera stops the old
-  // stream) and re-point the capture <video>. The streamingDeviceId guard
-  // stops this firing on the initial start or on pause/stop transitions.
   $effect(() => {
     const id = cameraStore.selectedDeviceId;
     if (!isStreaming || !id || id === streamingDeviceId) return;
@@ -319,11 +256,9 @@
     })();
   });
 
-  // Sequential capture loop: grab → JPEG-encode → POST → decode response
-  // → paint. The next capture starts only after the previous response
-  // has painted, so the display rate naturally tracks round-trip speed.
-  // The displayed image IS the frame detection ran on — the backend
-  // bakes overlays onto our exact uploaded pixels.
+  // Sequential capture loop: grab → cache bitmap → JPEG-encode → POST →
+  // paint cached frame + update liveFaces. The next capture starts only
+  // after the previous response returns, so display rate tracks round-trip.
   async function runCaptureLoop(signal: AbortSignal) {
     if (!captureCanvas) captureCanvas = document.createElement('canvas');
 
@@ -335,11 +270,7 @@
       const profile = (window as any).__pyfeatProfile === true;
       const t0 = profile ? performance.now() : 0;
 
-      // 1. Grab current frame from <video> at the camera's NATIVE
-      // resolution. The backend handles any downscale for the
-      // detector run via `detection_res` in /configure — we keep
-      // capture+display at full quality so overlays land at full
-      // pixel density regardless of detector input size.
+      // 1. Grab current frame from <video> at native resolution.
       const sW = sourceVideo.videoWidth, sH = sourceVideo.videoHeight;
       if (captureCanvas.width !== sW) captureCanvas.width = sW;
       if (captureCanvas.height !== sH) captureCanvas.height = sH;
@@ -347,69 +278,55 @@
       ctx.drawImage(sourceVideo, 0, 0, sW, sH);
       const tDraw = profile ? performance.now() : 0;
 
-      // 2. JPEG-encode. q=0.92 (was 0.85): lower DCT noise feeding the face
-      // detector each frame → less bbox jitter (the root of overlay flicker)
-      // for only ~1-2ms more upload on loopback.
-      const blob = await new Promise<Blob | null>((res) =>
-        captureCanvas!.toBlob((b) => res(b), 'image/jpeg', 0.92),
-      );
+      // 2. Cache this frame as a bitmap, tagged with a frame id.
+      const id = nextFrameId++;
+      const bmp = await createImageBitmap(captureCanvas!);
+      frameCache.put(id, bmp);
+
+      // 3. JPEG-encode. q=0.92: lower DCT noise → less bbox jitter.
+      const blob: Blob | null = await new Promise((res) =>
+        captureCanvas!.toBlob((b) => res(b), 'image/jpeg', 0.92));
       if (signal.aborted) return;
       if (!blob) { await new Promise((r) => setTimeout(r, 16)); continue; }
       const tEnc = profile ? performance.now() : 0;
 
-      // 3. Round-trip to backend; receive baked JPEG + generation + meta
-      let baked: Blob;
-      let generation = -1;
+      // 4. Round-trip to backend; receive JSON face data.
+      let result;
       try {
-        const r = await liveApi.uploadFrame(blob);
-        baked = r.blob;
-        generation = r.generation;
-        liveMeta = r.meta;
+        result = await liveApi.uploadFrame(blob, id);
         apiError = null;
       } catch (e: any) {
         if (signal.aborted) return;
-        apiError = `Frame upload failed: ${e?.message ?? e}`;
-        // Soft backoff so a backend hiccup doesn't spin a tight retry.
+        apiError = `Frame upload failed: ${(e as Error).message}`;
         await new Promise((r) => setTimeout(r, 250));
         continue;
       }
       const tNet = profile ? performance.now() : 0;
 
-      // 4. Decode + paint to displayCanvas. Size the canvas backing
-      // to the BITMAP's own dimensions and draw 1:1, so we never
-      // distort or mis-scale regardless of the camera's resolution
-      // (640x360, 1280x720, 4:3, whatever). The canvas element's CSS
-      // (object-contain) handles fitting it into the stage preserving
-      // aspect — overlay stays locked to the face because it's baked
-      // into the same pixels.
-      if (displayCanvas) {
-        try {
-          const bitmap = await createImageBitmap(baked);
-          if (signal.aborted) { bitmap.close(); return; }
-          if (displayCanvas.width !== bitmap.width) displayCanvas.width = bitmap.width;
-          if (displayCanvas.height !== bitmap.height) displayCanvas.height = bitmap.height;
+      // 5. Paint the cached frame that detection ran on (lock-to-detection).
+      const fid = result.id;
+      if (fid != null && fid > lastPaintedId) {
+        const frame = frameCache.get(fid);
+        if (frame && displayCanvas) {
+          if (displayCanvas.width !== frame.width) displayCanvas.width = frame.width;
+          if (displayCanvas.height !== frame.height) displayCanvas.height = frame.height;
           const dctx = displayCanvas.getContext('2d')!;
           dctx.setTransform(1, 0, 0, 1, 0, 0);
-          dctx.drawImage(bitmap, 0, 0);
-          bitmap.close();
-        } catch (e) {
-          // Decode failures shouldn't kill the loop — just skip this frame.
-          console.warn('failed to decode baked frame', e);
+          dctx.drawImage(frame, 0, 0);
+        }
+        liveFaces = result.faces;
+        lastPaintedId = fid;
+        frameCache.evictBelow(fid);
+        if (result.generation !== lastGeneration) {
+          lastGeneration = result.generation;
+          fpsWindow.push(performance.now());
+          frameIndex += 1;
         }
       }
       const tBlit = profile ? performance.now() : 0;
 
-      // FPS tracking — count only paints where the backend served a
-      // NEW locked frame (generation advanced). Duplicate paints of
-      // the same cached frame inflate raw paint-rate but aren't
-      // visible to the user. frameIndex tracks the detection cycles
-      // we've seen so it matches what the eye actually perceives.
+      // FPS: trim window to last 1 second, compute rate.
       const now = performance.now();
-      if (generation !== lastGeneration) {
-        lastGeneration = generation;
-        fpsWindow.push(now);
-        frameIndex += 1;
-      }
       while (fpsWindow.length > 0 && fpsWindow[0]! < now - 1000) fpsWindow.shift();
       fps = fpsWindow.length;
 
@@ -418,8 +335,8 @@
           `frame total=${(tBlit - t0).toFixed(1)}ms ` +
           `draw=${(tDraw - t0).toFixed(1)} ` +
           `jpegEncode=${(tEnc - tDraw).toFixed(1)} ` +
-          `netBake=${(tNet - tEnc).toFixed(1)} ` +
-          `decodeBlit=${(tBlit - tNet).toFixed(1)} ` +
+          `net=${(tNet - tEnc).toFixed(1)} ` +
+          `blit=${(tBlit - tNet).toFixed(1)} ` +
           `blobBytes=${blob.size}`,
         );
       }
@@ -432,18 +349,18 @@
   }
 
   async function stopStream() {
-    // If recording, finalize first so the user doesn't lose data.
     if (isRecording) {
       try { await liveApi.recordingStop(); } catch {}
       isRecording = false;
     }
     isStreaming = false;
     isPaused = false;
-    liveMeta = null;
+    frameCache.clear();
+    liveFaces = [];
+    lastPaintedId = -1;
     stopLoop();
     stopCamera();
     if (sourceVideo) sourceVideo.srcObject = null;
-    // Clear the display canvas so the stage looks idle.
     if (displayCanvas) {
       const dctx = displayCanvas.getContext('2d')!;
       dctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -455,9 +372,6 @@
     frameIndex = 0;
   }
 
-  // Pause is a client-side concept — backend has no pause endpoint.
-  // We stop the capture loop but keep the camera open so resume is
-  // instant. The displayCanvas keeps showing whatever was last painted.
   function pauseStream() {
     if (!isStreaming) return;
     if (!isPaused) {
@@ -493,9 +407,6 @@
     }
   }
 
-  // When overlay toggles or landmark style change mid-stream, push the
-  // new hints to the backend (no detector rebuild). Skips while idle to
-  // avoid spurious config calls; the next startStream() will sync them.
   function onToggleChange(key: keyof OverlayToggles, value: boolean) {
     toggles = { ...toggles, [key]: value };
     if (isStreaming) pushOverlayHints();
@@ -541,10 +452,11 @@
     {/if}
 
     <!-- Video stage. The hidden <video> only holds the MediaStream for
-         capture; the visible image is displayCanvas, painted from
-         backend-baked JPEGs so frame + overlay update together. The logs
-         panel (when open) sits beside the video in this row so it shrinks
-         the video — not the full-width toolbar below. -->
+         capture; the visible image is displayCanvas, painted from the
+         locally cached frame that detection ran on (lock-to-detection).
+         OverlayCanvas renders landmarks/rects client-side, layered over
+         the same mirrored stage so it mirrors with the video. The logs
+         panel (when open) sits beside the video in this row. -->
     <div class="flex-1 flex min-h-0">
     <div
       class="relative bg-black flex items-start justify-start overflow-hidden flex-1 min-w-0 min-h-0"
@@ -560,17 +472,31 @@
           playsinline
           muted
         ></video>
-        <!-- Selfie-style horizontal mirror so what the user sees
-             matches mirror intuition ("I look left, my image goes
-             left"). Inline style instead of Tailwind utility so we
-             don't depend on JIT picking up `-scale-x-100`. The
-             recorded MP4 and the fex CSV are unchanged — they still
-             carry non-mirrored camera frames and Gaze360 convention. -->
-        <canvas
-          bind:this={displayCanvas}
-          class="absolute inset-0 w-full h-full object-contain object-right"
-          style="transform: scaleX(-1);"
-        ></canvas>
+        <!-- Single mirrored wrapper: scaleX(-1) lives here so BOTH the video
+             frame and the OverlayCanvas are mirrored together. The canvas
+             keeps its sizing/object-contain classes; the overlay's absolute
+             inset-0 box aligns to this same wrapper. -->
+        <div class="absolute inset-0" style="transform: scaleX(-1);">
+          <canvas
+            bind:this={displayCanvas}
+            class="absolute inset-0 w-full h-full object-contain object-right"
+          ></canvas>
+
+          <!-- OverlayCanvas is inside the same mirrored wrapper, so its
+               landmarks/rects mirror with the video frame. Emotions are
+               OFF here — HTML panels own them. -->
+          <OverlayCanvas
+            faces={liveFaces}
+            mpLandmarks={true}
+            width={WIDTH}
+            height={HEIGHT}
+            toggles={{ ...toggles, emotions: false }}
+            landmarkStyle={landmarkStyle}
+            edges={overlayEdges ? (landmarkStyle === 'lines' ? overlayEdges.mp_contours : overlayEdges.mp_tess) : undefined}
+            mpToDlib68={mpToDlib68}
+            style={overlayStyle}
+          />
+        </div>
 
         {#if isStreaming}
           <span class="absolute top-3.5 left-3.5 px-3 py-1 rounded text-[9.5px] font-bold tracking-wider {isPaused ? 'bg-yellow-500/15 text-yellow-500 border-yellow-500/30' : 'bg-green-500/15 text-green-500 border-green-500/30'} border inline-flex items-center gap-2">
@@ -595,66 +521,47 @@
           </span>
         {/if}
 
-        <!-- HTML overlays for text-bearing meta: emotion top-3 and
-             pose readout. Positioned as siblings of the canvas so
-             the canvas's scaleX(-1) mirror doesn't flip the text.
-             Bbox coords are in source-frame (non-mirrored) space, so
-             we mirror-compensate horizontally via (100% - x/W)% using
-             a right anchor. -->
-        {#if isStreaming && liveMeta}
+        <!-- HTML overlays for text-bearing meta: emotion bars, valence/arousal
+             plot, pose cube. Positioned as siblings of the canvas so the
+             canvas's scaleX(-1) mirror doesn't flip the text.
+             Bbox coords are in source-frame (non-mirrored) space, so we
+             mirror-compensate horizontally via (WIDTH - x - stackW). -->
+        {#if isStreaming && liveFaces.length > 0}
           <!-- Source-pixel overlay layer: everything inside is in source-frame
                px and uniformly scaled by displayScale so the panels stay
-               proportional to the video at any window size. Mirror-convert each
-               stack's x (srcW − left − stackW) so it lands beside the displayed
-               face while the text still reads normally (the layer is NOT
-               mirrored, only the video canvas is). -->
+               proportional to the video at any window size. -->
           <div
             class="absolute top-0 left-0 origin-top-left pointer-events-none"
             style="width: {WIDTH}px; height: {HEIGHT}px; transform: scale({displayScale});"
           >
-            {#each liveMeta.faces as face, fi}
-              {@const emoOn = !!(toggles.emotions && face.emo?.length)}
+            {#each liveFaces as face, fi}
+              {@const emoOn = !!(toggles.emotions && face.emotions)}
               {@const vaOn = !!(toggles.valenceArousal && face.valence_arousal)}
               {@const poseOn = !!(toggles.poses && face.pose)}
               {@const anyOn = emoOn || vaOn || poseOn}
-              <!-- Fixed panel heights (source px) so placeMetaStack centers/flips consistently -->
               {@const emoH = emoOn ? 64 : 0}
               {@const vaH = vaOn ? 70 : 0}
               {@const poseH = poseOn ? 48 : 0}
               {@const nOn = (emoOn ? 1 : 0) + (vaOn ? 1 : 0) + (poseOn ? 1 : 0)}
               {@const stackW = 96}
               {@const stackH = emoH + vaH + poseH + (nOn > 1 ? (nOn - 1) * 4 : 0)}
-              {@const faceRect = { x: face.bbox[0] * sx, y: face.bbox[1] * sy, w: face.bbox[2] * sx, h: face.bbox[3] * sy }}
-              {@const others = liveMeta.faces.filter((_, j) => j !== fi).map((o) => ({ x: o.bbox[0] * sx, y: o.bbox[1] * sy, w: o.bbox[2] * sx, h: o.bbox[3] * sy }))}
+              {@const r = face.rect}
+              {@const faceRect = { x: (r?.[0] ?? 0) * sx, y: (r?.[1] ?? 0) * sy, w: (r?.[2] ?? 0) * sx, h: (r?.[3] ?? 0) * sy }}
+              {@const others = liveFaces.filter((_, j) => j !== fi).map((o) => ({ x: (o.rect?.[0] ?? 0) * sx, y: (o.rect?.[1] ?? 0) * sy, w: (o.rect?.[2] ?? 0) * sx, h: (o.rect?.[3] ?? 0) * sy }))}
               {@const pos = placeMetaStack(faceRect, others, stackW, stackH, WIDTH, HEIGHT)}
               {#if anyOn}
-                <div
-                  class="absolute flex flex-col gap-1 pointer-events-none"
-                  style="left: {WIDTH - pos.left - stackW}px; top: {pos.top}px; width: {stackW}px;"
-                >
+                <div class="absolute flex flex-col gap-1 pointer-events-none"
+                     style="left: {WIDTH - pos.left - stackW}px; top: {pos.top}px; width: {stackW}px;">
                   {#if emoOn}
-                    <EmotionBars
-                      values={Object.fromEntries(face.emo!)}
-                      {smooth}
-                      {smoothStrength}
-                    />
+                    {@const ev = Object.fromEntries(Object.entries(face.emotions ?? {}).map(([k, v]) => [k, v ?? 0]))}
+                    <EmotionBars values={ev} {smooth} {smoothStrength} />
                   {/if}
                   {#if vaOn}
-                    <ValenceArousalPlot
-                      valence={face.valence_arousal!.valence}
-                      arousal={face.valence_arousal!.arousal}
-                      {smooth}
-                      {smoothStrength}
-                    />
+                    <ValenceArousalPlot valence={face.valence_arousal!.valence} arousal={face.valence_arousal!.arousal} {smooth} {smoothStrength} />
                   {/if}
                   {#if poseOn}
-                    <PoseCube
-                      pitch={face.pose!.p}
-                      yaw={face.pose!.y}
-                      roll={face.pose!.r}
-                      {smooth}
-                      {smoothStrength}
-                    />
+                    {@const deg = (x: number | null) => (x ?? 0) * 180 / Math.PI}
+                    <PoseCube pitch={deg(face.pose![0])} yaw={deg(face.pose![2])} roll={deg(face.pose![1])} {smooth} {smoothStrength} />
                   {/if}
                 </div>
               {/if}

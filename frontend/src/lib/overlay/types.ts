@@ -8,6 +8,7 @@ export interface Face {
   gaze?: [number | null, number | null];               // pitch,yaw
   emotions?: Record<string, number | null>;
   aus?: Record<string, number | null>;
+  valence_arousal?: { valence: number; arousal: number };
 }
 
 export interface LiveState {
