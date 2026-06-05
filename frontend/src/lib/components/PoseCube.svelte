@@ -2,12 +2,12 @@
   import { untrack } from 'svelte';
   import { emaAlpha, emaStep } from '../overlay/panelViz';
 
-  // Degrees. pitch/yaw/roll are the Fex Pitch/Yaw/Roll columns (the cube panel
-  // in Live maps face.pose=[Pitch,Roll,Yaw] → pitch=Pitch, yaw=Yaw, roll=Roll).
-  let { pitch, yaw, roll, smooth, smoothStrength, convention = 'multitask' }: {
+  // Degrees, canonical convention (consistent across all detectors after the
+  // py-feat normalization): +pitch = up, +yaw = turn to subject's right,
+  // +roll = tilt to subject's right.
+  let { pitch, yaw, roll, smooth, smoothStrength }: {
     pitch: number; yaw: number; roll: number;
     smooth: boolean; smoothStrength: number;
-    convention?: 'classic' | 'multitask';
   } = $props();
 
   let dp = $state(pitch);
@@ -24,16 +24,9 @@
     });
   });
 
-  // TEMP (calibration): two mappings while we work out the canonical convention.
-  // - 'multitask' (Detectorv2): the validated swap mapping (Pitch col holds yaw,
-  //   Yaw col holds pitch) — nod=rotateX(-Yaw), turn=rotateY(Pitch).
-  // - 'classic' (Detector/img2pose, the REFERENCE): natural mapping straight
-  //   from the raw columns, signs TBD on camera. img2pose reports frontal yaw
-  //   near ±180°, so subtract 180 to recentre.
+  // One clean mapping for canonical data (signs tuned once on camera).
   const transform = $derived(
-    convention === 'classic'
-      ? `rotateX(${-dp}deg) rotateY(${dr}deg) rotateZ(${180 - dy}deg)`
-      : `rotateX(${-dy}deg) rotateY(${dp}deg) rotateZ(${-dr}deg)`,
+    `rotateX(${dp}deg) rotateY(${dy}deg) rotateZ(${dr}deg)`,
   );
 </script>
 

@@ -616,7 +616,7 @@
                   {/if}
                   {#if poseOn}
                     {@const deg = (x: number | null) => (x ?? 0) * 180 / Math.PI}
-                    <PoseCube pitch={deg(face.pose![0])} yaw={deg(face.pose![2])} roll={deg(face.pose![1])} {smooth} {smoothStrength} convention={config.detector_type === 'Detector' ? 'classic' : 'multitask'} />
+                    <PoseCube pitch={deg(face.pose![0])} yaw={deg(face.pose![2])} roll={deg(face.pose![1])} {smooth} {smoothStrength} />
                   {/if}
                 </div>
               {/if}
