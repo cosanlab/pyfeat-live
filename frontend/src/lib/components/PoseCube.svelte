@@ -32,7 +32,7 @@
   //   near ±180°, so subtract 180 to recentre.
   const transform = $derived(
     convention === 'classic'
-      ? `rotateX(${-dp}deg) rotateY(${dr}deg) rotateZ(${dy - 180}deg)`
+      ? `rotateX(${-dp}deg) rotateY(${dr}deg) rotateZ(${180 - dy}deg)`
       : `rotateX(${-dy}deg) rotateY(${dp}deg) rotateZ(${-dr}deg)`,
   );
 </script>
