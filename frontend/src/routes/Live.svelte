@@ -89,7 +89,13 @@
   let mpToDlib68 = $state<number[] | null>(null);
   // Frame cache: keeps recently-captured bitmaps keyed by frame id so the
   // display can paint the exact frame a detection ran on (lock-to-detection).
-  const frameCache = new FrameCache();
+  // Sized to cover slow detectors (MPDetector / classic Detector run
+  // ~100-250ms/detection): the in-flight window is detection_latency ÷
+  // capture_interval, so with the ~33ms capture cap below this holds ~8
+  // frames at 250ms latency — well within 40. Too small and the detected
+  // frame is evicted before its result returns, freezing the video while the
+  // overlay (coords only) keeps moving.
+  const frameCache = new FrameCache(40);
   let nextFrameId = 0;
   let lastPaintedId = -1;
 
@@ -283,12 +289,24 @@
   // after the previous response returns, so display rate tracks round-trip.
   async function runCaptureLoop(signal: AbortSignal) {
     if (!captureCanvas) captureCanvas = document.createElement('canvas');
+    // Cap capture at ~30fps. The upload response returns the latest cached
+    // detection immediately, so without a cap the loop spins far faster than
+    // detection and floods the frame cache, evicting frames a slow detector
+    // still needs. Detection is always the real ceiling, so this costs no fps.
+    const MIN_CAPTURE_MS = 33;
+    let lastCaptureAt = 0;
 
     while (!signal.aborted && isStreaming && !isPaused) {
       if (!sourceVideo || sourceVideo.readyState < 2) {
         await new Promise((r) => setTimeout(r, 33));
         continue;
       }
+      const sinceLast = performance.now() - lastCaptureAt;
+      if (sinceLast < MIN_CAPTURE_MS) {
+        await new Promise((r) => setTimeout(r, MIN_CAPTURE_MS - sinceLast));
+        if (signal.aborted) return;
+      }
+      lastCaptureAt = performance.now();
       const profile = (window as any).__pyfeatProfile === true;
       const t0 = profile ? performance.now() : 0;
 
