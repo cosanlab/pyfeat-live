@@ -9,7 +9,7 @@ import type {
   Annotation,
   AnnotationKind,
 } from './types';
-import type { OverlayStyleConfig } from './overlay/types';
+import type { Face, OverlayStyleConfig } from './overlay/types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -147,6 +147,13 @@ export interface LiveMeta {
   faces: LiveFace[];
 }
 
+export interface LiveFrameResult {
+  id: number | null;
+  generation: number;
+  frame: [number, number];
+  faces: Face[];
+}
+
 export const liveApi = {
   configure: (cfg: LiveConfigure) =>
     request<LiveConfigure>('/api/live/configure', {
@@ -159,30 +166,17 @@ export const liveApi = {
       method: 'POST',
       body: JSON.stringify(h),
     }),
-  // POST a JPEG of the current camera frame; backend bakes overlays and
-  // returns the baked JPEG. The display canvas renders the returned blob
-  // so what the user sees is exactly the frame detection ran on.
-  uploadFrame: async (jpeg: Blob): Promise<{
-    blob: Blob;
-    generation: number;
-    meta: LiveMeta | null;
-  }> => {
+  // POST a JPEG of the current camera frame; backend returns parsed JSON
+  // face data. The frontend paints its own captured frame and renders
+  // the overlay client-side.
+  uploadFrame: async (jpeg: Blob, frameId: number): Promise<LiveFrameResult> => {
     const r = await fetch('/api/live/frame', {
       method: 'POST',
-      headers: { 'Content-Type': 'image/jpeg' },
+      headers: { 'Content-Type': 'image/jpeg', 'X-Frame-Id': String(frameId) },
       body: jpeg,
     });
     if (!r.ok) throw new ApiError(r.status, `uploadFrame: ${r.status} ${r.statusText}`);
-    const blob = await r.blob();
-    const generation = parseInt(
-      r.headers.get('X-Detection-Generation') ?? '0', 10,
-    );
-    const metaRaw = r.headers.get('X-Live-Meta');
-    let meta: LiveMeta | null = null;
-    if (metaRaw) {
-      try { meta = JSON.parse(metaRaw); } catch { /* malformed; ignore */ }
-    }
-    return { blob, generation, meta };
+    return (await r.json()) as LiveFrameResult;
   },
   recordingStart: (body: {
     record_video: boolean;
