@@ -147,6 +147,18 @@
   const sx = $derived(frameW > 0 ? WIDTH / frameW : 1);
   const sy = $derived(frameH > 0 ? HEIGHT / frameH : 1);
 
+  // Detector landmark space: Detectorv2 / MPDetector are 478-point mesh
+  // detectors; classic Detector is dlib-68. The overlay needs the matching
+  // edge set — mesh edges over 68 dlib points produce garbage.
+  const liveMpLandmarks = $derived(config.detector_type !== 'Detector');
+  const liveEdges = $derived.by((): number[][] | undefined => {
+    if (!overlayEdges) return undefined;
+    const lines = overlayStyle.landmarks.style === 'lines';
+    return liveMpLandmarks
+      ? (lines ? overlayEdges.mp_contours : overlayEdges.mp_tess)
+      : (lines ? overlayEdges.dlib_parts : overlayEdges.dlib_mesh);
+  });
+
   // Displayed width (px) of the video rect, for scaling HTML meta panels.
   let videoDisplayW = $state(0);
   const displayScale = $derived(videoDisplayW > 0 ? videoDisplayW / WIDTH : 1);
@@ -180,7 +192,9 @@
 
   async function applyConfig(c: LiveConfigure) {
     if (c.detector_type !== config.detector_type) {
-      const ls = c.detector_type === 'Detector' ? 'lines' : 'mesh';
+      // Default to feature-contour 'lines' for every detector (cleaner than the
+      // full tessellation); the overlay-config dropdown can switch to mesh/points.
+      const ls = 'lines';
       landmarkStyle = ls;
       overlayStyle = { ...overlayStyle, landmarks: { ...overlayStyle.landmarks, style: ls } };
     }
@@ -509,12 +523,12 @@
                OFF here — HTML panels own them. -->
           <OverlayCanvas
             faces={liveFaces}
-            mpLandmarks={true}
+            mpLandmarks={liveMpLandmarks}
             width={frameW}
             height={frameH}
             toggles={{ ...toggles, emotions: false, poses: false }}
             landmarkStyle={overlayStyle.landmarks.style}
-            edges={overlayEdges ? (overlayStyle.landmarks.style === 'lines' ? overlayEdges.mp_contours : overlayEdges.mp_tess) : undefined}
+            edges={liveEdges}
             mpToDlib68={mpToDlib68}
             style={overlayStyle}
             gazeConvention={config.detector_type === 'Detectorv2' ? 'multitask' : 'l2cs'}
