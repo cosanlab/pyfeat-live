@@ -22,9 +22,13 @@
     });
   });
 
-  // Default sign mapping; verify on-camera in final review.
+  // Detectorv2 reports pitch/yaw physically transposed (same reason the 2D
+  // pose axes need their swap): face.pose.p is physically yaw, face.pose.y is
+  // physically pitch. So drive the nodding axis (rotateX) with yaw (dy) and the
+  // turning axis (rotateY) with pitch (dp) so the cube tracks the head and
+  // matches the 3D axis sticks. Signs verified on-camera.
   const transform = $derived(
-    `rotateX(${-dp}deg) rotateY(${dy}deg) rotateZ(${-dr}deg)`,
+    `rotateX(${-dy}deg) rotateY(${dp}deg) rotateZ(${-dr}deg)`,
   );
 </script>
 
