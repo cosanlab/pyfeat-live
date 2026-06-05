@@ -2,10 +2,12 @@
   import { untrack } from 'svelte';
   import { emaAlpha, emaStep } from '../overlay/panelViz';
 
-  // Degrees.
-  let { pitch, yaw, roll, smooth, smoothStrength }: {
+  // Degrees. pitch/yaw/roll are the Fex Pitch/Yaw/Roll columns (the cube panel
+  // in Live maps face.pose=[Pitch,Roll,Yaw] → pitch=Pitch, yaw=Yaw, roll=Roll).
+  let { pitch, yaw, roll, smooth, smoothStrength, convention = 'multitask' }: {
     pitch: number; yaw: number; roll: number;
     smooth: boolean; smoothStrength: number;
+    convention?: 'classic' | 'multitask';
   } = $props();
 
   let dp = $state(pitch);
@@ -22,17 +24,20 @@
     });
   });
 
-  // Detectorv2 reports pitch/yaw physically transposed (same reason the 2D
-  // pose axes need their swap): face.pose.p is physically yaw, face.pose.y is
-  // physically pitch. So drive the nodding axis (rotateX) with yaw (dy) and the
-  // turning axis (rotateY) with pitch (dp) so the cube tracks the head and
-  // matches the 3D axis sticks. Signs verified on-camera.
+  // TEMP (calibration): two mappings while we work out the canonical convention.
+  // - 'multitask' (Detectorv2): the validated swap mapping (Pitch col holds yaw,
+  //   Yaw col holds pitch) — nod=rotateX(-Yaw), turn=rotateY(Pitch).
+  // - 'classic' (Detector/img2pose, the REFERENCE): natural mapping straight
+  //   from the raw columns, signs TBD on camera. img2pose reports frontal yaw
+  //   near ±180°, so subtract 180 to recentre.
   const transform = $derived(
-    `rotateX(${-dy}deg) rotateY(${dp}deg) rotateZ(${-dr}deg)`,
+    convention === 'classic'
+      ? `rotateX(${dp}deg) rotateY(${dy - 180}deg) rotateZ(${dr}deg)`
+      : `rotateX(${-dy}deg) rotateY(${dp}deg) rotateZ(${-dr}deg)`,
   );
 </script>
 
-<div class="px-2 py-1.5 rounded bg-black/65 flex justify-center">
+<div class="px-2 py-1.5 rounded bg-black/65 flex flex-col items-center gap-1">
   <div class="pose-scene">
     <div class="pose-cube" style="transform: {transform};">
       <div class="pose-face bk"></div>
@@ -42,6 +47,10 @@
       <div class="pose-face tp"></div>
       <div class="pose-face fr"><span class="nose"></span></div>
     </div>
+  </div>
+  <!-- TEMP calibration readout: raw Fex Pitch/Yaw/Roll (deg). -->
+  <div class="text-[8px] font-mono text-zinc-300 leading-tight text-center">
+    P {pitch.toFixed(0)} Y {yaw.toFixed(0)} R {roll.toFixed(0)}
   </div>
 </div>
 
