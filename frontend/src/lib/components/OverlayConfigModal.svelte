@@ -221,6 +221,13 @@
                   oninput={(e) => upd('aus', { gamma: +(e.target as HTMLInputElement).value })} />
                 <span class="font-mono text-zinc-400 w-7">{(style.aus.gamma ?? 2.2).toFixed(1)}</span>
               </label>
+              {#if (style.aus.mode ?? 'heatmap') === 'points'}
+                <label class="flex items-center gap-1.5">dot size
+                  <input type="range" min="1" max="8" step="0.5" class="accent-green-500 w-20" value={style.aus.pointSize ?? 2}
+                    oninput={(e) => upd('aus', { pointSize: +(e.target as HTMLInputElement).value })} />
+                  <span class="font-mono text-zinc-400 w-7">{(style.aus.pointSize ?? 2).toFixed(1)}</span>
+                </label>
+              {/if}
 
             {:else if s.key === 'emotions'}
               <label class="flex items-center gap-1.5">color

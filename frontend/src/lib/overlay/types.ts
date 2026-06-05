@@ -51,6 +51,8 @@ export interface OverlayStyleConfig {
     /** Gamma applied to AU intensity before the colormap (higher = only
      *  strong activations show; lower = more sensitive). Default 2.2. */
     gamma?: number;
+    /** Dot radius for the 'points' AU render mode. Default 2. */
+    pointSize?: number;
   };
   emotions: { color: string; opacity: number; fontSize: number };
 }
@@ -61,7 +63,7 @@ export function defaultOverlayStyle(): OverlayStyleConfig {
     landmarks: { style: 'mesh', color: '#ffffff', opacity: 1, size: 1.2 },
     pose: { sizeScale: 0.5 },
     gaze: { color: '#22c55e', opacity: 1, lineWidth: 2 },
-    aus: { colormap: 'Blues', opacity: 0.55, mode: 'heatmap', gamma: 2.2 },
+    aus: { colormap: 'Blues', opacity: 0.55, mode: 'heatmap', gamma: 2.2, pointSize: 2 },
     emotions: { color: '#ffffff', opacity: 1, fontSize: 12 },
   };
 }
