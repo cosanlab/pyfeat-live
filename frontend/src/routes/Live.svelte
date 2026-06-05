@@ -131,13 +131,15 @@
   let lastGeneration = -1;
   let frameIndex = $state(0);
 
-  // Source-frame dimensions are always WIDTH×HEIGHT (detection runs at this
-  // resolution), so sx/sy are 1. Kept as deriveds so existing downstream code
-  // (placeMetaStack callers) needs no changes.
-  const srcW = WIDTH;
-  const srcH = HEIGHT;
-  const sx = 1;
-  const sy = 1;
+  // Landmark/rect coords arrive in the SOURCE (uploaded/captured) frame space —
+  // the backend scales detector coords back to the uploaded resolution (≈ the
+  // capture res, e.g. 1280×720), reported in each response's `frame`. Track it
+  // so OverlayCanvas uses a matching logical coord space and the HTML panel
+  // layer (normalized to WIDTH×HEIGHT) scales source coords by sx/sy.
+  let frameW = $state<number>(WIDTH);
+  let frameH = $state<number>(HEIGHT);
+  const sx = $derived(frameW > 0 ? WIDTH / frameW : 1);
+  const sy = $derived(frameH > 0 ? HEIGHT / frameH : 1);
 
   // Displayed width (px) of the video rect, for scaling HTML meta panels.
   let videoDisplayW = $state(0);
@@ -315,6 +317,8 @@
           dctx.drawImage(frame, 0, 0);
         }
         liveFaces = result.faces;
+        frameW = result.frame[0];
+        frameH = result.frame[1];
         lastPaintedId = fid;
         frameCache.evictBelow(fid);
         if (result.generation !== lastGeneration) {
@@ -488,8 +492,8 @@
           <OverlayCanvas
             faces={liveFaces}
             mpLandmarks={true}
-            width={WIDTH}
-            height={HEIGHT}
+            width={frameW}
+            height={frameH}
             toggles={{ ...toggles, emotions: false }}
             landmarkStyle={landmarkStyle}
             edges={overlayEdges ? (landmarkStyle === 'lines' ? overlayEdges.mp_contours : overlayEdges.mp_tess) : undefined}
