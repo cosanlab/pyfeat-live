@@ -151,7 +151,7 @@
   <!-- Models -->
   <div>
     <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">Models</div>
-    {#each modelRows as [label, key]}
+    {#each modelRows as [key, label]}
       <div class="mb-2">
         <div class="text-[11px] text-zinc-400 mb-1">{label}</div>
         <div class="relative">
