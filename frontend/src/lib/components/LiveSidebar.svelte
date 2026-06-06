@@ -2,112 +2,101 @@
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import { cameraStore } from '../webrtc/useCamera.svelte';
   import logoUrl from '../../assets/logo.png';
-  import type { LiveConfigure, ComputeInfo } from '../api';
+  import type { LiveConfigure, ComputeInfo, DetectorCapabilities } from '../api';
 
   type Props = {
     config: LiveConfigure;
     compute: ComputeInfo | null;
+    /** Fetched once from /api/system/detector-capabilities; null while loading. */
+    capabilities: DetectorCapabilities | null;
     onConfigChange: (c: LiveConfigure) => void;
   };
-  let { config, compute, onConfigChange }: Props = $props();
+  let { config, compute, capabilities, onConfigChange }: Props = $props();
 
   function update<K extends keyof LiveConfigure>(key: K, value: LiveConfigure[K]) {
     onConfigChange({ ...config, [key]: value });
   }
 
-  const MODEL_OPTIONS = {
-    // Detectorv2 is a standalone multitask model: the backend ignores
-    // these sub-model fields entirely. Placeholders keep switchDetectorType
-    // (which reads index [0] of each) consistent; values are never used.
-    Detectorv2: {
-      face_model: ['retinaface'],
-      landmark_model: ['mp_facemesh_v2'],
-      au_model: ['mp_blendshapes'],
-      emotion_model: ['resmasknet'],
-      identity_model: [null, 'arcface'],
-      gaze_model: ['mp_iris (built-in)'],
-      facepose_model: ['multitask'],
-    },
-    Detector: {
-      face_model: ['retinaface', 'img2pose'],
-      landmark_model: ['mobilefacenet', 'mobilenet', 'pfld'],
-      au_model: ['xgb', 'svm', null],
-      emotion_model: ['resmasknet', 'svm', null],
-      identity_model: ['arcface', 'arcface_r50', 'facenet', null],
-      gaze_model: ['l2cs', null],
+  // Canonical display order for category keys (present in a detector's map
+  // → shown; absent → hidden). This drives modelRows below.
+  const CATEGORY_ORDER: [string, string][] = [
+    ['face_model',     'Face'],
+    ['facepose_model', 'Pose'],
+    ['landmark_model', 'Landmark'],
+    ['au_model',       'Action units'],
+    ['emotion_model',  'Emotion'],
+    ['identity_model', 'Identity'],
+    ['gaze_model',     'Gaze'],
+  ];
+
+  // Capabilities for the currently selected detector type.
+  const detectorCaps = $derived(capabilities?.[config.detector_type] ?? null);
+
+  // Rows: categories present in the selected detector's capability map,
+  // in canonical order. Falls back to the legacy hardcoded ordering when
+  // capabilities haven't loaded yet so the UI isn't blank at startup.
+  const modelRows = $derived.by((): [string, string][] => {
+    if (detectorCaps) {
+      return CATEGORY_ORDER.filter(([key]) => key in detectorCaps);
+    }
+    // Fallback (pre-load / error): replicate the old hardcoded sets.
+    if (config.detector_type === 'Detectorv2') {
+      return [['face_model', 'Face'], ['identity_model', 'Identity']];
+    }
+    if (config.detector_type === 'MPDetector') {
+      return [['face_model', 'Face'], ['au_model', 'Action units'], ['emotion_model', 'Emotion'], ['identity_model', 'Identity']];
+    }
+    return CATEGORY_ORDER;
+  });
+
+  // Options for a given category key, sourced from capabilities when available.
+  function optionsFor(key: string): (string | null)[] {
+    const cat = detectorCaps?.[key];
+    if (cat) return cat.options;
+    // Fallback static options (capabilities not yet loaded).
+    const fallback: Record<string, (string | null)[]> = {
+      face_model:     ['retinaface', 'img2pose'],
       facepose_model: ['pose_mlp', 'pnp_dlt', 'img2pose'],
-    },
-    MPDetector: {
-      face_model: ['retinaface'],
-      landmark_model: ['mp_facemesh_v2'],
-      au_model: ['mp_blendshapes', null],
-      emotion_model: ['resmasknet', 'svm', null],
-      identity_model: ['arcface', 'arcface_r50', 'facenet', null],
-      // MPDetector ignores gaze_model; gaze comes from iris landmarks.
-      // Show a single "built-in" option so the UI is consistent.
-      gaze_model: ['mp_iris (built-in)'],
-      facepose_model: ['pnp_dlt'],
-    },
-  } as const;
+      landmark_model: ['mobilefacenet', 'mobilenet', 'pfld'],
+      au_model:       ['xgb', 'svm', null],
+      emotion_model:  ['resmasknet', 'svm', null],
+      identity_model: [null, 'arcface', 'facenet'],
+      gaze_model:     ['l2cs', null],
+    };
+    return fallback[key] ?? [null];
+  }
 
-  const opts = $derived(MODEL_OPTIONS[config.detector_type]);
+  // Dynamic Pose options for the classic Detector: img2pose face → only
+  // 'img2pose' pose; retinaface → capability options minus 'img2pose'
+  // (i.e. ['pose_mlp', 'pnp_dlt']). For other detectors not used.
+  const poseOptions = $derived.by((): (string | null)[] => {
+    if (config.detector_type !== 'Detector') return optionsFor('facepose_model');
+    if (config.face_model === 'img2pose') return ['img2pose'];
+    // retinaface: use capability options but exclude img2pose (it's
+    // only valid when face_model=img2pose).
+    return optionsFor('facepose_model').filter((o) => o !== 'img2pose');
+  });
 
-  // Rows shown per detector type. Face is always first.
-  // Detectorv2: only Face + Identity (everything else is fixed in the multitask model).
-  // MPDetector: Face, AU, Emotion, Identity.
-  // Detector (classic): all rows.
-  const modelRows = $derived(
-    config.detector_type === 'Detectorv2'
-      ? ([
-          ['Face', 'face_model'],
-          ['Identity', 'identity_model'],
-        ] as [string, string][])
-      : config.detector_type === 'MPDetector'
-        ? ([
-            ['Face', 'face_model'],
-            ['Action units', 'au_model'],
-            ['Emotion', 'emotion_model'],
-            ['Identity', 'identity_model'],
-          ] as [string, string][])
-        : ([
-            ['Face', 'face_model'],
-            ['Pose', 'facepose_model'],
-            ['Landmark', 'landmark_model'],
-            ['Action units', 'au_model'],
-            ['Emotion', 'emotion_model'],
-            ['Identity', 'identity_model'],
-            ['Gaze', 'gaze_model'],
-          ] as [string, string][]),
-  );
-
-  // Dynamic Pose options for the classic Detector depend on face_model.
-  // img2pose drives pose natively → only option is 'img2pose'.
-  // retinaface → user can pick pose_mlp or pnp_dlt.
-  const poseOptions = $derived(
-    config.detector_type === 'Detector'
-      ? config.face_model === 'img2pose'
-        ? ['img2pose']
-        : ['pose_mlp', 'pnp_dlt']
-      : config.detector_type === 'Detectorv2'
-        ? ['multitask']
-        : ['pnp_dlt'],
-  );
-
-  // Switching detector type resets all sub-model fields to the first valid
-  // option for that detector. face_model and facepose_model are set directly
-  // from MODEL_OPTIONS — no derive-from-pose coupling.
+  // Switching detector type resets all sub-model fields to their capability
+  // defaults (or fallback first option). EXCEPTION: identity_model is
+  // always set to null — the Live app disables identity by default for speed
+  // even though the library default is 'arcface'.
   function switchDetectorType(type: LiveConfigure['detector_type']) {
-    const d = MODEL_OPTIONS[type];
+    const caps = capabilities?.[type] ?? null;
+    function defaultFor(key: string, fallback: string | null): string | null {
+      return caps?.[key]?.default ?? fallback;
+    }
     onConfigChange({
       ...config,
       detector_type: type,
-      face_model: d.face_model[0]!,
-      facepose_model: d.facepose_model[0]!,
-      landmark_model: d.landmark_model[0]!,
-      au_model: d.au_model[0]!,
-      emotion_model: d.emotion_model[0],
-      identity_model: d.identity_model[0],
-      gaze_model: d.gaze_model[0],
+      face_model:     defaultFor('face_model',     'retinaface') ?? 'retinaface',
+      facepose_model: defaultFor('facepose_model', 'pose_mlp') ?? 'pose_mlp',
+      landmark_model: defaultFor('landmark_model', 'mobilefacenet') ?? 'mobilefacenet',
+      au_model:       defaultFor('au_model',       'xgb'),
+      emotion_model:  defaultFor('emotion_model',  'resmasknet'),
+      // Always disable identity by default in the Live app (speed).
+      identity_model: null,
+      gaze_model:     defaultFor('gaze_model',     'l2cs'),
     });
   }
 
@@ -178,7 +167,7 @@
               }
             }}
           >
-            {#each (key === 'facepose_model' ? poseOptions : (opts as any)[key]) as opt}
+            {#each (key === 'facepose_model' ? poseOptions : optionsFor(key)) as opt}
               <option value={opt ?? ''}>{opt ?? '(disabled)'}</option>
             {/each}
           </select>

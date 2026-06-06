@@ -124,6 +124,25 @@ def au_table() -> dict:
     return _AU_TABLE_CACHE
 
 
+@router.get("/detector-capabilities")
+def detector_capabilities_route() -> dict:
+    """Return each detector class's supported model options (single source of truth).
+
+    Response shape::
+
+        {
+          "Detector":    {"face_model": {"options": [...], "default": "..."}, ...},
+          "Detectorv2":  {...},
+          "MPDetector":  {...}
+        }
+
+    Fetched once on app mount by the frontend to drive the model dropdowns;
+    replaces the hardcoded MODEL_OPTIONS constant in LiveSidebar.
+    """
+    import feat
+    return feat.detector_capabilities()
+
+
 _AU_MESH_TABLE_CACHE: dict | None = None
 
 

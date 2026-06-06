@@ -3,7 +3,7 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import { liveApi, systemApi } from '../lib/api';
-  import type { LiveConfigure, ComputeInfo, OverlayEdgeSets } from '../lib/api';
+  import type { LiveConfigure, ComputeInfo, OverlayEdgeSets, DetectorCapabilities } from '../lib/api';
   import type { OverlayToggles, OverlayStyleConfig } from '../lib/overlay/types';
   import type { Face } from '../lib/overlay/types';
   import { defaultOverlayStyle } from '../lib/overlay/types';
@@ -41,6 +41,7 @@
   });
 
   let compute: ComputeInfo | null = $state(null);
+  let detectorCaps: DetectorCapabilities | null = $state(null);
   let sidebarCollapsed = $state(false);
   let apiError: string | null = $state(null);
 
@@ -182,6 +183,9 @@
       apiError = `Backend unreachable: ${e?.message ?? e}`;
       return;
     }
+    // Fetch capabilities alongside compute — independent requests, but we
+    // fire them sequentially to keep the error handling simple.
+    detectorCaps = await systemApi.detectorCapabilities().catch(() => null);
     try {
       await applyConfig(config);
     } catch (e: any) {
@@ -478,6 +482,7 @@
       <LiveSidebar
         {config}
         {compute}
+        capabilities={detectorCaps}
         onConfigChange={applyConfig}
       />
       <button
