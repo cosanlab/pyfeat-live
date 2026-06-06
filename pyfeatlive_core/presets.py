@@ -33,7 +33,7 @@ def default_presets_path() -> Path:
 class Preset:
     id: str
     name: str
-    detector_type: str = "MPDetector"
+    detector_type: str = "Detectorv2"
     face_model: str = "retinaface"
     landmark_model: str = "mp_facemesh_v2"
     au_model: str = "mp_blendshapes"
@@ -58,10 +58,10 @@ def _builtin_presets() -> list[Preset]:
             au_model="xgb",
         ),
         Preset(
-            id="mp-standard", name="MP · standard", builtin=True,
+            id="v2-standard", name="Detectorv2 · standard", builtin=True,
         ),
         Preset(
-            id="mp-fast-cpu", name="MP · fast (cpu)", builtin=True,
+            id="v2-fast", name="Detectorv2 · fast", builtin=True,
             emotion_model="resmasknet", identity_model=None,
         ),
     ]

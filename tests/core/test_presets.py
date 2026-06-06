@@ -13,7 +13,7 @@ def test_first_load_returns_builtins(tmp_path: Path):
     p = tmp_path / "presets.json"
     presets = load_presets(p)
     names = {pr.name for pr in presets}
-    assert "MP · standard" in names
+    assert "Detectorv2 · standard" in names
     assert "Classic · img2pose" in names
     assert all(pr.builtin for pr in presets)
 

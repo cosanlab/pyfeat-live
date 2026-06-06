@@ -121,7 +121,7 @@
                 pipeline.landmark_model = d.landmark_model[0];
                 pipeline.au_model = d.au_model[0];
               }}>
-              <option>Detectorv2</option><option>MPDetector</option><option>Detector</option>
+              <option>Detectorv2</option><option>Detector</option>
             </select>
           </label>
           {#each ['face_model', 'landmark_model', 'au_model', 'emotion_model', 'identity_model'] as field}

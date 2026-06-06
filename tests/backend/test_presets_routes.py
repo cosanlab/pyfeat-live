@@ -20,7 +20,7 @@ def test_list_returns_builtins_on_first_call(client, presets_file):
     assert r.status_code == 200
     data = r.json()
     names = {p["name"] for p in data}
-    assert "MP · standard" in names
+    assert "Detectorv2 · standard" in names
     assert "Classic · img2pose" in names
 
 
