@@ -138,8 +138,8 @@
   <!-- Detector type -->
   <div>
     <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">Detector</div>
-    <div class="grid grid-cols-3 gap-0.5 bg-zinc-900 rounded-md p-0.5">
-      {#each [['Detectorv2', 'Detector​v2'], ['MPDetector', 'MP​Detector'], ['Detector', 'Detector​v1']] as [type, label]}
+    <div class="grid grid-cols-2 gap-0.5 bg-zinc-900 rounded-md p-0.5">
+      {#each [['Detectorv2', 'Detector​v2'], ['Detector', 'Detector​v1']] as [type, label]}
         <button
           class="text-[10px] leading-tight px-1 py-1 rounded text-center break-words min-w-0 {config.detector_type === type ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
           onclick={() => switchDetectorType(type as LiveConfigure['detector_type'])}
