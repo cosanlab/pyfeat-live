@@ -66,15 +66,14 @@
     return fallback[key] ?? [null];
   }
 
-  // Dynamic Pose options for the classic Detector: img2pose face → only
-  // 'img2pose' pose; retinaface → capability options minus 'img2pose'
-  // (i.e. ['pose_mlp', 'pnp_dlt']). For other detectors not used.
+  // Dynamic Pose options for the classic Detector. img2pose pose requires the
+  // img2pose face detector, so: face=img2pose → only 'img2pose'; face=retinaface
+  // → all options INCLUDING img2pose (selecting it switches Face to img2pose via
+  // onPoseChange). For other detectors, the capability options as-is.
   const poseOptions = $derived.by((): (string | null)[] => {
     if (config.detector_type !== 'Detector') return optionsFor('facepose_model');
     if (config.face_model === 'img2pose') return ['img2pose'];
-    // retinaface: use capability options but exclude img2pose (it's
-    // only valid when face_model=img2pose).
-    return optionsFor('facepose_model').filter((o) => o !== 'img2pose');
+    return optionsFor('facepose_model');
   });
 
   // Switching detector type resets all sub-model fields to their capability
@@ -105,6 +104,13 @@
   function onFaceChange(newFace: string) {
     const newFacepose = newFace === 'img2pose' ? 'img2pose' : 'pose_mlp';
     onConfigChange({ ...config, face_model: newFace, facepose_model: newFacepose });
+  }
+
+  // When the user changes Pose, keep face_model consistent: img2pose pose needs
+  // the img2pose face detector; pose_mlp/pnp_dlt need retinaface.
+  function onPoseChange(newPose: string) {
+    const newFace = newPose === 'img2pose' ? 'img2pose' : 'retinaface';
+    onConfigChange({ ...config, facepose_model: newPose, face_model: newFace });
   }
 </script>
 
@@ -162,6 +168,8 @@
               const val = (e.target as HTMLSelectElement).value || null;
               if (key === 'face_model' && val) {
                 onFaceChange(val);
+              } else if (key === 'facepose_model' && val) {
+                onPoseChange(val);
               } else {
                 update(key as keyof LiveConfigure, val as any);
               }
