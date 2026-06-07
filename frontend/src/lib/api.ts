@@ -324,6 +324,15 @@ export const analyzeApi = {
     if (!r.ok) throw new ApiError(r.status, await r.text());
     return r.json() as Promise<AnalyzeItem>;
   },
+  // Tauri-only: enqueue by absolute OS path (from the native file
+  // picker). Skips the multipart byte upload — the sidecar reads the
+  // user's file in-place and the queue row is "borrowed" (never
+  // deleted on removal).
+  addByPath: (path: string, pipeline: PipelineConfig, video: VideoParams) =>
+    request<AnalyzeItem>('/api/analyze/queue/by-path', {
+      method: 'POST',
+      body: JSON.stringify({ path, pipeline, video }),
+    }),
   patch: (id: string, body: { pipeline?: PipelineConfig; video?: VideoParams }) =>
     request<AnalyzeItem>(`/api/analyze/queue/${encodeURIComponent(id)}`, {
       method: 'PATCH', body: JSON.stringify(body),

@@ -47,6 +47,8 @@
         <span class="text-green-400 font-mono">done · {item.total_frames}f</span>
       {:else if item.status === 'failed'}
         <span class="text-red-400 font-mono">failed: {item.error}</span>
+      {:else if item.status === 'cancelled'}
+        <span class="text-zinc-400 font-mono">cancelled · {item.progress_frames}f written</span>
       {/if}
     </div>
     {#if item.status === 'running' && item.total_frames > 0}
@@ -72,7 +74,6 @@
   <button
     class="w-7 h-7 rounded border border-zinc-800 inline-flex items-center justify-center text-zinc-400 hover:text-red-400 hover:bg-zinc-900"
     onclick={onDelete}
-    disabled={item.status === 'running'}
-    title="Remove from queue"
+    title={item.status === 'running' ? 'Cancel this item' : 'Remove from queue'}
   ><X size={12} /></button>
 </div>

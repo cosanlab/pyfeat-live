@@ -1,5 +1,6 @@
 <script lang="ts">
   import TopNav from './lib/components/TopNav.svelte';
+  import UpdateBanner from './lib/components/UpdateBanner.svelte';
   import Live from './routes/Live.svelte';
   import Analyze from './routes/Analyze.svelte';
   import Viewer from './routes/Viewer.svelte';
@@ -10,6 +11,7 @@
 </script>
 
 <div class="min-h-screen flex flex-col">
+  <UpdateBanner />
   <TopNav {view} onViewChange={(v) => (view = v)} logsOpen={showLogs} onToggleLogs={() => (showLogs = !showLogs)} />
   <div class="flex-1 flex min-h-0">
     <main class="flex-1 flex flex-col min-w-0">

@@ -21,6 +21,7 @@ class QueueStatus(str, enum.Enum):
     RUNNING = "running"
     DONE = "done"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass
@@ -61,6 +62,11 @@ class AnalyzeQueueItem:
     finished_at: float = 0.0
     session_dir: Optional[str] = None       # populated on DONE
     error: Optional[str] = None             # populated on FAILED
+    # True when ``file_path`` points at something we copied into our own
+    # upload temp dir (multipart upload from the browser) — safe to
+    # unlink on removal. False when the user passed a path to a file
+    # they own (Tauri native file picker); we never delete those.
+    owns_file: bool = True
 
 
 @dataclass
@@ -106,6 +112,8 @@ class AnalyzeQueue:
         before = len(self._items)
         self._items = [
             i for i in self._items
-            if i.status not in (QueueStatus.DONE, QueueStatus.FAILED)
+            if i.status not in (
+                QueueStatus.DONE, QueueStatus.FAILED, QueueStatus.CANCELLED,
+            )
         ]
         return before - len(self._items)

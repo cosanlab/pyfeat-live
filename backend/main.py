@@ -80,6 +80,11 @@ def create_app() -> FastAPI:
     app.state.analyze_runner_task = None
     app.state.analyze_paused = False
     app.state.analyze_subscribers = []          # list[asyncio.Queue]
+    # threading.Event for the currently-running item; the runner sets
+    # this before each item and clears it after. /stop and the per-row
+    # X handler signal it to interrupt the in-flight item.
+    app.state.analyze_current_cancel = None     # threading.Event | None
+    app.state.analyze_current_item_id = None    # str | None
 
     app.include_router(system_router.router)
     app.include_router(live_router.router)
