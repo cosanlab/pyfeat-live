@@ -109,11 +109,15 @@ class AnalyzeQueue:
         return None
 
     def clear_done(self) -> int:
-        before = len(self._items)
-        self._items = [
-            i for i in self._items
-            if i.status not in (
-                QueueStatus.DONE, QueueStatus.FAILED, QueueStatus.CANCELLED,
-            )
-        ]
-        return before - len(self._items)
+        terminal = (QueueStatus.DONE, QueueStatus.FAILED, QueueStatus.CANCELLED)
+        done = [i for i in self._items if i.status in terminal]
+        self._items = [i for i in self._items if i.status not in terminal]
+        # Free the temp uploads we own (multipart flow) — otherwise "clear
+        # done" leaves every uploaded source video behind in the temp dir.
+        for i in done:
+            if i.owns_file:
+                try:
+                    i.file_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        return len(done)

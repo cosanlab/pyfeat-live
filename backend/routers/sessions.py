@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 
 from pyfeatlive_core.recorder import default_sessions_root
 from pyfeatlive_core.session_io import (
@@ -109,16 +110,12 @@ def get_session_video(session_id: str, request: Request) -> Response:
             return _serve_range(video, range_header)
         except ValueError:
             raise HTTPException(400, "bad Range header")
-    size = video.stat().st_size
-    with open(video, "rb") as f:
-        data = f.read()
-    return Response(
-        content=data,
+    # Non-Range request: stream the file instead of buffering the whole
+    # (potentially hundreds of MB) recording into memory per request.
+    return FileResponse(
+        video,
         media_type="video/mp4",
-        headers={
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(size),
-        },
+        headers={"Accept-Ranges": "bytes"},
     )
 
 
@@ -128,11 +125,7 @@ def get_session_fex(session_id: str) -> Response:
     fex = d / FEX_FILENAME
     if not fex.is_file():
         raise HTTPException(404, "fex not found")
-    return Response(
-        content=fex.read_bytes(),
-        media_type="text/csv",
-        headers={"Content-Length": str(fex.stat().st_size)},
-    )
+    return FileResponse(fex, media_type="text/csv")
 
 
 @router.get("/{session_id}/face-thumbnail/{frame}/{face_idx}")

@@ -76,3 +76,25 @@ def test_next_queued_returns_none_when_drained():
     a = q.add(_make_item("a"))
     q.set_status(a.id, QueueStatus.DONE)
     assert q.next_queued() is None
+
+
+def test_clear_done_unlinks_owned_upload(tmp_path):
+    """clear_done() frees the temp uploads we own (no disk leak) but never
+    deletes a borrowed source the user pointed us at."""
+    owned = tmp_path / "upload.mp4"
+    owned.write_bytes(b"x")
+    borrowed = tmp_path / "source.mp4"
+    borrowed.write_bytes(b"x")
+    q = AnalyzeQueue()
+    a = q.add(_make_item("a"))
+    a.file_path = owned
+    a.owns_file = True
+    b = q.add(_make_item("b"))
+    b.file_path = borrowed
+    b.owns_file = False
+    q.set_status(a.id, QueueStatus.DONE)
+    q.set_status(b.id, QueueStatus.DONE)
+
+    assert q.clear_done() == 2
+    assert not owned.exists(), "owned upload should be unlinked on clear_done"
+    assert borrowed.exists(), "borrowed source must NOT be deleted"
