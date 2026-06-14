@@ -114,3 +114,13 @@ The Tauri shell spawns `sidecar.py` (which spawns uvicorn) as a child process, t
 `PYFEAT_LIVE_PROFILE=1 .venv/bin/python -m uvicorn backend.main:app --port 8765` logs per-frame timing breakdown of the detection pipeline (`recv / decode / lock_wait / detect / serialize`). Toggle the matching frontend instrumentation in the browser console with `window.__pyfeatProfile = true`.
 
 If you run into installation issues with py-feat see [this issue](https://github.com/cosanlab/py-feat/issues/186).
+
+## License
+
+The Py-feat Live application code is released under the [MIT License](LICENSE).
+
+**The facial-expression detection models are not covered by MIT.** The app
+downloads and runs pretrained models (via py-feat) that are licensed
+separately by their authors, and **several carry non-commercial / research-only
+stipulations**. You are responsible for reviewing and complying with each
+model's license before use — see the [py-feat model reference](https://py-feat.org/).

@@ -46,6 +46,11 @@ coverage.xml
 *.cer
 *.mobileprovision
 
+# Tauri updater signing key (minisign). The private key must never be
+# committed; the public key belongs in tauri.conf.json's `pubkey`, not loose.
+*.key
+.tauri/
+
 # --- Editor / OS ---
 *.DS*
 *.swp
