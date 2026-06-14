@@ -10,11 +10,11 @@
   let showLogs = $state(false);
 </script>
 
-<div class="min-h-screen flex flex-col">
+<div class="h-screen flex flex-col">
   <UpdateBanner />
   <TopNav {view} onViewChange={(v) => (view = v)} logsOpen={showLogs} onToggleLogs={() => (showLogs = !showLogs)} />
   <div class="flex-1 flex min-h-0">
-    <main class="flex-1 flex flex-col min-w-0">
+    <main class="flex-1 flex flex-col min-w-0 min-h-0">
       {#if view === 'live'}
         <Live showLogs={showLogs} onCloseLogs={() => (showLogs = false)} />
       {:else if view === 'analyze'}
