@@ -302,7 +302,9 @@
   }
 
   function onSeek(f: number) {
-    currentFrame = Math.max(0, Math.min(totalFrames, f));
+    // totalFrames is a count, so the last valid index is totalFrames - 1.
+    // Clamping to totalFrames left the last frame blank (no fex rows match).
+    currentFrame = Math.max(0, Math.min(totalFrames - 1, f));
   }
 
   function onTogglePlay() { isPlaying = !isPlaying; }

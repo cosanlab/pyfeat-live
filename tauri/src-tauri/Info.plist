@@ -12,15 +12,5 @@
          flips it on. -->
     <key>NSMicrophoneUsageDescription</key>
     <string>Py-feat Live does not record audio. This entry is reserved for future features.</string>
-
-    <!-- Legacy from the old WebRTC capture path, which negotiated ICE
-         over the host's non-loopback IPs and needed local-network
-         access on macOS 15+. The current pipeline captures via
-         getUserMedia and POSTs frames to the loopback (127.0.0.1)
-         sidecar, which is exempt — so this key is likely vestigial and
-         a candidate for removal after verifying no local-network use
-         remains. -->
-    <key>NSLocalNetworkUsageDescription</key>
-    <string>Py-feat Live uses local network access to route webcam frames from the camera to its embedded analysis engine. No data leaves your machine.</string>
   </dict>
 </plist>
