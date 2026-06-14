@@ -526,7 +526,7 @@ export function drawAuMeshHeatmap(
       const cx = lm[c * 2], cy = lm[c * 2 + 1];
       if (ax == null || ay == null || bx == null || by == null || cx == null || cy == null) continue;
 
-      const lutIdx = Math.min(255, Math.max(0, Math.round(disp * 255)));
+      const lutIdx = Math.min(255, Math.max(0, Math.floor(disp * 255)));
       const rgb = lut[lutIdx];
       if (!rgb) continue;
 
@@ -550,7 +550,7 @@ export function drawAuMeshHeatmap(
       const raw = aus[au];
       if (raw == null || (raw as number) <= 0) continue;
       const disp = Math.pow(raw as number, gamma);
-      const rgb = lut[Math.min(255, Math.max(0, Math.round(disp * 255)))];
+      const rgb = lut[Math.min(255, Math.max(0, Math.floor(disp * 255)))];
       if (!rgb) continue;
       ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
       for (const vi of verts) {

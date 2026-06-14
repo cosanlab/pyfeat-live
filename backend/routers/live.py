@@ -175,7 +175,11 @@ async def _run_detection(live, img: Image.Image, frame_id: int = -1) -> None:
                 gaze_convention, overlay_style, tracker, need_bake,
             )
             dur = time.perf_counter() - t0
-        print(f"detect: {dims[0]}x{dims[1]} dur={dur*1000:.0f}ms bake={need_bake}")
+        if _LIVE_PROFILE:
+            logging.getLogger(__name__).info(
+                "detect: %dx%d dur=%.0fms bake=%s",
+                dims[0], dims[1], dur * 1000, need_bake,
+            )
 
         live._cached_baked_jpeg = png  # None when not baking; kept for compat
         live._cached_fex = fex

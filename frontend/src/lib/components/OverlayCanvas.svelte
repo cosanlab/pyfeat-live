@@ -87,6 +87,9 @@
     if (canvas.height !== bh) canvas.height = bh;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    // Guard against a 0-sized frame (a `frame:[0,0]` response or a pre-init
+    // Viewer): dividing by it yields a NaN/Infinity transform.
+    if (!width || !height) return;
     ctx.setTransform(bw / width, 0, 0, bh / height, 0, 0);
     ctx.clearRect(0, 0, width, height);
     for (const face of faces) {

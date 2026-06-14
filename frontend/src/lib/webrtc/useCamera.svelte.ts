@@ -36,8 +36,10 @@ export async function refreshDevices(): Promise<void> {
     if (!cameraStore.selectedDeviceId && cameraStore.devices.length > 0) {
       cameraStore.selectedDeviceId = cameraStore.devices[0].deviceId;
     }
-  } catch (err: any) {
-    cameraStore.error = err.message;
+  } catch (err) {
+    // A thrown non-Error (string, DOMException without .message, null) would
+    // otherwise store `undefined` or throw inside the catch.
+    cameraStore.error = err instanceof Error ? err.message : String(err);
   }
 }
 
