@@ -40,7 +40,7 @@
       emotion_model: ['resmasknet', 'svm', null],
       identity_model: ['arcface', 'arcface_r50', 'facenet', null],
     },
-    Detector: {
+    Detectorv1: {
       face_model: ['img2pose', 'retinaface'],
       landmark_model: ['mobilefacenet', 'mobilenet', 'pfld'],
       au_model: ['xgb', 'svm'],
@@ -116,12 +116,12 @@
                 pipeline.detector_type = newType;
                 // Reset sub-models to valid options for the new detector type
                 // so we never carry a stale model (e.g. mp_facemesh_v2 into a
-                // classic Detector), which would make build_detector raise.
+                // Detectorv1), which would make build_detector raise.
                 const d = MODEL_OPTIONS[newType];
                 pipeline.landmark_model = d.landmark_model[0];
                 pipeline.au_model = d.au_model[0];
               }}>
-              <option>Detectorv2</option><option>Detector</option>
+              <option>Detectorv2</option><option>Detectorv1</option>
             </select>
           </label>
           {#each ['face_model', 'landmark_model', 'au_model', 'emotion_model', 'identity_model'] as field}

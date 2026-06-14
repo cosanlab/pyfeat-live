@@ -59,7 +59,7 @@ def test_create(client, presets_file):
 
 def test_patch_rename(client, presets_file):
     r = client.post("/api/presets", json={
-        "name": "Original", "detector_type": "Detector",
+        "name": "Original", "detector_type": "Detectorv1",
         "face_model": "img2pose", "landmark_model": "mobilefacenet",
         "au_model": "xgb", "emotion_model": "resmasknet",
         "identity_model": "arcface",

@@ -1,4 +1,4 @@
-py-feat @ git+https://github.com/cosanlab/py-feat@68d5fce
+py-feat @ git+https://github.com/cosanlab/py-feat@3855e07
 watchdog
 plotly
 fastapi>=0.115

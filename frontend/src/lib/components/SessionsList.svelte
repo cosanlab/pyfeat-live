@@ -24,7 +24,7 @@
 
   function detectorBadge(d: string | null): string {
     if (d === 'MPDetector') return 'MP';
-    if (d === 'Detector') return 'D';
+    if (d === 'Detectorv1') return 'D';
     return '?';
   }
 </script>

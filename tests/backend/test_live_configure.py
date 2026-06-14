@@ -45,7 +45,7 @@ def test_configure_validates_unknown_keys(client):
 
 def test_configure_accepts_toggles(client):
     r = client.post("/api/live/configure", json={
-        "detector_type": "Detector",
+        "detector_type": "Detectorv1",
         "face_model": "retinaface",
         "landmark_model": "mobilefacenet",
         "au_model": "xgb",
@@ -59,7 +59,7 @@ def test_configure_accepts_toggles(client):
     live = client.app.state.live
     assert live.toggles == {"rects": True, "gaze": False}
     assert live.landmark_style == "points"
-    # MPDetector wiring: this run used "Detector", so flag stays False.
+    # MPDetector wiring: this run used "Detectorv1", so flag stays False.
     assert live.mp_landmarks is False
 
 

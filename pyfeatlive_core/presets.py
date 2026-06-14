@@ -54,13 +54,13 @@ def _builtin_presets() -> list[Preset]:
         ),
         Preset(
             id="classic-retinaface", name="Detectorv1 · retinaface", builtin=True,
-            detector_type="Detector",
+            detector_type="Detectorv1",
             face_model="retinaface", landmark_model="mobilefacenet",
             au_model="xgb",
         ),
         Preset(
             id="classic-img2pose", name="Detectorv1 · img2pose", builtin=True,
-            detector_type="Detector",
+            detector_type="Detectorv1",
             face_model="img2pose", landmark_model="mobilefacenet",
             au_model="xgb",
         ),

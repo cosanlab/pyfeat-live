@@ -89,7 +89,7 @@ def draw_overlays(
         mp_landmarks: True for MPDetector's 478-point Face Mesh;
             affects landmark rendering and gaze-origin fallback.
             If None, derived from overlay_kind.
-        overlay_kind: 'dlib68_polygons' (classic Detector) or
+        overlay_kind: 'dlib68_polygons' (Detectorv1) or
             'mesh478_muscle' (Detectorv2 / MPDetector).
         landmark_style: 'mesh' | 'lines' | 'points'
     """
@@ -642,7 +642,7 @@ def _draw_gaze(
         dir_x = float(np.sin(gy_rad) * np.cos(gp_rad))
         dir_y = -float(np.sin(gp_rad))
     else:
-        # L2CS (classic Detector / MPDetector) — yaw sign hand-tuned.
+        # L2CS (Detectorv1 / MPDetector) — yaw sign hand-tuned.
         dir_x = -float(np.sin(gy_rad))
         dir_y = -float(np.sin(gp_rad))
     length = min(w, h) * 0.9
