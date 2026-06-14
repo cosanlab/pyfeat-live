@@ -37,7 +37,7 @@ DETECTORV2_EMOTION_RENAME = {
 
 LandmarkSpace = Literal["dlib68", "mp478"]
 OverlayKind = Literal["dlib68_polygons", "mesh478_muscle"]
-# Gaze sign convention for the overlay arrow. The classic Detector +
+# Gaze sign convention for the overlay arrow. The Detectorv1 +
 # MPDetector use the L2CS model, whose yaw sign the overlay was hand-tuned
 # for (dir_x = -sin(yaw)). Detectorv2's multitask gaze head follows
 # py-feat's own draw_facegaze convention (dir_x = +sin(yaw)*cos(pitch)),
@@ -80,8 +80,8 @@ _CAPS = {
         has_valence_arousal=False,
         emotion_columns=list(DISPLAY_EMOTIONS),
     ),
-    "Detector": DetectorCapabilities(
-        kind="Detector",
+    "Detectorv1": DetectorCapabilities(
+        kind="Detectorv1",
         au_set=list(DISPLAY_AUS),
         landmark_space="dlib68",
         has_mesh478=False,
@@ -92,7 +92,14 @@ _CAPS = {
 }
 
 
+# py-feat renamed the modular detector "Detector" -> "Detectorv1" (and dropped
+# the alias). Sessions/presets recorded before that carry detector_type
+# "Detector"; map it so old data keeps rendering.
+_LEGACY_KIND_ALIASES = {"Detector": "Detectorv1"}
+
+
 def capabilities_for(kind: str) -> DetectorCapabilities:
+    kind = _LEGACY_KIND_ALIASES.get(kind, kind)
     try:
         return _CAPS[kind]
     except KeyError:

@@ -21,7 +21,7 @@
     // user-configured style from its overlay-settings modal.
     style?: OverlayStyleConfig | null;
     // Gaze direction convention: Detectorv2's multitask gaze head needs a
-    // different yaw mapping than L2CS (classic Detector / MPDetector).
+    // different yaw mapping than L2CS (Detectorv1 / MPDetector).
     gazeConvention?: 'l2cs' | 'multitask';
   };
   let {
@@ -42,7 +42,7 @@
 
   // Static 478-mesh AU→vertex table, fetched once. Used for the mesh
   // detectors (Detectorv2, MPDetector) where mpLandmarks is true; the
-  // classic Detector keeps the dlib-68 polygon heatmap below.
+  // Detectorv1 keeps the dlib-68 polygon heatmap below.
   let auMeshTable: AuMeshTable | null = $state(null);
   // MP tessellation triangles for the filled heatmap. Reconstructed from the
   // mp_tess edge list using the same consecutive-triple rule as the backend

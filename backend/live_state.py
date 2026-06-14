@@ -55,7 +55,7 @@ class LiveSession:
     # an explicit configure still carry a valid capabilities block.
     detector_type: str = "Detectorv2"
     # Which overlay family the active detector wants: 'dlib68_polygons'
-    # (classic Detector) or 'mesh478_muscle' (Detectorv2 / MPDetector).
+    # (Detectorv1) or 'mesh478_muscle' (Detectorv2 / MPDetector).
     # Read by the bake path and passed to draw_overlays. A later task
     # wires the detector→overlay_kind assignment in /configure.
     overlay_kind: str = "mesh478_muscle"
@@ -63,7 +63,7 @@ class LiveSession:
     # sets this from detector capabilities; the field exists now so the
     # attribute is always present.
     has_valence_arousal: bool = True
-    # Gaze arrow sign convention: 'l2cs' (classic Detector / MPDetector) or
+    # Gaze arrow sign convention: 'l2cs' (Detectorv1 / MPDetector) or
     # 'multitask' (Detectorv2 — py-feat draw_facegaze convention, yaw not
     # flipped). Set from detector capabilities in /configure.
     gaze_convention: str = "multitask"
@@ -117,7 +117,7 @@ class LiveSession:
         """Clear per-session detection state; called by /configure.
 
         Critically: must clear the cached baked frame too, otherwise
-        a /configure that swaps the detector (e.g., classic Detector
+        a /configure that swaps the detector (e.g., Detectorv1
         → MPDetector) returns the previous detector's last baked
         frame on the next /api/live/frame upload until a new
         detection completes. The display would show stale pixels.

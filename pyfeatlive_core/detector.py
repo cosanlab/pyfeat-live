@@ -11,11 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from feat import Detector, Detectorv2
+from feat import Detectorv1, Detectorv2
 from feat.MPDetector import MPDetector
 
 
-DetectorType = Literal["Detector", "MPDetector", "Detectorv2"]
+DetectorType = Literal["Detectorv1", "MPDetector", "Detectorv2"]
 Device = Literal["cpu", "mps", "cuda"]
 
 
@@ -35,11 +35,11 @@ class DetectorConfig:
     au_model: Optional[str] = "mp_blendshapes"
     emotion_model: Optional[str] = "resmasknet"
     identity_model: Optional[str] = "arcface"
-    # Only classic Detector accepts a gaze_model kwarg (L2CS). MPDetector
+    # Only Detectorv1 accepts a gaze_model kwarg (L2CS). MPDetector
     # derives gaze internally from MediaPipe iris landmarks; this field
     # is ignored when detector_type == "MPDetector".
     gaze_model: Optional[str] = "l2cs"
-    # Head-pose backend for the classic Detector only.
+    # Head-pose backend for the Detectorv1 only.
     # "pose_mlp" (default): retinaface + Pose-MLP (falls back to pnp_dlt).
     # "pnp_dlt": retinaface + PnP-DLT (forces MLP skip).
     # "img2pose": builds with face_model='img2pose' (pose comes from that model).
@@ -78,7 +78,7 @@ def build_detector(config: DetectorConfig):
     # Classic Detector: build, then optionally force facepose_method when
     # using retinaface so pose_mlp / pnp_dlt is applied correctly.
     # When face_model == 'img2pose', pose is native to that model — no override needed.
-    detector = Detector(gaze_model=config.gaze_model, **common_kwargs)
+    detector = Detectorv1(gaze_model=config.gaze_model, **common_kwargs)
     if config.face_model == "retinaface" and config.facepose_model in ("pose_mlp", "pnp_dlt"):
         detector.facepose_method = config.facepose_model
     return detector

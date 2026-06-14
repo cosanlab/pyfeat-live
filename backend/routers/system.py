@@ -131,7 +131,7 @@ def detector_capabilities_route() -> dict:
     Response shape::
 
         {
-          "Detector":    {"face_model": {"options": [...], "default": "..."}, ...},
+          "Detectorv1":    {"face_model": {"options": [...], "default": "..."}, ...},
           "Detectorv2":  {...},
           "MPDetector":  {...}
         }

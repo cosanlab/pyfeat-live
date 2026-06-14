@@ -74,7 +74,7 @@ export interface ModelCategory {
 
 /**
  * Full capabilities map from GET /api/system/detector-capabilities.
- * Keys are detector class names ("Detector", "Detectorv2", "MPDetector").
+ * Keys are detector class names ("Detectorv1", "Detectorv2", "MPDetector").
  * Inner keys are category names (e.g. "face_model", "au_model", …).
  */
 export type DetectorCapabilities = Record<string, Record<string, ModelCategory>>;
@@ -102,16 +102,16 @@ export const systemApi = {
 
 // ---------------- live ----------------
 export interface LiveConfigure {
-  detector_type: 'Detectorv2' | 'MPDetector' | 'Detector';
+  detector_type: 'Detectorv2' | 'MPDetector' | 'Detectorv1';
   face_model: string;
   landmark_model: string;
   au_model: string | null;
   emotion_model: string | null;
   identity_model: string | null;
-  // Only classic Detector honors gaze_model. MPDetector derives gaze
+  // Only Detectorv1 honors gaze_model. MPDetector derives gaze
   // from iris landmarks unconditionally.
   gaze_model: string | null;
-  // Head-pose backend for the classic Detector only ("pose_mlp", "pnp_dlt",
+  // Head-pose backend for the Detectorv1 only ("pose_mlp", "pnp_dlt",
   // "img2pose"). Ignored for Detectorv2 / MPDetector.
   facepose_model?: string;
   device: 'cpu' | 'mps' | 'cuda';

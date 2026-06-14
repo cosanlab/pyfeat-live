@@ -1,9 +1,9 @@
 """GET /api/system/detector-capabilities returns SUPPORTED_MODELS for all detectors."""
 
 
-EXPECTED_DETECTORS = {"Detector", "Detectorv2", "MPDetector"}
+EXPECTED_DETECTORS = {"Detectorv1", "Detectorv2", "MPDetector"}
 EXPECTED_DETECTOR_CATEGORIES = {
-    "Detector": {"face_model", "facepose_model", "landmark_model", "au_model", "emotion_model", "identity_model", "gaze_model"},
+    "Detectorv1": {"face_model", "facepose_model", "landmark_model", "au_model", "emotion_model", "identity_model", "gaze_model"},
     "Detectorv2": {"face_model", "identity_model"},
     "MPDetector": {"face_model", "au_model", "emotion_model", "identity_model"},
 }
@@ -37,7 +37,7 @@ def test_detector_capabilities_entry_shape(client):
 def test_detector_capabilities_classic_face_options(client):
     r = client.get("/api/system/detector-capabilities")
     data = r.json()
-    face_opts = data["Detector"]["face_model"]["options"]
+    face_opts = data["Detectorv1"]["face_model"]["options"]
     assert "retinaface" in face_opts
     assert "img2pose" in face_opts
 
@@ -57,6 +57,6 @@ def test_detector_capabilities_identity_default_is_arcface(client):
     """Library default for identity_model is arcface (app overrides to None)."""
     r = client.get("/api/system/detector-capabilities")
     data = r.json()
-    for det in ("Detector", "Detectorv2", "MPDetector"):
+    for det in ("Detectorv1", "Detectorv2", "MPDetector"):
         assert data[det]["identity_model"]["default"] == "arcface", \
             f"{det} identity_model default should be 'arcface'"

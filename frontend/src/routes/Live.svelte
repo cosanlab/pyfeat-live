@@ -93,7 +93,7 @@
   let mpToDlib68 = $state<number[] | null>(null);
   // Frame cache: keeps recently-captured bitmaps keyed by frame id so the
   // display can paint the exact frame a detection ran on (lock-to-detection).
-  // Sized to cover slow detectors (MPDetector / classic Detector run
+  // Sized to cover slow detectors (MPDetector / Detectorv1 run
   // ~100-250ms/detection): the in-flight window is detection_latency ÷
   // capture_interval, so with the ~33ms capture cap below this holds ~8
   // frames at 250ms latency — well within 40. Too small and the detected
@@ -159,9 +159,9 @@
   let frameH = $state<number>(DET_BUDGET);
 
   // Detector landmark space: Detectorv2 / MPDetector are 478-point mesh
-  // detectors; classic Detector is dlib-68. The overlay needs the matching
+  // detectors; Detectorv1 is dlib-68. The overlay needs the matching
   // edge set — mesh edges over 68 dlib points produce garbage.
-  const liveMpLandmarks = $derived(config.detector_type !== 'Detector');
+  const liveMpLandmarks = $derived(config.detector_type !== 'Detectorv1');
   const liveEdges = $derived.by((): number[][] | undefined => {
     if (!overlayEdges) return undefined;
     const lines = overlayStyle.landmarks.style === 'lines';

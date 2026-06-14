@@ -360,10 +360,10 @@ class ConfigureRequest(BaseModel):
     au_model: Optional[str] = "mp_blendshapes"
     emotion_model: Optional[str] = "resmasknet"
     identity_model: Optional[str] = "arcface"
-    # Only honored by classic Detector. MPDetector emits gaze
+    # Only honored by Detectorv1. MPDetector emits gaze
     # unconditionally from iris landmarks.
     gaze_model: Optional[str] = "l2cs"
-    # Head-pose backend for the classic Detector ("pose_mlp", "pnp_dlt",
+    # Head-pose backend for the Detectorv1 ("pose_mlp", "pnp_dlt",
     # "img2pose"). Ignored for Detectorv2 / MPDetector.
     facepose_model: Optional[str] = "pose_mlp"
     device: Literal["cpu", "mps", "cuda"] = "cpu"

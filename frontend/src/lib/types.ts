@@ -64,7 +64,7 @@ export interface Annotation {
 export interface Preset {
   id: string;
   name: string;
-  detector_type: 'Detectorv2' | 'MPDetector' | 'Detector';
+  detector_type: 'Detectorv2' | 'MPDetector' | 'Detectorv1';
   face_model: string;
   landmark_model: string;
   au_model: string;
@@ -77,7 +77,7 @@ export interface Preset {
 export type QueueStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
 export interface PipelineConfig {
-  detector_type: 'Detectorv2' | 'MPDetector' | 'Detector';
+  detector_type: 'Detectorv2' | 'MPDetector' | 'Detectorv1';
   face_model: string;
   landmark_model: string;
   au_model: string;
