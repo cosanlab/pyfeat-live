@@ -160,3 +160,14 @@ def au_mesh_table() -> dict:
         from pyfeatlive_core.au_mesh import build_au_mesh_table
         _AU_MESH_TABLE_CACHE = build_au_mesh_table()
     return _AU_MESH_TABLE_CACHE
+
+
+@router.get("/blendshape-names")
+def blendshape_names() -> list[str]:
+    """The 52 MediaPipe/ARKit blendshape coefficient names emitted by
+    Detectorv2 v2.5 (e.g. ``browDownLeft``, ``jawOpen``, ``_neutral``).
+
+    Sourced from py-feat so the timeseries picker can group blendshape
+    columns exactly, rather than guessing from name patterns. Static."""
+    from feat.utils import MP_BLENDSHAPE_NAMES
+    return list(MP_BLENDSHAPE_NAMES)

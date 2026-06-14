@@ -43,26 +43,26 @@ class Preset:
 
 
 def _builtin_presets() -> list[Preset]:
-    # classic-retinaface first: it's the default extraction preset.
+    # v2-standard first: it's the default extraction preset.
     return [
-        Preset(
-            id="classic-retinaface", name="Classic · retinaface", builtin=True,
-            detector_type="Detector",
-            face_model="retinaface", landmark_model="mobilefacenet",
-            au_model="xgb",
-        ),
-        Preset(
-            id="classic-img2pose", name="Classic · img2pose", builtin=True,
-            detector_type="Detector",
-            face_model="img2pose", landmark_model="mobilefacenet",
-            au_model="xgb",
-        ),
         Preset(
             id="v2-standard", name="Detectorv2 · standard", builtin=True,
         ),
         Preset(
             id="v2-fast", name="Detectorv2 · fast", builtin=True,
             emotion_model="resmasknet", identity_model=None,
+        ),
+        Preset(
+            id="classic-retinaface", name="Detectorv1 · retinaface", builtin=True,
+            detector_type="Detector",
+            face_model="retinaface", landmark_model="mobilefacenet",
+            au_model="xgb",
+        ),
+        Preset(
+            id="classic-img2pose", name="Detectorv1 · img2pose", builtin=True,
+            detector_type="Detector",
+            face_model="img2pose", landmark_model="mobilefacenet",
+            au_model="xgb",
         ),
     ]
 

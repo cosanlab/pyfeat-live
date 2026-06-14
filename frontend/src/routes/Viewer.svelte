@@ -53,6 +53,12 @@
     aus: false, emotions: false, valenceArousal: true,
   });
 
+  // Display smoothing for the HTML meta panels (mirrors Live). No `track`
+  // here — fast detect/track is a live-only concept (recorded playback has
+  // nothing to re-detect).
+  let smooth = $state(true);
+  let smoothStrength = $state(0.3);
+
   // Overlay toggle chips (mirrors the Live page control bar).
   const OVERLAY_CHIPS: { key: keyof OverlayToggles; label: string }[] = [
     { key: 'rects', label: 'Faceboxes' },
@@ -112,6 +118,9 @@
   // so the heatmap can find muscle vertices on MP sessions.
   let auTable: AuTable | null = $state(null);
   let edges: OverlayEdgeSets | null = $state(null);
+  // Exact blendshape column names (Detectorv2 v2.5), so the timeseries picker
+  // groups them precisely instead of guessing from name patterns.
+  let blendshapeNames: string[] = $state([]);
   // Pick the edge set that matches the active landmark model AND the chosen
   // landmark style: 'mesh' uses the full tessellation, 'lines' the feature
   // contours, 'points' needs no edges. Without keying on the style, picking
@@ -177,6 +186,10 @@
         gaze: [num('gaze_pitch'), num('gaze_yaw')],
         emotions,
         aus,
+        valence_arousal: (() => {
+          const v = num('valence'), a = num('arousal');
+          return v != null && a != null ? { valence: v, arousal: a } : undefined;
+        })(),
       };
     });
   });
@@ -207,10 +220,11 @@
 
   onMount(async () => {
     // Overlay tables are static; fetch them once alongside the session list.
-    [sessions, auTable, edges] = await Promise.all([
+    [sessions, auTable, edges, blendshapeNames] = await Promise.all([
       sessionsApi.list(),
       systemApi.auTable().catch(() => null),
       systemApi.overlayEdges().catch(() => null),
+      systemApi.blendshapeNames().catch(() => []),
     ]);
     if (sessions.length > 0) {
       await selectSession(sessions[0].name);
@@ -418,6 +432,8 @@
       mpToDlib68={auTable?.mpToDlib68 ?? null}
       style={overlayStyle}
       {showVideo}
+      {smooth}
+      {smoothStrength}
       {identities}
       {assignments}
       {onFaceClick}
@@ -475,6 +491,7 @@
       {#if !bottomCollapsed}
         <TimeseriesPlot
           {fexRows}
+          {blendshapeNames}
           {totalFrames}
           {currentFrame}
           {identities}
@@ -539,6 +556,10 @@
   <OverlayConfigModal
     style={overlayStyle}
     {toggles}
+    {smooth}
+    onSmoothChange={(v) => (smooth = v)}
+    {smoothStrength}
+    onSmoothStrengthChange={(v) => (smoothStrength = v)}
     hasValenceArousal={(currentSession as SessionDetail | null)?.detector_type === 'Detectorv2'}
     onStyleChange={(s) => (overlayStyle = s)}
     onToggle={(key) => (toggles = { ...toggles, [key]: !toggles[key] })}

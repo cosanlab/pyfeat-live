@@ -97,6 +97,7 @@ export const systemApi = {
   overlayEdges: () => request<OverlayEdgeSets>('/api/system/overlay-edges'),
   auTable: () => request<AuTable>('/api/system/au-table'),
   auMeshTable: () => request<AuMeshTable>('/api/system/au-mesh-table'),
+  blendshapeNames: () => request<string[]>('/api/system/blendshape-names'),
 };
 
 // ---------------- live ----------------

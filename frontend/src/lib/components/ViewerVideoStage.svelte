@@ -1,5 +1,9 @@
 <script lang="ts">
   import OverlayCanvas from './OverlayCanvas.svelte';
+  import EmotionBars from './EmotionBars.svelte';
+  import ValenceArousalPlot from './ValenceArousalPlot.svelte';
+  import PoseCube from './PoseCube.svelte';
+  import { placeMetaStack } from '../overlay/metaStack';
   import type { Face, OverlayToggles, OverlayStyleConfig } from '../overlay/types';
   import type { Identity, IdentityAssignment } from '../types';
   import type { AuTable } from '../api';
@@ -19,6 +23,10 @@
     mpToDlib68?: number[] | null;
     style?: OverlayStyleConfig | null;
     showVideo?: boolean;
+    // Display smoothing for the HTML meta panels (emotion / V·A / pose),
+    // mirrors Live's stabilization controls.
+    smooth?: boolean;
+    smoothStrength?: number;
     identities: Identity[];
     assignments: IdentityAssignment[];
     onFaceClick: (frame: number, faceIdx: number) => void;
@@ -29,11 +37,22 @@
     videoUrl, width, height, currentFrame, fps, isPlaying,
     faces, toggles, mpLandmarks,
     edges, auTable = null, mpToDlib68 = null, style = null, showVideo = true,
+    smooth = true, smoothStrength = 0.3,
     identities, assignments,
     onFaceClick, onFrameAdvance, onPlaybackEnd,
   }: Props = $props();
 
   let video: HTMLVideoElement | null = $state(null);
+
+  // Rendered size (px) of the aspect-locked stage box. The meta panels are
+  // POSITIONED in this screen space (source coords × displayScale) but rendered
+  // at a FIXED screen size — so their readability doesn't shrink with the
+  // recorded video's resolution (a high-res recording made displayScale tiny,
+  // ~0.4, which shrank the panels to ~35px). Live can scale-with-video because
+  // its frames are small (detection-budget capped); recordings are full-res.
+  let stageBoxW = $state(0);
+  let stageBoxH = $state(0);
+  const displayScale = $derived(stageBoxW > 0 && width > 0 ? stageBoxW / width : 1);
 
   // True while we're programmatically seeking the video to match a
   // currentFrame change from the parent. Suppresses the resulting
@@ -125,6 +144,8 @@
     <div
       class="relative h-full"
       style="aspect-ratio: {width} / {height}; max-width: 100%; max-height: 100%;"
+      bind:clientWidth={stageBoxW}
+      bind:clientHeight={stageBoxH}
     >
       <video
         bind:this={video}
@@ -136,7 +157,55 @@
         ontimeupdate={onTimeUpdate}
         onended={onEnded}
       ></video>
-      <OverlayCanvas {faces} {mpLandmarks} {width} {height} {toggles} {edges} {auTable} {mpToDlib68} {style} />
+      <!-- emotions/poses are drawn as HTML panels below (like Live), so keep
+           them OFF on the canvas to avoid double-rendering. -->
+      <OverlayCanvas {faces} {mpLandmarks} {width} {height}
+        toggles={{ ...toggles, emotions: false, poses: false }}
+        {edges} {auTable} {mpToDlib68} {style} />
+
+      <!-- HTML meta panels: emotion bars / valence-arousal / pose cube,
+           positioned per-face via placeMetaStack. Ported from Live; the
+           recorded video is NOT selfie-mirrored, so left = pos.left directly
+           (no mirror compensation). The layer is sized in source pixels and
+           scaled to the displayed video via displayScale. -->
+      {#if faces.length > 0}
+        <div class="absolute inset-0 pointer-events-none">
+          {#each faces as face, fi}
+            {@const emoOn = !!(toggles.emotions && face.emotions)}
+            {@const vaOn = !!(toggles.valenceArousal && face.valence_arousal)}
+            {@const poseOn = !!(toggles.poses && face.pose)}
+            {@const anyOn = emoOn || vaOn || poseOn}
+            {@const emoH = emoOn ? 64 : 0}
+            {@const vaH = vaOn ? 70 : 0}
+            {@const poseH = poseOn ? 48 : 0}
+            {@const nOn = (emoOn ? 1 : 0) + (vaOn ? 1 : 0) + (poseOn ? 1 : 0)}
+            {@const stackW = 96}
+            {@const stackH = emoH + vaH + poseH + (nOn > 1 ? (nOn - 1) * 4 : 0)}
+            {@const r = face.rect}
+            <!-- Face rect + neighbors mapped to SCREEN px (× displayScale); the
+                 panel stack itself is fixed-size, placed in that screen space. -->
+            {@const faceRect = { x: (r?.[0] ?? 0) * displayScale, y: (r?.[1] ?? 0) * displayScale, w: (r?.[2] ?? 0) * displayScale, h: (r?.[3] ?? 0) * displayScale }}
+            {@const others = faces.filter((_, j) => j !== fi).map((o) => ({ x: (o.rect?.[0] ?? 0) * displayScale, y: (o.rect?.[1] ?? 0) * displayScale, w: (o.rect?.[2] ?? 0) * displayScale, h: (o.rect?.[3] ?? 0) * displayScale }))}
+            {@const pos = placeMetaStack(faceRect, others, stackW, stackH, stageBoxW, stageBoxH)}
+            {#if anyOn}
+              <div class="absolute flex flex-col gap-1 pointer-events-none"
+                   style="left: {pos.left}px; top: {pos.top}px; width: {stackW}px;">
+                {#if emoOn}
+                  {@const ev = Object.fromEntries(Object.entries(face.emotions ?? {}).map(([k, v]) => [k, v ?? 0]))}
+                  <EmotionBars values={ev} {smooth} {smoothStrength} />
+                {/if}
+                {#if vaOn}
+                  <ValenceArousalPlot valence={face.valence_arousal!.valence} arousal={face.valence_arousal!.arousal} {smooth} {smoothStrength} />
+                {/if}
+                {#if poseOn}
+                  {@const deg = (x: number | null) => (x ?? 0) * 180 / Math.PI}
+                  <PoseCube pitch={deg(face.pose![0])} yaw={deg(face.pose![2])} roll={deg(face.pose![1])} {smooth} {smoothStrength} />
+                {/if}
+              </div>
+            {/if}
+          {/each}
+        </div>
+      {/if}
 
       <!-- Identity badges, positioned over each face box -->
       {#each faces as face (face.face_idx)}

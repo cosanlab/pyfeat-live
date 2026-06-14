@@ -1,6 +1,6 @@
 [package]
 name = "pyfeatlive-tauri"
-version = "0.8.3"
+version = "0.8.5"
 description = "Native desktop wrapper for pyfeatlive"
 authors = ["cosanlab"]
 license = "MIT"

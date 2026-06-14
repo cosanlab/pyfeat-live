@@ -1,11 +1,16 @@
 <script lang="ts">
   import Plus from '@lucide/svelte/icons/plus';
+  import ChevronRight from '@lucide/svelte/icons/chevron-right';
+  import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import { colorForSeriesIndex, dashForIdentityOrder } from '../plot/series';
   import type { Identity, IdentityAssignment, Annotation } from '../types';
 
   type Props = {
     // Each row of fexRows is { frame, face_idx, AU01, AU06, ..., happy, ... }.
     fexRows: Record<string, number | string | null>[];
+    // Exact blendshape column names (from the backend) so the picker groups
+    // them precisely; empty for non-v2.5 sessions.
+    blendshapeNames?: string[];
     totalFrames: number;
     currentFrame: number;
     identities: Identity[];
@@ -21,7 +26,7 @@
     onDragRangeComplete: (start: number, end: number) => void;
   };
   let {
-    fexRows, totalFrames, currentFrame, identities, assignments, annotations,
+    fexRows, blendshapeNames = [], totalFrames, currentFrame, identities, assignments, annotations,
     selectedIdentityIds, selectedSeries,
     onToggleIdentity, onToggleSeries, onSeek, onDragRangeComplete,
   }: Props = $props();
@@ -147,6 +152,55 @@
     return Object.keys(sample).filter(k => !skipPattern.test(k));
   });
 
+  // ---- Series grouping --------------------------------------------------
+  // Categorize each available series into a labeled group so the picker can
+  // collapse/expand whole sets (blendshapes are the noisy one — 52 columns).
+  // Blendshapes come from the backend's exact list; the rest are stable name
+  // patterns across detector versions. Order here = display order.
+  const EMOTION_NAMES = new Set([
+    'anger', 'disgust', 'fear', 'happiness', 'sadness', 'surprise', 'neutral', 'contempt',
+  ]);
+  const POSE_NAMES = new Set(['Pitch', 'Yaw', 'Roll', 'X', 'Y', 'Z']);
+  const VA_NAMES = new Set(['valence', 'arousal']);
+
+  function groupFor(s: string, blendshapes: Set<string>): string {
+    if (blendshapes.has(s)) return 'Blendshapes';
+    if (/^AU\d/.test(s)) return 'AUs';
+    if (EMOTION_NAMES.has(s)) return 'Emotions';
+    if (VA_NAMES.has(s)) return 'Valence / Arousal';
+    if (POSE_NAMES.has(s)) return 'Pose';
+    if (/^gaze_/.test(s)) return 'Gaze';
+    return 'Other';
+  }
+
+  // Fixed display order; groups with no members are dropped.
+  const GROUP_ORDER = ['Emotions', 'Valence / Arousal', 'Pose', 'Gaze', 'AUs', 'Blendshapes', 'Other'];
+
+  const seriesGroups = $derived.by(() => {
+    const bs = new Set(blendshapeNames);
+    const byGroup = new Map<string, string[]>();
+    for (const s of availableSeries) {
+      const g = groupFor(s, bs);
+      (byGroup.get(g) ?? byGroup.set(g, []).get(g)!).push(s);
+    }
+    return GROUP_ORDER
+      .filter(g => byGroup.has(g))
+      .map(g => ({ label: g, series: byGroup.get(g)! }));
+  });
+
+  // Collapsed groups (Blendshapes folded by default — it's the big one).
+  let collapsed = $state<Record<string, boolean>>({ Blendshapes: true });
+
+  function setGroupSelected(series: string[], on: boolean) {
+    // Toggle each so the parent's selectedSeries ends up with all-on / all-off
+    // for this group, without disturbing other groups.
+    for (const s of series) {
+      const isOn = selectedSeries.includes(s);
+      if (on && !isOn) onToggleSeries(s);
+      else if (!on && isOn) onToggleSeries(s);
+    }
+  }
+
   // Convert a pointer x-pixel to a clamped frame index (inverse of xFor).
   function frameAt(svg: SVGSVGElement, clientX: number): number {
     const r = svg.getBoundingClientRect();
@@ -225,22 +279,45 @@
     {/each}
   </div>
 
-  <!-- Series chips -->
-  <div class="flex items-center gap-2 mb-2 flex-wrap">
-    <span class="text-[9.5px] uppercase tracking-wider font-semibold text-zinc-500 min-w-[56px]">Series</span>
-    {#each availableSeries as s (s)}
-      {@const idx = selectedSeries.indexOf(s)}
-      <button
-        class="px-2.5 py-0.5 rounded text-[10.5px] border inline-flex items-center gap-1.5 font-mono {idx >= 0 ? 'bg-zinc-900 text-zinc-50 border-zinc-700' : 'opacity-50 border-zinc-800 text-zinc-500'}"
-        onclick={() => onToggleSeries(s)}
-      >
-        <span class="inline-block w-2 h-2 rounded-sm" style:background-color={idx >= 0 ? colorForSeriesIndex(idx) : '#3f3f46'}></span>
-        {s}
-      </button>
+  <!-- Series chips, grouped into collapsible sets so the picker stays
+       manageable (Detectorv2 v2.5 exposes 52 blendshapes). -->
+  <div class="mb-2 space-y-1">
+    {#each seriesGroups as grp (grp.label)}
+      {@const selCount = grp.series.filter(s => selectedSeries.includes(s)).length}
+      {@const isCollapsed = collapsed[grp.label]}
+      <div class="flex items-start gap-2">
+        <button
+          class="shrink-0 inline-flex items-center gap-1 mt-0.5 text-[9.5px] uppercase tracking-wider font-semibold text-zinc-400 hover:text-zinc-200 w-[112px] text-left"
+          onclick={() => (collapsed = { ...collapsed, [grp.label]: !isCollapsed })}
+          title={isCollapsed ? 'Expand' : 'Collapse'}
+        >
+          {#if isCollapsed}<ChevronRight size={11} />{:else}<ChevronDown size={11} />{/if}
+          <span class="truncate">{grp.label}</span>
+          <span class="text-zinc-600 font-mono normal-case">{selCount}/{grp.series.length}</span>
+        </button>
+        <div class="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+          <button class="text-[9.5px] text-zinc-500 hover:text-zinc-300" onclick={() => setGroupSelected(grp.series, true)}>all</button>
+          <button class="text-[9.5px] text-zinc-500 hover:text-zinc-300" onclick={() => setGroupSelected(grp.series, false)}>none</button>
+          {#if isCollapsed}
+            <span class="text-[10px] text-zinc-600 italic">{grp.series.length} hidden</span>
+          {:else}
+            {#each grp.series as s (s)}
+              {@const idx = selectedSeries.indexOf(s)}
+              <button
+                class="px-2.5 py-0.5 rounded text-[10.5px] border inline-flex items-center gap-1.5 font-mono {idx >= 0 ? 'bg-zinc-900 text-zinc-50 border-zinc-700' : 'opacity-50 border-zinc-800 text-zinc-500'}"
+                onclick={() => onToggleSeries(s)}
+              >
+                <span class="inline-block w-2 h-2 rounded-sm" style:background-color={idx >= 0 ? colorForSeriesIndex(idx) : '#3f3f46'}></span>
+                {s}
+              </button>
+            {/each}
+          {/if}
+        </div>
+      </div>
     {/each}
-    <span class="ml-auto text-[10px] font-mono text-zinc-500">
+    <div class="text-right text-[10px] font-mono text-zinc-500">
       {lines.length} lines · {selectedIdentityIds.length} face{selectedIdentityIds.length === 1 ? '' : 's'} × {selectedSeries.length} series
-    </span>
+    </div>
   </div>
 
   <!-- Plot SVG -->

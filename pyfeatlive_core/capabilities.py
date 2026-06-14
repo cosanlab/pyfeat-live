@@ -13,9 +13,10 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Literal
 
-# Display sets — uniform across all detectors. Detectorv2 natively emits
-# 24 AUs and 8 emotions; we project onto these for the UI/overlay (the
-# extra signals are still written to CSV by the recorder).
+# Display sets — uniform across all detectors. Detectorv2 (v2.5) natively
+# emits these 20 AUs and 7 emotions (plus 52 blendshape coefficients,
+# which are written to CSV by the recorder but not part of the AU/emotion
+# UI projection).
 DISPLAY_AUS = [
     "AU01", "AU02", "AU04", "AU05", "AU06", "AU07", "AU09", "AU10",
     "AU11", "AU12", "AU14", "AU15", "AU17", "AU20", "AU23", "AU24",

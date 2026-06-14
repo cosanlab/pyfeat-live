@@ -56,9 +56,9 @@
       [presets, items, compute] = await Promise.all([
         presetsApi.list(), analyzeApi.list(), systemApi.compute(),
       ]);
-      // Default to the classic retinaface preset when present; fall back
+      // Default to the Detectorv2 standard preset when present; fall back
       // to the first preset otherwise.
-      activePreset = presets.find(p => p.id === 'classic-retinaface')
+      activePreset = presets.find(p => p.id === 'v2-standard')
         ?? presets[0] ?? null;
       // GPU detection is serialised process-wide (see detect.py _GPU_LOCK),
       // so MPS/CUDA are safe to auto-select for the extract speedup.
