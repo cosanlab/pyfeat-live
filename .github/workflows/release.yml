@@ -280,7 +280,10 @@ jobs:
           # the .sig sits next to the .tar.gz it signs.
           targz_name="Py-feat.Live_${arch}.app.tar.gz"
           sig_name="${targz_name}.sig"
-          src_sig="$(find tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos \
+          # Native host build (no --target), so the bundle is at the untripled
+          # target/release/bundle path — NOT target/<triple>/... (see the build
+          # step's projectPath note). The triple here is what failed v0.8.5.
+          src_sig="$(find tauri/src-tauri/target/release/bundle/macos \
                        -name '*.app.tar.gz.sig' -type f | head -n1)"
           if [ -z "$src_sig" ]; then
             echo "no .sig produced — TAURI_SIGNING_PRIVATE_KEY may be unset" >&2
