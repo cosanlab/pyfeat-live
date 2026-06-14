@@ -38,7 +38,6 @@ coverage.xml
 .env
 .env.*
 *.env
-.streamlit/secrets.toml
 
 # Apple signing artifacts that should never be committed
 *.p12

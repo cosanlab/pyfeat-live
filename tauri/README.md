@@ -1,13 +1,14 @@
 # Py-feat Live — Tauri shell
 
 Native desktop wrapper around `pyfeatlive`. Tauri (Rust) shell + system
-WebView pointing at a bundled Python streamlit subprocess.
+WebView pointing at a bundled Python FastAPI (uvicorn) subprocess that
+serves both the `/api/*` routes and the built Svelte SPA.
 
 ## Layout
 
 ```
 tauri/
-├── dist/index.html         loader page (polls /_stcore/health, redirects)
+├── dist/                   built Svelte SPA (served by the sidecar)
 ├── src-tauri/
 │   ├── src/
 │   │   ├── main.rs         binary entry
@@ -22,7 +23,7 @@ tauri/
 └── package.json            (just to pull tauri-cli)
 
 ../sidecar/
-├── sidecar.py              streamlit.web.bootstrap entry
+├── sidecar.py              uvicorn entry (serves backend.main:app)
 ├── pyfeatlive.spec         PyInstaller spec
 └── build.sh                produces a prod sidecar + drops it into
                             tauri/src-tauri/binaries/
@@ -50,12 +51,12 @@ This:
    checkout that's the **dev shim**, a tiny shell script that runs the
    repo's `.venv/bin/python sidecar/sidecar.py`. It boots in ~10s
    instead of requiring a 20+ minute PyInstaller bundle first.
-3. The native window opens to `index.html`, which polls
-   `http://127.0.0.1:8501/_stcore/health` and redirects to the
-   streamlit UI as soon as it's serving.
+3. The native window opens to the loader (`setup.html`), which polls
+   the sidecar's health endpoint on `http://127.0.0.1:8501/` and
+   redirects to the app as soon as it's serving.
 
 You should see a "Loading Py-feat Live…" splash, then the full
-streamlit app inside a native window.
+app inside a native window.
 
 ## Production build
 
@@ -75,8 +76,8 @@ faster thanks to PyInstaller's intermediate cache.
 ## Code signing & notarization (macOS)
 
 `tauri.conf.json` already wires the entitlements + Info.plist additions
-streamlit-webrtc and torch need (camera, JIT, dyld env vars, library
-validation off — see `entitlements.plist` for the rationale).
+the WebView camera capture and torch need (camera, JIT, dyld env vars,
+library validation off — see `entitlements.plist` for the rationale).
 
 To sign:
 
@@ -97,7 +98,7 @@ automatically when those env vars are present. See
 - **"sidecar: $VENV/bin/python not found"**: the dev shim couldn't
   locate the repo's venv. Run `uv venv --python 3.12 .venv && uv pip
   install -e .` from the repo root.
-- **Splash hangs forever**: streamlit isn't reaching healthy. Check the
+- **Splash hangs forever**: the sidecar isn't reaching healthy. Check the
   Rust shell's stderr — sidecar stdout/stderr are forwarded there with
   `log::info!` / `log::warn!`. Run with `RUST_LOG=info npm run
   tauri:dev` to see them.

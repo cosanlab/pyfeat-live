@@ -10,7 +10,7 @@
 //     standard application-data directory. ~1.5GB on disk; only
 //     happens once unless the requirements lock changes.
 //   - On every launch, the shell spawns sidecar.py from the user-
-//     installed venv and points the WebView at the streamlit
+//     installed venv and points the WebView at the FastAPI (uvicorn)
 //     localhost server it serves.
 //   - In dev mode (`tauri dev`) we skip the bootstrap and use the
 //     repo's `.venv/bin/python` directly, so iteration is fast.
@@ -30,8 +30,8 @@ use tokio::process::{Child, Command};
 #[cfg(target_os = "macos")]
 mod macos_camera;
 
-/// Streamlit listening port. Fixed for now; we'll need a free-port
-/// scan if multiple installs need to coexist.
+/// Sidecar (FastAPI/uvicorn) listening port. Fixed for now; we'll need a
+/// free-port scan if multiple installs need to coexist.
 const SIDECAR_PORT: u16 = 8501;
 
 /// Frontend event names. Keep in sync with tauri/dist/setup.html.
@@ -119,7 +119,7 @@ pub fn run() {
             // to "updater://available" and surfaces a "Update available"
             // banner that the user can click to apply. We never auto-
             // apply during a session because that would yank the
-            // streamlit subprocess out from under the user.
+            // sidecar subprocess out from under the user.
             let updater_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = check_for_update(&updater_handle).await {
@@ -190,7 +190,7 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
         let requirements = resource_dir.join("runtime/requirements.txt");
         if needs_install(&python_path, &runtime_dir, &requirements) {
             // Remove a stale venv so a dependency change yields a clean
-            // tree (drops removed packages, e.g. the old Streamlit deps).
+            // tree (drops packages that were removed across versions).
             if venv_dir.exists() {
                 emit_log(app, "stdout", "Dependencies changed — rebuilding the Python runtime…");
                 std::fs::remove_dir_all(&venv_dir)
@@ -237,10 +237,9 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
         .arg("127.0.0.1")
         .env("OMP_NUM_THREADS", "1")
         .env("HF_HOME", &hf_home)
-        // PYTHONPATH so sidecar.py can `import pyfeatlive` and find
-        // app.py inside the bundle resources (or repo root in dev).
+        // PYTHONPATH so sidecar.py can import the backend + pyfeatlive_core
+        // packages from the bundle resources (or repo root in dev).
         .env("PYTHONPATH", &pyfeatlive_root)
-        .env("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 

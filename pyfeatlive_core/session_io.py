@@ -1,8 +1,7 @@
 """Read-side helpers for the on-disk session schema.
 
-The backend Sessions router uses these to render summaries + load
-fex CSV without depending on the Streamlit-coupled v1 sessions.py
-surface. Write-side stays in pyfeatlive_core.recorder.SessionRecorder.
+The backend Sessions router uses these to render summaries + load the
+fex CSV. Write-side stays in pyfeatlive_core.recorder.SessionRecorder.
 """
 
 from __future__ import annotations
