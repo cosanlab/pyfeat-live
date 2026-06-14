@@ -77,20 +77,30 @@ async def add_to_queue(
     pipeline: str = Form(...),
     video: str = Form(...),
 ) -> dict:
-    pipeline_dict = json.loads(pipeline)
-    video_dict = json.loads(video)
+    try:
+        pipeline_dict = json.loads(pipeline)
+        video_dict = json.loads(video)
+    except json.JSONDecodeError as e:
+        raise HTTPException(422, f"invalid pipeline/video JSON: {e}")
     _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    saved = _UPLOAD_DIR / f"{int(time.time() * 1000)}_{file.filename}"
+    # Reduce the client-supplied filename to its basename so it can't compose
+    # a path-traversal ("../") into the saved location.
+    safe_name = Path(file.filename or "upload").name or "upload"
+    saved = _UPLOAD_DIR / f"{int(time.time() * 1000)}_{safe_name}"
     with open(saved, "wb") as out:
         shutil.copyfileobj(file.file, out)
 
-    item = AnalyzeQueueItem(
-        id="auto",
-        filename=file.filename or saved.name,
-        file_path=saved,
-        pipeline=PipelineConfig(**pipeline_dict),
-        video=VideoParams(**video_dict),
-    )
+    try:
+        item = AnalyzeQueueItem(
+            id="auto",
+            filename=safe_name,
+            file_path=saved,
+            pipeline=PipelineConfig(**pipeline_dict),
+            video=VideoParams(**video_dict),
+        )
+    except TypeError as e:
+        saved.unlink(missing_ok=True)  # don't leave an orphan upload behind
+        raise HTTPException(422, f"invalid pipeline/video fields: {e}")
     request.app.state.analyze_queue.add(item)
     return _item_to_dict(item)
 
@@ -117,14 +127,17 @@ def add_by_path(req: AddByPathRequest, request: Request) -> dict:
         raise HTTPException(404, f"file not found: {req.path}")
     if not p.is_file():
         raise HTTPException(400, f"not a regular file: {req.path}")
-    item = AnalyzeQueueItem(
-        id="auto",
-        filename=p.name,
-        file_path=p,
-        pipeline=PipelineConfig(**req.pipeline),
-        video=VideoParams(**req.video),
-        owns_file=False,
-    )
+    try:
+        item = AnalyzeQueueItem(
+            id="auto",
+            filename=p.name,
+            file_path=p,
+            pipeline=PipelineConfig(**req.pipeline),
+            video=VideoParams(**req.video),
+            owns_file=False,
+        )
+    except TypeError as e:
+        raise HTTPException(422, f"invalid pipeline/video fields: {e}")
     request.app.state.analyze_queue.add(item)
     return _item_to_dict(item)
 
@@ -141,10 +154,13 @@ def patch_item(item_id: str, req: PatchItemRequest, request: Request) -> dict:
         raise HTTPException(404, "item not found")
     if item.status is not QueueStatus.QUEUED:
         raise HTTPException(409, "can only edit queued items")
-    if req.pipeline is not None:
-        item.pipeline = PipelineConfig(**req.pipeline)
-    if req.video is not None:
-        item.video = VideoParams(**req.video)
+    try:
+        if req.pipeline is not None:
+            item.pipeline = PipelineConfig(**req.pipeline)
+        if req.video is not None:
+            item.video = VideoParams(**req.video)
+    except TypeError as e:
+        raise HTTPException(422, f"invalid pipeline/video fields: {e}")
     return _item_to_dict(item)
 
 

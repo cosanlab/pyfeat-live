@@ -150,3 +150,25 @@ def test_add_by_path_404_missing(client, analyze_upload):
                   "clip_end": None, "track_identities": False},
     })
     assert r.status_code == 404
+
+
+def test_add_item_malformed_json_returns_422(client, analyze_upload):
+    """Bad pipeline/video JSON is a client error (422), not a 500."""
+    img_bytes = Path("tests/core/fixtures/sample_image.jpg").read_bytes()
+    files = {"file": ("img.jpg", img_bytes, "image/jpeg")}
+    r = client.post(
+        "/api/analyze/queue", files=files,
+        data={"pipeline": "not-json", "video": "{}"},
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_add_item_unknown_field_returns_422(client, analyze_upload):
+    """Unknown pipeline fields are a 422, not a 500 from the dataclass ctor."""
+    img_bytes = Path("tests/core/fixtures/sample_image.jpg").read_bytes()
+    files = {"file": ("img.jpg", img_bytes, "image/jpeg")}
+    r = client.post(
+        "/api/analyze/queue", files=files,
+        data={"pipeline": '{"bogus_field": 1}', "video": "{}"},
+    )
+    assert r.status_code == 422, r.text

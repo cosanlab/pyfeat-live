@@ -29,19 +29,28 @@ def extract_face_crop(
     container = av.open(str(video_path))
     try:
         stream = container.streams.video[0]
-        # Seek to approximate timestamp
         fps = float(stream.average_rate) if stream.average_rate else 30.0
         target_time = frame_idx / fps
-        container.seek(int(target_time * stream.time_base.denominator),
-                       stream=stream)
+        # Some containers report no time_base (variable/unknown fps). Seek by
+        # timestamp when we can; otherwise fall back to decode-order index so
+        # an unusual container yields a frame instead of crashing.
+        tb = stream.time_base
+        if tb is not None:
+            try:
+                container.seek(int(target_time * tb.denominator), stream=stream)
+            except Exception:
+                pass
         rgb: Optional[np.ndarray] = None
-        for frame in container.decode(video=0):
-            if frame.pts is None:
+        for idx, frame in enumerate(container.decode(video=0)):
+            if tb is not None:
+                if frame.pts is None:
+                    continue
+                if float(frame.pts * tb) < target_time - (0.5 / fps):
+                    continue
+            elif idx < frame_idx:
                 continue
-            t = float(frame.pts * stream.time_base)
-            if t >= target_time - (0.5 / fps):
-                rgb = frame.to_ndarray(format="rgb24")
-                break
+            rgb = frame.to_ndarray(format="rgb24")
+            break
         if rgb is None:
             return None
     finally:

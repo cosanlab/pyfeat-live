@@ -27,6 +27,13 @@ _VIDEO_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv"}
 _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 
 
+def _load_rgb_image(src: Path) -> Image.Image:
+    """Load an image as RGB, closing the source file handle (``.convert``
+    returns a fresh image, so the original ``Image.open`` fp can be released)."""
+    with Image.open(src) as im:
+        return im.convert("RGB")
+
+
 def _iter_video_frames(
     path: Path, vp: VideoParams,
 ) -> Iterator[tuple[int, Image.Image]]:
@@ -44,14 +51,29 @@ def _iter_video_frames(
         start_pts = (vp.clip_start or 0) * fps
         end_pts = float("inf") if vp.clip_end is None else vp.clip_end * fps
         step = max(1, int(vp.skip_frames))
-        for i, frame in enumerate(container.decode(stream)):
-            if i < start_pts:
-                continue
-            if i > end_pts:
-                break
-            if (i - int(start_pts)) % step != 0:
-                continue
-            yield i, frame.to_image()
+        try:
+            for i, frame in enumerate(container.decode(stream)):
+                if i < start_pts:
+                    continue
+                if i > end_pts:
+                    break
+                if (i - int(start_pts)) % step != 0:
+                    continue
+                try:
+                    img = frame.to_image()
+                except Exception:
+                    # A single undecodable frame shouldn't fail the whole job.
+                    logging.getLogger(__name__).warning(
+                        "skipping undecodable frame %d", i,
+                    )
+                    continue
+                yield i, img
+        except av.FFmpegError as exc:
+            # Truncated/corrupt stream: keep the frames decoded so far rather
+            # than failing the entire job on the trailing corruption.
+            logging.getLogger(__name__).warning(
+                "video decode stopped early at corruption: %s", exc,
+            )
     finally:
         container.close()
 
@@ -261,7 +283,7 @@ def run_item(
         t0 = time.time()
         frame_iter = (
             _iter_video_frames(src, item.video) if is_video
-            else iter([(0, Image.open(src).convert("RGB"))])
+            else iter([(0, _load_rgb_image(src))])
         )
         was_cancelled = False
         for idx, img in frame_iter:
