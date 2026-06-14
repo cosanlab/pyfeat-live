@@ -115,7 +115,14 @@
       // under tauri:// and every API call throws "The string did not match
       // the expected pattern."
       const port = parseInt(location.hash.slice(1), 10) || 8501;
-      const target = `http://127.0.0.1:${port}`;
+      // Cache-bust the SPA entry document. WKWebView caches the served
+      // index.html, so after an in-app update the stale cached document
+      // keeps pinning the PREVIOUS hashed JS/CSS and the new frontend never
+      // loads (the "UI regression after update" bug). A per-launch token
+      // forces a fresh index.html each launch; the hash-named assets it
+      // references stay cached by URL, so only the ~0.4 KB document
+      // re-downloads.
+      const target = `http://127.0.0.1:${port}/?v=${Date.now()}`;
       const log = document.getElementById("log");
       const status = document.getElementById("status");
       const hint = document.getElementById("hint");
