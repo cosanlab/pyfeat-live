@@ -2,8 +2,6 @@
 
 Real-time facial expression analysis. Webcam → py-feat detection → live overlays. Plus a Viewer for recorded sessions and an Analyze page for batch processing files.
 
-![](./demo.gif)
-
 ## Install + run (desktop app)
 
 The polished path is the Tauri-bundled desktop app:
