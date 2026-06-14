@@ -109,8 +109,6 @@ Batch-process video / image files. Drop into the queue; each file gets a per-fil
 
 The Tauri shell spawns `sidecar.py` (which spawns uvicorn) as a child process, then opens the webview at `http://127.0.0.1:8765/`. The backend serves both `/api/*` and the bundled SPA, so the webview never crosses an origin.
 
-See `docs/superpowers/specs/2026-05-17-pyfeatlive-v2-svelte-rewrite-design.md` for the full design rationale.
-
 ## Profiling
 
 `PYFEAT_LIVE_PROFILE=1 .venv/bin/python -m uvicorn backend.main:app --port 8765` logs per-frame timing breakdown of the detection pipeline (`recv / decode / lock_wait / detect / serialize`). Toggle the matching frontend instrumentation in the browser console with `window.__pyfeatProfile = true`.
