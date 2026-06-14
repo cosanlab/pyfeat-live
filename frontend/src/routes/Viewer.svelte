@@ -392,9 +392,9 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="flex flex-1 overflow-hidden">
+<div class="flex flex-1 overflow-hidden min-h-0">
   {#if !leftCollapsed}
-    <div class="relative">
+    <div class="relative h-full min-h-0">
       <ViewerLeftPane
         activeTab={leftTab}
         onTabChange={(t) => leftTab = t}
@@ -426,7 +426,7 @@
     ><ChevronRight size={12} /></button>
   {/if}
 
-  <div class="flex-1 flex flex-col min-w-0">
+  <div class="flex-1 flex flex-col min-w-0 min-h-0 overflow-y-auto">
     <ViewerVideoStage
       videoUrl={currentSessionId && hasVideo ? sessionsApi.videoUrl(currentSessionId) : null}
       width={VIDEO_W}

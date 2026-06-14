@@ -107,6 +107,32 @@
     return m;
   });
 
+  // Video stage height. Null = flex-fill (adaptive: grows on tall windows,
+  // shrinks to min-height on short ones so the scroll column can reveal the
+  // timeseries). Once the user drags the corner grip, an explicit px height
+  // takes over (shrink-0). Double-clicking the grip resets to flex-fill.
+  let stageEl: HTMLDivElement | null = $state(null);
+  let manualHeight = $state<number | null>(null);
+
+  // Drag-to-resize. Window-level listeners (rather than setPointerCapture)
+  // so it works reliably across engines — WKWebView's pointer-capture on a
+  // <button> is flaky, and global listeners fire no matter where the cursor
+  // travels during the drag.
+  function onResizeStart(e: PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startTop = stageEl?.getBoundingClientRect().top ?? 0;
+    const move = (ev: PointerEvent) => {
+      manualHeight = Math.max(160, Math.round(ev.clientY - startTop));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
   function handleStageClick(e: MouseEvent) {
     // Hit-test face rects; emit click for the first hit so the parent
     // can open the identity assignment dialog.
@@ -129,8 +155,9 @@
 </script>
 
 <div
-  class="relative bg-black flex items-start justify-center overflow-hidden cursor-crosshair shrink-0"
-  style="resize: vertical; height: 45vh; min-height: 160px;"
+  bind:this={stageEl}
+  class="relative bg-black flex items-start justify-center overflow-hidden cursor-crosshair min-h-0 {manualHeight === null ? 'flex-1' : 'shrink-0'}"
+  style={manualHeight === null ? 'min-height: 50vh;' : `height: ${manualHeight}px; min-height: 160px;`}
   onclick={handleStageClick}
   role="presentation"
 >
@@ -221,6 +248,24 @@
           >{ident.name}</span>
         {/if}
       {/each}
+
+      <!-- Resize grip anchored to the video's bottom-right CORNER (inside the
+           aspect-locked box), not the full-width stage — so it sits on the
+           video instead of in the letterbox / over the scroll column's
+           scrollbar. Vertical drag sets an explicit stage height; width
+           follows the locked aspect. Double-click resets to flex-fill. -->
+      <button
+        class="absolute bottom-1.5 right-1.5 z-20 flex items-center justify-center w-6 h-6 rounded bg-black/45 hover:bg-black/70 ring-1 ring-white/20 text-zinc-100 cursor-ns-resize"
+        onpointerdown={onResizeStart}
+        onclick={(e) => e.stopPropagation()}
+        ondblclick={(e) => { e.stopPropagation(); manualHeight = null; }}
+        title="Drag to resize · double-click to reset"
+        aria-label="Resize video"
+      >
+        <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M11 3 L3 11 M11 7 L7 11" />
+        </svg>
+      </button>
     </div>
   {:else}
     <div class="text-zinc-600 text-xs font-mono">no video</div>
