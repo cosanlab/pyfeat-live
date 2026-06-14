@@ -87,3 +87,45 @@ def test_cancel_before_first_batch(tmp_path):
     # session_dir is set but the recorder removes empty session folders
     # (no faces ever offered) — so the dir may not exist on disk. That's
     # the recorder's "don't litter ~/Documents" rule, not a bug here.
+
+
+def test_recorder_closed_when_detection_errors(tmp_path, monkeypatch):
+    """A detection failure mid-run must still close the recorder (the
+    finally block): its writer thread joins and the empty session dir is
+    not orphaned. Regression for the pre-fix path where recorder.close()
+    only ran on success."""
+    import pyfeatlive_core.analyze_runner as runner
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated detection failure")
+
+    monkeypatch.setattr(runner, "detect_pil_images", _boom)
+
+    run_root = tmp_path / "sessions"
+    fixture = Path("tests/core/fixtures/sample_image.jpg")
+    item = AnalyzeQueueItem(
+        id="auto",
+        filename=fixture.name,
+        file_path=fixture,
+        pipeline=PipelineConfig(
+            detector_type="MPDetector",
+            face_model="retinaface", landmark_model="mp_facemesh_v2",
+            au_model="mp_blendshapes",
+            emotion_model=None, identity_model=None,
+            preset_id=None, preset_name=None,
+        ),
+        video=VideoParams(),
+    )
+    before = {id(t) for t in threading.enumerate() if t.name == "SessionRecorder"}
+    # detector arg is unused — detect_pil_images is patched to raise.
+    events = list(run_item(item, object(), run_root, batch_size=1))
+
+    assert events[-1]["type"] == "failed"
+    assert item.status is QueueStatus.FAILED
+    # close() ran in the finally → writer thread joined (no NEW live one).
+    leaked = [t for t in threading.enumerate()
+              if t.name == "SessionRecorder" and t.is_alive() and id(t) not in before]
+    assert not leaked, "recorder writer thread leaked after error"
+    # close() ran → the empty session dir was removed, none orphaned.
+    leftover = list(run_root.iterdir()) if run_root.exists() else []
+    assert leftover == [], f"orphaned session dir after error: {leftover}"

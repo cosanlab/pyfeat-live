@@ -101,12 +101,15 @@ def _transcode_to_h264(src: Path, dst: Path) -> None:
     browser-playable h264 mp4."""
     inp = av.open(str(src))
     out = av.open(str(dst), mode="w", format="mp4")
+    ok = False
     try:
         istream = inp.streams.video[0]
         fps = istream.average_rate or 30
-        ostream = out.add_stream("libx264", rate=fps)
         w = int(istream.codec_context.width or 0)
         h = int(istream.codec_context.height or 0)
+        if w < 2 or h < 2:
+            raise ValueError(f"source video has unusable dimensions {w}x{h}")
+        ostream = out.add_stream("libx264", rate=fps)
         ostream.width = w - (w % 2)
         ostream.height = h - (h % 2)
         ostream.pix_fmt = "yuv420p"
@@ -116,9 +119,15 @@ def _transcode_to_h264(src: Path, dst: Path) -> None:
                 out.mux(packet)
         for packet in ostream.encode():
             out.mux(packet)
+        ok = True
     finally:
         inp.close()
         out.close()
+        # A half-written mp4 (decode error mid-stream, bad dimensions) would
+        # otherwise surface to the Viewer as a corrupt video — drop it so the
+        # caller's "best-effort" fallback leaves no broken artifact.
+        if not ok:
+            dst.unlink(missing_ok=True)
 
 
 def _count_video_frames(path: Path) -> int:
@@ -171,6 +180,11 @@ def run_item(
         yield {"type": "failed", "item_id": item.id, "error": item.error}
         return
 
+    # Tracked so the recorder's writer thread + CSV handle are always torn
+    # down, even if detection / frame decoding raises mid-run (otherwise the
+    # thread + open file leak and an empty session dir is orphaned).
+    recorder = None
+    recorder_closed = False
     try:
         if is_video:
             total = _count_video_frames(src)
@@ -278,6 +292,7 @@ def run_item(
             }
 
         recorder.close()
+        recorder_closed = True
         if was_cancelled:
             item.status = QueueStatus.CANCELLED
             item.session_dir = str(recorder.dir)
@@ -307,3 +322,13 @@ def run_item(
         item.error = str(exc)
         item.finished_at = time.time()
         yield {"type": "failed", "item_id": item.id, "error": item.error}
+    finally:
+        # Close the recorder on every exit path (success, cancel, or error)
+        # so the writer thread joins and fex.csv is flushed/closed.
+        if recorder is not None and not recorder_closed:
+            try:
+                recorder.close()
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "recorder cleanup after error failed", exc_info=True,
+                )

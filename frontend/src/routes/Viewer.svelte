@@ -221,7 +221,7 @@
   onMount(async () => {
     // Overlay tables are static; fetch them once alongside the session list.
     [sessions, auTable, edges, blendshapeNames] = await Promise.all([
-      sessionsApi.list(),
+      sessionsApi.list().catch(() => []),
       systemApi.auTable().catch(() => null),
       systemApi.overlayEdges().catch(() => null),
       systemApi.blendshapeNames().catch(() => []),
@@ -256,10 +256,18 @@
       }
     }
     selectedIdentityIds = identities.map(i => i.identity_id);
-    // Fetch fex CSV and parse
+    // Fetch fex CSV and parse. A failed fetch (missing/locked file, backend
+    // blip) leaves fexRows empty so the Viewer shows the video without
+    // overlays rather than rejecting and stranding a half-loaded session.
     const csvUrl = sessionsApi.fexUrl(id);
-    const text = await fetch(csvUrl).then(r => r.text());
-    fexRows = parseFexCsv(text);
+    try {
+      const res = await fetch(csvUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      fexRows = parseFexCsv(await res.text());
+    } catch (e) {
+      console.warn(`failed to load fex CSV for session ${id}:`, e);
+      fexRows = [];
+    }
     // Recovery for legacy sessions recorded with the pre-fix recorder
     // that emitted frame=0 for every row and no face_idx column. If
     // all `frame` values are 0/missing, infer the frame index from
