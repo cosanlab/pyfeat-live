@@ -22,11 +22,14 @@
   type Props = { showLogs?: boolean; onCloseLogs?: () => void };
   let { showLogs = false, onCloseLogs = () => {} }: Props = $props();
 
-  // Display dimensions — always render at this size regardless of what
-  // resolution detection runs at.
-  const WIDTH = 640, HEIGHT = 360;
-  // CAPTURE resolution — what we request from the camera. 16:9 matches
-  // WIDTH/HEIGHT so the stage aspect-ratio is unchanged.
+  // Detection upload budget: the longest edge (px) we downscale a captured
+  // frame to before sending it for detection. The camera's native ASPECT
+  // RATIO is always preserved — everything downstream (overlay coord space,
+  // stage aspect, meta panels) derives from the actual frame dims the
+  // backend echoes back, so the app adapts to any camera/resolution.
+  const DET_BUDGET = 640;
+  // CAPTURE resolution — a *preference* we request from the camera; the
+  // camera reports its real videoWidth/videoHeight, which is what we use.
   const CAP_W = 1280, CAP_H = 720;
 
   let config: LiveConfigure = $state({
@@ -128,8 +131,9 @@
   let displayCanvas: HTMLCanvasElement | null = $state(null);
   let captureCanvas: HTMLCanvasElement | null = null;
   // Small canvas used to encode a detection-resolution JPEG for upload when NOT
-  // recording. Detection runs at WIDTH×HEIGHT, so uploading the full capture
-  // res just wastes a big main-thread JPEG encode each frame; the crisp display
+  // recording. Detection runs at the DET_BUDGET-capped (aspect-preserved) size,
+  // so uploading the full capture res just wastes a big main-thread JPEG encode
+  // each frame; the crisp display
   // uses the cached full-res bitmap regardless. When recording, we upload full
   // res so the recorder bakes onto a high-res frame.
   let uploadCanvas: HTMLCanvasElement | null = null;
@@ -144,15 +148,15 @@
   let lastGeneration = -1;
   let frameIndex = $state(0);
 
-  // Landmark/rect coords arrive in the SOURCE (uploaded/captured) frame space —
-  // the backend scales detector coords back to the uploaded resolution (≈ the
-  // capture res, e.g. 1280×720), reported in each response's `frame`. Track it
-  // so OverlayCanvas uses a matching logical coord space and the HTML panel
-  // layer (normalized to WIDTH×HEIGHT) scales source coords by sx/sy.
-  let frameW = $state<number>(WIDTH);
-  let frameH = $state<number>(HEIGHT);
-  const sx = $derived(frameW > 0 ? WIDTH / frameW : 1);
-  const sy = $derived(frameH > 0 ? HEIGHT / frameH : 1);
+  // Landmark/rect coords arrive in the SOURCE (uploaded) frame space — the
+  // backend scales detector coords back to the uploaded resolution and reports
+  // those dims in each response's `frame`. This is the single source of truth
+  // for the overlay coordinate space, the stage aspect ratio, and the meta
+  // panel layer — so the mesh, the video, and the panels all share ONE aspect
+  // (the camera's) and nothing gets stretched. Defaults are a placeholder until
+  // the first response arrives.
+  let frameW = $state<number>(DET_BUDGET);
+  let frameH = $state<number>(DET_BUDGET);
 
   // Detector landmark space: Detectorv2 / MPDetector are 478-point mesh
   // detectors; classic Detector is dlib-68. The overlay needs the matching
@@ -168,7 +172,7 @@
 
   // Displayed width (px) of the video rect, for scaling HTML meta panels.
   let videoDisplayW = $state(0);
-  const displayScale = $derived(videoDisplayW > 0 ? videoDisplayW / WIDTH : 1);
+  const displayScale = $derived(videoDisplayW > 0 && frameW > 0 ? videoDisplayW / frameW : 1);
 
   // 1) On mount: fetch compute info + enumerate cameras + configure detector
   //    + fetch overlay statics (edge sets + AU table) for OverlayCanvas.
@@ -214,7 +218,7 @@
         ...c,
         toggles: toggles as unknown as Record<string, boolean>,
         landmark_style: landmarkStyle,
-        detection_res: { w: WIDTH, h: HEIGHT },
+        detection_res: { w: DET_BUDGET, h: DET_BUDGET },
         style: overlayStyle,
         smooth,
         smooth_strength: smoothStrength,
@@ -231,7 +235,7 @@
       await liveApi.hints({
         toggles: toggles as unknown as Record<string, boolean>,
         landmark_style: landmarkStyle,
-        detection_res: { w: WIDTH, h: HEIGHT },
+        detection_res: { w: DET_BUDGET, h: DET_BUDGET },
         style: overlayStyle,
         smooth,
         smooth_strength: smoothStrength,
@@ -327,17 +331,24 @@
       const bmp = await createImageBitmap(captureCanvas!);
       frameCache.put(id, bmp);
 
-      // 3. JPEG-encode for upload. Detection only needs WIDTH×HEIGHT, so when
-      // NOT recording encode a downscaled frame — a full-res JPEG encode is the
-      // dominant per-frame main-thread cost and pure waste here. When recording,
-      // encode full res so the recorder bakes onto a high-res frame.
+      // 3. JPEG-encode for upload. Detection only needs a budget-sized frame, so
+      // when NOT recording encode a downscaled copy — a full-res JPEG encode is
+      // the dominant per-frame main-thread cost and pure waste here. When
+      // recording, encode full res so the recorder bakes onto a high-res frame.
+      // CRITICAL: downscale PRESERVING the camera's aspect ratio (fit the longest
+      // edge to DET_BUDGET). The old code forced a fixed 640×360, which squished
+      // any non-16:9 camera before detection — py-feat then fit a correct mesh to
+      // a distorted face, and it no longer lined up with the (true-aspect) video.
       // q=0.92: lower DCT noise → less bbox jitter.
       let encodeCanvas = captureCanvas!;
       if (!isRecording) {
+        const s = Math.min(1, DET_BUDGET / Math.max(sW, sH));
+        const dW = Math.max(1, Math.round(sW * s));
+        const dH = Math.max(1, Math.round(sH * s));
         if (!uploadCanvas) uploadCanvas = document.createElement('canvas');
-        if (uploadCanvas.width !== WIDTH) uploadCanvas.width = WIDTH;
-        if (uploadCanvas.height !== HEIGHT) uploadCanvas.height = HEIGHT;
-        uploadCanvas.getContext('2d')!.drawImage(captureCanvas!, 0, 0, WIDTH, HEIGHT);
+        if (uploadCanvas.width !== dW) uploadCanvas.width = dW;
+        if (uploadCanvas.height !== dH) uploadCanvas.height = dH;
+        uploadCanvas.getContext('2d')!.drawImage(captureCanvas!, 0, 0, dW, dH);
         encodeCanvas = uploadCanvas;
       }
       const blob: Blob | null = await new Promise((res) =>
@@ -444,9 +455,14 @@
 
   async function record() {
     try {
+      // Recording uploads full-res native frames, so the recorder output must
+      // match the camera's real dimensions (fall back to the current frame dims
+      // if the video isn't ready yet).
       await liveApi.recordingStart({
         record_video: true, record_fex: true, video_mode: 'clean',
-        fps: 30, width: WIDTH, height: HEIGHT,
+        fps: 30,
+        width: sourceVideo?.videoWidth || frameW,
+        height: sourceVideo?.videoHeight || frameH,
       });
       isRecording = true;
       apiError = null;
@@ -522,7 +538,7 @@
     >
       <div
         class="relative bg-black h-full"
-        style="aspect-ratio: {WIDTH} / {HEIGHT}; max-width: 100%; max-height: 100%;"
+        style="aspect-ratio: {frameW} / {frameH}; max-width: 100%; max-height: 100%;"
         bind:clientWidth={videoDisplayW}
       >
         <video
@@ -585,14 +601,14 @@
              plot, pose cube. Positioned as siblings of the canvas so the
              canvas's scaleX(-1) mirror doesn't flip the text.
              Bbox coords are in source-frame (non-mirrored) space, so we
-             mirror-compensate horizontally via (WIDTH - x - stackW). -->
+             mirror-compensate horizontally via (frameW - x - stackW). -->
         {#if isStreaming && liveFaces.length > 0}
           <!-- Source-pixel overlay layer: everything inside is in source-frame
                px and uniformly scaled by displayScale so the panels stay
                proportional to the video at any window size. -->
           <div
             class="absolute top-0 left-0 origin-top-left pointer-events-none"
-            style="width: {WIDTH}px; height: {HEIGHT}px; transform: scale({displayScale});"
+            style="width: {frameW}px; height: {frameH}px; transform: scale({displayScale});"
           >
             {#each liveFaces as face, fi}
               {@const emoOn = !!(toggles.emotions && face.emotions)}
@@ -606,12 +622,12 @@
               {@const stackW = 96}
               {@const stackH = emoH + vaH + poseH + (nOn > 1 ? (nOn - 1) * 4 : 0)}
               {@const r = face.rect}
-              {@const faceRect = { x: (r?.[0] ?? 0) * sx, y: (r?.[1] ?? 0) * sy, w: (r?.[2] ?? 0) * sx, h: (r?.[3] ?? 0) * sy }}
-              {@const others = liveFaces.filter((_, j) => j !== fi).map((o) => ({ x: (o.rect?.[0] ?? 0) * sx, y: (o.rect?.[1] ?? 0) * sy, w: (o.rect?.[2] ?? 0) * sx, h: (o.rect?.[3] ?? 0) * sy }))}
-              {@const pos = placeMetaStack(faceRect, others, stackW, stackH, WIDTH, HEIGHT)}
+              {@const faceRect = { x: r?.[0] ?? 0, y: r?.[1] ?? 0, w: r?.[2] ?? 0, h: r?.[3] ?? 0 }}
+              {@const others = liveFaces.filter((_, j) => j !== fi).map((o) => ({ x: o.rect?.[0] ?? 0, y: o.rect?.[1] ?? 0, w: o.rect?.[2] ?? 0, h: o.rect?.[3] ?? 0 }))}
+              {@const pos = placeMetaStack(faceRect, others, stackW, stackH, frameW, frameH)}
               {#if anyOn}
                 <div class="absolute flex flex-col gap-1 pointer-events-none"
-                     style="left: {WIDTH - pos.left - stackW}px; top: {pos.top}px; width: {stackW}px;">
+                     style="left: {frameW - pos.left - stackW}px; top: {pos.top}px; width: {stackW}px;">
                   {#if emoOn}
                     {@const ev = Object.fromEntries(Object.entries(face.emotions ?? {}).map(([k, v]) => [k, v ?? 0]))}
                     <EmotionBars values={ev} {smooth} {smoothStrength} />

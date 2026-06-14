@@ -21,7 +21,7 @@ def test_list_returns_builtins_on_first_call(client, presets_file):
     data = r.json()
     names = {p["name"] for p in data}
     assert "Detectorv2 · standard" in names
-    assert "Classic · img2pose" in names
+    assert "Detectorv1 · img2pose" in names
 
 
 def test_get_one_by_id(client, presets_file):

@@ -41,6 +41,7 @@ from feat.utils import (
     FEAT_FACEPOSE_COLUMNS_6D,
     FEAT_GAZE_COLUMNS,
     FEAT_IDENTITY_COLUMNS,
+    MP_BLENDSHAPE_NAMES,
     MP_LANDMARK_COLUMNS,
     openface_2d_landmark_columns,
 )
@@ -92,11 +93,12 @@ _FEX_KWARGS_MPDETECTOR = dict(
 )
 
 
-# Detectorv2 emits a native multitask schema: 24 AUs (AU01..AU43),
-# 8 emotions (incl. Contempt), valence/arousal, a 478-point mesh, 6D
-# pose, gaze and ArcFace identity. We mirror Detectorv2.detect()'s own
-# Fex wrapping (see feat/detector_v2.py) so the Fex our batched path
-# produces is schema-identical to detector.detect() output.
+# Detectorv2 (v2.5) emits a native multitask schema: 20 AUs (AU01..AU43),
+# 7 emotions, valence/arousal, a 478-point mesh, 6D pose, gaze, ArcFace
+# identity and 52 MediaPipe/ARKit blendshape coefficients. We mirror
+# Detectorv2.detect()'s own Fex wrapping (see feat/detector_v2.py) so the
+# Fex our batched path produces is schema-identical to detector.detect()
+# output — including the v2.5 blendshape_columns metadata.
 _FEX_KWARGS_DETECTORV2 = dict(
     au_columns=AU_COLUMNS_V2,
     # The df's emotion columns are renamed to the legacy lowercase scheme
@@ -109,6 +111,7 @@ _FEX_KWARGS_DETECTORV2 = dict(
     facepose_columns=FEAT_FACEPOSE_COLUMNS_6D,
     gaze_columns=FEAT_GAZE_COLUMNS,
     identity_columns=FEAT_IDENTITY_COLUMNS[1:],
+    blendshape_columns=list(MP_BLENDSHAPE_NAMES),
     detector="Detectorv2",
 )
 

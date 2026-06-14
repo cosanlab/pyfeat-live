@@ -116,7 +116,14 @@ def create_app() -> FastAPI:
         def spa_fallback(full_path: str) -> FileResponse:
             # /api/* are matched earlier by the routers; this only fires
             # for unmatched non-/api paths. Always return index.html.
-            return FileResponse(dist_path / "index.html")
+            # no-store on index.html: the hashed /assets are immutable and
+            # cache fine, but index.html points at the current hashes — if the
+            # browser serves a stale index.html it loads an old bundle. During
+            # dev iteration that silently masks rebuilds, so never cache it.
+            return FileResponse(
+                dist_path / "index.html",
+                headers={"Cache-Control": "no-store, must-revalidate"},
+            )
 
     return app
 
