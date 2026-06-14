@@ -349,11 +349,42 @@ export const analyzeApi = {
     }),
   pause: () => request<{ status: string }>('/api/analyze/pause', { method: 'POST' }),
   stop: () => request<{ status: string }>('/api/analyze/stop', { method: 'POST' }),
-  openWebSocket: (onMessage: (ev: AnalyzeEvent) => void): WebSocket => {
+  // Returns a handle (not a bare WebSocket) that auto-reconnects with
+  // backoff. A malformed frame is skipped rather than throwing in the
+  // handler, and a dropped connection reconnects instead of silently
+  // freezing the queue UI. `onReconnect` fires after a re-established
+  // connection so the caller can resync from a fresh snapshot (events
+  // missed while disconnected are not replayed).
+  openWebSocket: (
+    onMessage: (ev: AnalyzeEvent) => void,
+    onReconnect?: () => void,
+  ): { close: () => void } => {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${location.host}/api/analyze/ws`);
-    ws.onmessage = (e) => onMessage(JSON.parse(e.data));
-    return ws;
+    let ws: WebSocket | null = null;
+    let stopped = false;
+    let everConnected = false;
+    let backoff = 500;
+    const connect = () => {
+      ws = new WebSocket(`${proto}//${location.host}/api/analyze/ws`);
+      ws.onopen = () => {
+        backoff = 500;
+        if (everConnected) onReconnect?.();
+        everConnected = true;
+      };
+      ws.onmessage = (e) => {
+        let ev: AnalyzeEvent;
+        try { ev = JSON.parse(e.data) as AnalyzeEvent; } catch { return; }
+        onMessage(ev);
+      };
+      ws.onclose = () => {
+        if (stopped) return;
+        setTimeout(connect, backoff);
+        backoff = Math.min(backoff * 2, 10_000);
+      };
+      ws.onerror = () => { try { ws?.close(); } catch { /* closing triggers reconnect */ } };
+    };
+    connect();
+    return { close: () => { stopped = true; try { ws?.close(); } catch { /* ignore */ } } };
   },
 };
 

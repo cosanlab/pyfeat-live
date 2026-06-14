@@ -26,7 +26,7 @@
   let isRunning = $state(false);
   let configureFor: AnalyzeItem | null = $state(null);
   let apiError: string | null = $state(null);
-  let ws: WebSocket | null = null;
+  let ws: { close: () => void } | null = null;
 
   function defaultPipeline(): PipelineConfig {
     if (activePreset) {
@@ -64,7 +64,11 @@
       // so MPS/CUDA are safe to auto-select for the extract speedup.
       if (compute.mps.available) computeDevice = 'mps';
       else if (compute.cuda.available) computeDevice = 'cuda';
-      ws = analyzeApi.openWebSocket(handleEvent);
+      // On reconnect, re-pull the queue snapshot — progress events that
+      // arrived while the socket was down aren't replayed.
+      ws = analyzeApi.openWebSocket(handleEvent, async () => {
+        try { items = await analyzeApi.list(); } catch { /* keep current */ }
+      });
     } catch (e: any) {
       apiError = `Backend unreachable: ${e?.message ?? e}`;
     }

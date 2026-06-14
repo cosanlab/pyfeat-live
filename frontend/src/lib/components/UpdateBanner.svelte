@@ -47,7 +47,15 @@
   onMount(async () => {
     if (!inTauri()) return;
     dismissedVersion = loadDismissed();
-    const result = await checkForUpdate();
+    let result;
+    try {
+      result = await checkForUpdate();
+    } catch (e) {
+      // Updater endpoint unreachable (dormant on a private repo, or a
+      // network blip). Non-fatal — just don't show a banner this launch.
+      console.warn('update check failed:', e);
+      return;
+    }
     if (result.available && result.version !== dismissedVersion) {
       phase = {
         kind: 'available',
