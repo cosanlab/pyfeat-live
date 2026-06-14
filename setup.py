@@ -7,6 +7,10 @@ setup(
     name="pyfeatlive",
     version="1.0",
     python_requires=">=3.11",
+    license="MIT",
+    classifiers=[
+        "License :: OSI Approved :: MIT License",
+    ],
     install_requires=requirements,
     packages=["pyfeatlive"],
     package_data={"pyfeatlive": ["*.png"]},
