@@ -368,3 +368,26 @@ jobs:
             > latest.json
           cat latest.json
           gh release upload "$tag" latest.json --repo "$repo" --clobber
+
+  # Tell the docs site (cosanlab/py-feat) to regenerate the Py-feat Live
+  # changelog from this release. No-ops unless a cross-repo PAT is configured
+  # as the DOCS_DISPATCH_TOKEN secret (the default GITHUB_TOKEN can't dispatch
+  # to another repo); py-feat's daily scheduled refresh covers it otherwise.
+  notify-docs:
+    needs: publish-updater-manifest
+    runs-on: ubuntu-latest
+    steps:
+      - name: dispatch changelog refresh to py-feat
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_DISPATCH_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "DOCS_DISPATCH_TOKEN not set — skipping docs dispatch" \
+                 "(py-feat's scheduled refresh will catch up)."
+            exit 0
+          fi
+          gh api repos/cosanlab/py-feat/dispatches \
+            -f "event_type=pyfeatlive-release" \
+            -f "client_payload[tag]=$TAG"
