@@ -7,21 +7,19 @@
     <key>NSCameraUsageDescription</key>
     <string>Py-feat Live uses your camera to detect facial expressions, landmarks, head pose, gaze, and emotions in real time.</string>
 
-    <!-- Microphone is *not* used by pyfeatlive currently (audio:
-         False on streamlit-webrtc), but listing the description
-         keeps the prompt friendly if a future build flips it on. -->
+    <!-- Microphone is *not* used by Py-feat Live currently, but listing
+         the description keeps the prompt friendly if a future build
+         flips it on. -->
     <key>NSMicrophoneUsageDescription</key>
     <string>Py-feat Live does not record audio. This entry is reserved for future features.</string>
 
-    <!-- streamlit-webrtc's WebRTC stack negotiates ICE candidates
-         that include the host's non-loopback IPs (en0, Tailscale,
-         IPv6 ULA, etc.). Even though both peers are on the same
-         machine, WKWebView talking UDP to 192.168.x or 10.x is
-         "local network access" from macOS's perspective and is
-         gated on this prompt as of macOS 15. Without this key the
-         OS silently blocks the UDP without prompting, and the
-         WebRTC negotiation completes (ICE: connected) but no
-         media frames flow. -->
+    <!-- Legacy from the old WebRTC capture path, which negotiated ICE
+         over the host's non-loopback IPs and needed local-network
+         access on macOS 15+. The current pipeline captures via
+         getUserMedia and POSTs frames to the loopback (127.0.0.1)
+         sidecar, which is exempt — so this key is likely vestigial and
+         a candidate for removal after verifying no local-network use
+         remains. -->
     <key>NSLocalNetworkUsageDescription</key>
     <string>Py-feat Live uses local network access to route webcam frames from the camera to its embedded analysis engine. No data leaves your machine.</string>
   </dict>

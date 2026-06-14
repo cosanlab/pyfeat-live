@@ -5,9 +5,7 @@ PIL images and a py-feat detector instance, runs the full detection
 pipeline (face detection, landmark/AU/emotion forward pass, MPDetector
 pose backfill), and returns a populated Fex.
 
-This deliberately duplicates the orchestration logic from
-``pyfeatlive/utils.py:run_pyfeat_detection_batched`` without any
-Streamlit dependency so it can be called from the FastAPI backend,
+Framework-neutral so it can be called from the FastAPI backend,
 notebooks, or CLI scripts.
 """
 
