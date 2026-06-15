@@ -238,17 +238,14 @@ jobs:
           # on workflow_dispatch the input is forwarded.
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: "Py-feat Live ${{ github.event.inputs.tag || github.ref_name }}"
+          # Keep release notes focused on incremental changes — installation and
+          # first-run details live in the docs (https://py-feat.org/pages/pyfeat_live/),
+          # so they don't repeat in every changelog entry. Releases are drafts
+          # (below): edit the draft to list the version's notable changes before
+          # publishing; the docs changelog is generated from these notes.
           releaseBody: |
-            ## Installation
-
-            Requires macOS on Apple Silicon (M-series).
-
-            - macOS Apple Silicon: `Py-feat.Live_*_aarch64.dmg`
-
-            First launch downloads ~1.5GB of Python dependencies and
-            ~1GB of model weights into your user data directory.
-            Plan for ~10 minutes on a typical broadband connection.
-            Subsequent launches are instant.
+            <!-- Replace with this release's notable changes (what's new / fixes).
+                 Install + first-run docs: https://py-feat.org/pages/pyfeat_live/ -->
           releaseDraft: true
           prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
           # tauri-action's `includeUpdaterJson` silently drops latest.json
