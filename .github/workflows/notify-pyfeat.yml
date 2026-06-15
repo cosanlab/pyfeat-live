@@ -1,0 +1,29 @@
+name: Notify py-feat (changelog refresh)
+
+# When a Py-feat Live release is PUBLISHED, ping cosanlab/py-feat to regenerate
+# its Py-feat Live changelog from our GitHub Releases. The build pipeline
+# (release.yml) creates the release as a DRAFT; py-feat's `sync-releases`
+# excludes drafts, so `published` (draft -> published) is the right trigger.
+#
+# Requires a repo secret PYFEAT_DISPATCH_TOKEN: a fine-grained PAT scoped to
+# cosanlab/py-feat with Contents: Read and write (needed to POST a
+# repository_dispatch). Until that secret exists the dispatch step is skipped,
+# so this workflow never fails a release.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    env:
+      DISPATCH_TOKEN: ${{ secrets.PYFEAT_DISPATCH_TOKEN }}
+    steps:
+      - name: Fire repository_dispatch at cosanlab/py-feat
+        if: env.DISPATCH_TOKEN != ''
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ env.DISPATCH_TOKEN }}
+          repository: cosanlab/py-feat
+          event-type: pyfeatlive-release
