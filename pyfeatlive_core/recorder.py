@@ -52,6 +52,27 @@ def default_sessions_root() -> Path:
     return Path.home() / "Documents" / "pyfeat-live" / "sessions"
 
 
+def _scale_fex_pixel_cols(fex: pd.DataFrame, sx: float, sy: float) -> pd.DataFrame:
+    """Multiply every source-pixel coord column by (sx, sy), in place-ish.
+
+    Same column set as backend.routers.live._scale_fex_coords: FaceRect{X,Y,
+    Width,Height}, x_/y_ landmarks, mesh_x_/mesh_y_ (mesh_z_ depth is left
+    alone — it's relative, not a source pixel). Kept here so the core recorder
+    has no dependency on the backend package.
+    """
+    x_cols = [c for c in fex.columns
+              if c in ("FaceRectX", "FaceRectWidth")
+              or c.startswith("x_") or c.startswith("mesh_x_")]
+    y_cols = [c for c in fex.columns
+              if c in ("FaceRectY", "FaceRectHeight")
+              or c.startswith("y_") or c.startswith("mesh_y_")]
+    if x_cols:
+        fex.loc[:, x_cols] = fex[x_cols].values * sx
+    if y_cols:
+        fex.loc[:, y_cols] = fex[y_cols].values * sy
+    return fex
+
+
 def reveal_in_file_manager(path: Path) -> None:
     """Open the OS file manager and select `path`. macOS only for now;
     Windows/Linux can be added later. Best-effort — failures are logged
@@ -246,7 +267,7 @@ class SessionRecorder:
                 if self.config.record_video:
                     self._write_video(frame, idx)
                 if self.config.record_fex and fex is not None and len(fex):
-                    self._write_fex(fex, idx)
+                    self._write_fex(fex, idx, frame)
                 self.frames_written += 1
         except Exception as e:
             logger.exception("Writer thread crashed: %s", e)
@@ -340,7 +361,9 @@ class SessionRecorder:
         self._csv_writer = csv.DictWriter(self._csv_file, fieldnames=list(columns))
         self._csv_writer.writeheader()
 
-    def _write_fex(self, fex: pd.DataFrame, frame_idx: int) -> None:
+    def _write_fex(
+        self, fex: pd.DataFrame, frame_idx: int, frame=None,
+    ) -> None:
         try:
             # Live mode runs one detector call per frame, so fex.frame is
             # always 0 — stamp the recorder's monotonic frame index instead.
@@ -351,6 +374,20 @@ class SessionRecorder:
             # as the natural primary key, so two faces in frame 7 must be
             # (7,0) and (7,1), never (7,0)/(8,1).
             fex = fex.copy()
+            # Normalize coords to the ENCODED video resolution. Every frame is
+            # re-encoded to (enc_w, enc_h); when the offered frame's native
+            # size differs the fex coords would be in the wrong pixel space.
+            # This happens at record start: the in-flight PRE-record detection
+            # ran on a downscaled (~640) upload, so the first stored row's
+            # coords are ~half scale while video.mp4 is full-res — producing a
+            # mangled frame-0 overlay and a wrong identity thumbnail (the crop
+            # uses raw bbox pixels). Scaling here keeps fex.csv in video.mp4
+            # space. No-op (scale 1.0) on the common full-res path.
+            enc_w = getattr(self, "_enc_w", None)
+            fw = getattr(frame, "width", None) if frame is not None else None
+            if enc_w and fw and fw != enc_w:
+                s = enc_w / fw
+                fex = _scale_fex_pixel_cols(fex, s, s)
             if not (self.config.trust_fex_frame and "frame" in fex.columns):
                 fex["frame"] = int(frame_idx)
             fex["face_idx"] = fex.groupby("frame").cumcount().to_numpy()
