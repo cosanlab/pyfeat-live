@@ -67,6 +67,7 @@
     { key: 'gaze', label: 'Gaze' },
     { key: 'aus', label: 'AUs' },
     { key: 'emotions', label: 'Emotions' },
+    { key: 'valenceArousal', label: 'Valence / Arousal' },
   ];
 
   // --- Layout + overlay-style state -------------------------------------
@@ -110,7 +111,21 @@
   };
   const VIDEO_W = $derived(metaNum('width', 640));
   const VIDEO_H = $derived(metaNum('height', 360));
-  const FPS = $derived(metaNum('fps', 30));
+  // EFFECTIVE fps for the video⇄frame mapping = actual frames / duration, NOT
+  // metadata `fps`. Live recordings are written with variable wall-clock PTS at
+  // the (lower) detection rate, but `fps` stores the config TARGET (e.g. 30).
+  // Using that target made `frame = currentTime * fps` race ahead and clamp at
+  // the last frame ~1/3 into the video — the overlay froze while the video kept
+  // playing. frames/duration is the true average rate and matches both live and
+  // analyze sessions. Falls back to metadata fps when counts are unavailable.
+  const FPS = $derived.by(() => {
+    const frames = metaNum('frames_written', 0)
+      || ((currentSession as SessionDetail | null)?.frames ?? 0);
+    const dur = metaNum('duration_seconds', 0)
+      || ((currentSession as SessionDetail | null)?.duration_seconds ?? 0);
+    if (frames > 1 && dur > 0.1) return frames / dur;
+    return metaNum('fps', 30);
+  });
 
   // Static overlay-render tables fetched once. `auTable` drives the AU
   // muscle-polygon heatmap; `edges` provides landmark mesh/contour line

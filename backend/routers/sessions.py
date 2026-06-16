@@ -158,3 +158,18 @@ def face_thumbnail(session_id: str, frame: int, face_idx: int) -> Response:
     if png_bytes is None:
         raise HTTPException(500, "frame extraction failed")
     return Response(content=png_bytes, media_type="image/png")
+
+
+@router.post("/{session_id}/reveal")
+def reveal_session(session_id: str) -> dict[str, str]:
+    """Open the OS file manager with the session folder selected.
+
+    Reuses the same sidecar-side helper the Logs drawer uses — the desktop
+    WebView can't open Finder/Explorer itself, but the Python sidecar has
+    full filesystem access.
+    """
+    from pyfeatlive_core.recorder import reveal_in_file_manager
+
+    d = _resolve_session(session_id)
+    reveal_in_file_manager(d)
+    return {"path": str(d)}
