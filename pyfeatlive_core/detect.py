@@ -286,6 +286,9 @@ def _finalize_fex(detector, df, faces_data, frame_offset: int) -> Fex:
 
     fex = Fex(df, **_fex_wrap_kwargs(detector))
 
+    if isinstance(detector, Detectorv2) and len(fex) > 0:
+        _overwrite_v2_yaw_from_mesh(fex)
+
     if isinstance(detector, MPDetector) and len(fex) > 0:
         try:
             from feat.MPDetector import convert_landmarks_3d
@@ -349,6 +352,49 @@ def _meshes_from_fex(fex) -> list:
 # py-feat no longer exposes as FaceRect (it now reports the square crop box).
 _FACEBOX_W_PAD = 0.97
 _FACEBOX_H_PAD = 1.11
+
+
+# --- Detectorv2 head-pose YAW, derived from the 478 mesh -------------------
+# py-feat 2.0.0's v2.5 multitask pose head emits a DEGENERATE yaw: at a fixed
+# head position it swings ±20° frame-to-frame and reads positive for BOTH left
+# and right turns (verified on-camera). Pitch and roll from the head are fine.
+# The 478 mesh is rock-steady, so we derive yaw geometrically and overwrite only
+# the Yaw column. Proxy = the nose tip's offset from the eye midpoint, projected
+# onto the eye axis and normalized by interocular span (roll-invariant,
+# scale-invariant). yaw = -arcsin(proxy / nose_depth_ratio): the minus gives the
+# canonical convention (+yaw = turn to the subject's right; in unmirrored source
+# coords a right turn moves the nose to image-left → negative proxy). The depth
+# ratio (nose protrusion / interocular distance) sets the magnitude; ~0.55 puts a
+# full ~±0.4 proxy at ~±45°, matching on-camera readings. MP indices: 33/263 =
+# outer eye corners, 1 = nose tip.
+_YAW_EYE_L, _YAW_EYE_R, _YAW_NOSE = 33, 263, 1
+_YAW_NOSE_DEPTH_RATIO = 0.55
+
+
+def _overwrite_v2_yaw_from_mesh(fex) -> None:
+    """Replace the (degenerate) multitask Yaw with a mesh-geometry yaw, in place.
+    Pitch/Roll are left untouched. Fully guarded — any failure (missing mesh
+    columns, dtype quirks) leaves the model yaw rather than breaking detection."""
+    try:
+        if "Yaw" not in fex.columns:
+            return
+        lx = fex[f"mesh_x_{_YAW_EYE_L}"].to_numpy(dtype=float)
+        ly = fex[f"mesh_y_{_YAW_EYE_L}"].to_numpy(dtype=float)
+        rx = fex[f"mesh_x_{_YAW_EYE_R}"].to_numpy(dtype=float)
+        ry = fex[f"mesh_y_{_YAW_EYE_R}"].to_numpy(dtype=float)
+        nx = fex[f"mesh_x_{_YAW_NOSE}"].to_numpy(dtype=float)
+        ny = fex[f"mesh_y_{_YAW_NOSE}"].to_numpy(dtype=float)
+        ex, ey = rx - lx, ry - ly                      # eye axis vector
+        span2 = ex * ex + ey * ey
+        mx, my = (lx + rx) / 2.0, (ly + ry) / 2.0      # eye midpoint
+        with np.errstate(invalid="ignore", divide="ignore"):
+            proxy = ((nx - mx) * ex + (ny - my) * ey) / np.where(span2 > 1e-6, span2, np.nan)
+            yaw = -np.arcsin(np.clip(proxy / _YAW_NOSE_DEPTH_RATIO, -1.0, 1.0))
+        # Plain column replace (NOT .loc[:, ]) — the dtype-preserving setitem
+        # path raises LossySetitemError on some Fex column blocks.
+        fex["Yaw"] = np.asarray(yaw, dtype="float64")
+    except Exception as e:  # never let a pose override break detection
+        logger.debug("mesh-yaw override skipped (%s)", e)
 
 
 def _stabilize_facebox_from_meshes(fex, meshes: list, frame_w, frame_h) -> None:
