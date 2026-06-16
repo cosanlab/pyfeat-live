@@ -632,13 +632,9 @@ def _draw_gaze(
     gp_rad = float(gp)
     gy_rad = float(gy)
     if gaze_convention == "multitask":
-        # Detectorv2's multitask gaze head. The arrow is baked in source-frame
-        # then the canvas is displayed selfie-mirrored (scaleX(-1)), so the
-        # horizontal the user sees is the negation of dir_x. Empirically the
-        # arrow read reversed left/right; use +sin(yaw) so "look to your right"
-        # points to your right in the mirrored view. Pitch: look up → image-Y
-        # up (negative). (These signs are confirmed on-camera; adjust if a
-        # later model revision flips them.)
+        # Detectorv2's multitask gaze head. Sign under investigation — its
+        # gaze_yaw appears unstable, so the rendered arrow can read reversed
+        # independent of this sign. Kept at +sin(yaw)*cos(pitch) for now.
         dir_x = float(np.sin(gy_rad) * np.cos(gp_rad))
         dir_y = -float(np.sin(gp_rad))
     else:

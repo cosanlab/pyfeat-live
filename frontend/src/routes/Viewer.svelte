@@ -43,6 +43,10 @@
   let currentAnnotationId: string | null = $state(null);
 
   let fexRows: Record<string, number | string | null>[] = $state([]);
+  // Real per-frame video timestamps (seconds), indexed by fex frame value.
+  // Built from the video's actual PTS so the overlay maps to the video by TIME
+  // (handles variable-rate live recordings). Empty → fall back to fps mapping.
+  let frameTimes: number[] = $state([]);
   let currentFrame = $state(0);
   let isPlaying = $state(false);
   let selectedIdentityIds: string[] = $state([]);
@@ -67,6 +71,7 @@
     { key: 'gaze', label: 'Gaze' },
     { key: 'aus', label: 'AUs' },
     { key: 'emotions', label: 'Emotions' },
+    { key: 'valenceArousal', label: 'Valence / Arousal' },
   ];
 
   // --- Layout + overlay-style state -------------------------------------
@@ -110,7 +115,21 @@
   };
   const VIDEO_W = $derived(metaNum('width', 640));
   const VIDEO_H = $derived(metaNum('height', 360));
-  const FPS = $derived(metaNum('fps', 30));
+  // EFFECTIVE fps for the video⇄frame mapping = actual frames / duration, NOT
+  // metadata `fps`. Live recordings are written with variable wall-clock PTS at
+  // the (lower) detection rate, but `fps` stores the config TARGET (e.g. 30).
+  // Using that target made `frame = currentTime * fps` race ahead and clamp at
+  // the last frame ~1/3 into the video — the overlay froze while the video kept
+  // playing. frames/duration is the true average rate and matches both live and
+  // analyze sessions. Falls back to metadata fps when counts are unavailable.
+  const FPS = $derived.by(() => {
+    const frames = metaNum('frames_written', 0)
+      || ((currentSession as SessionDetail | null)?.frames ?? 0);
+    const dur = metaNum('duration_seconds', 0)
+      || ((currentSession as SessionDetail | null)?.duration_seconds ?? 0);
+    if (frames > 1 && dur > 0.1) return frames / dur;
+    return metaNum('fps', 30);
+  });
 
   // Static overlay-render tables fetched once. `auTable` drives the AU
   // muscle-polygon heatmap; `edges` provides landmark mesh/contour line
@@ -282,6 +301,26 @@
     if (fexRows.length > 0 && !('face_idx' in fexRows[0])) {
       fexRows.forEach(r => { r.face_idx = 0; });
     }
+    // Map each fex frame to the video's REAL presentation time. The fex rows are
+    // written lock-step with the video frames (in order), so the k-th unique
+    // frame value aligns to the k-th video timestamp. This drives a by-time
+    // overlay⇄video mapping that, unlike a synthetic fps, stays in sync on
+    // variable-rate live recordings.
+    frameTimes = [];
+    try {
+      const { times } = await sessionsApi.frameTimes(id);
+      const uniq = [...new Set(fexRows.map(r => Number(r.frame)))]
+        .filter(n => Number.isFinite(n)).sort((a, b) => a - b);
+      const n = Math.min(uniq.length, times.length);
+      if (n > 0) {
+        const arr: number[] = [];
+        for (let k = 0; k < n; k++) arr[uniq[k]] = times[k];
+        frameTimes = arr;
+      }
+    } catch (e) {
+      console.warn(`frame-times unavailable for ${id}; using fps mapping`, e);
+      frameTimes = [];
+    }
   }
 
   function parseFexCsv(text: string): Record<string, number | string | null>[] {
@@ -433,6 +472,7 @@
       height={VIDEO_H}
       {currentFrame}
       fps={FPS}
+      {frameTimes}
       {isPlaying}
       faces={facesForCurrentFrame}
       {toggles}

@@ -224,6 +224,18 @@ export const sessionsApi = {
   // Returns a URL — use as <img src=...> with loading="lazy".
   faceThumbnailUrl: (id: string, frame: number, faceIdx: number) =>
     `/api/sessions/${encodeURIComponent(id)}/face-thumbnail/${frame}/${faceIdx}`,
+  // Open the OS file manager with the session folder selected (sidecar-side).
+  reveal: (id: string) =>
+    request<{ path: string }>(
+      `/api/sessions/${encodeURIComponent(id)}/reveal`, { method: 'POST' },
+    ),
+  // True per-frame presentation timestamps (seconds) of the session video, in
+  // presentation order. Used to map video time ⇄ overlay frame for
+  // variable-rate (live) recordings instead of a synthetic fps.
+  frameTimes: (id: string) =>
+    request<{ times: number[] }>(
+      `/api/sessions/${encodeURIComponent(id)}/frame-times`,
+    ),
 };
 
 // ---------------- identities ----------------

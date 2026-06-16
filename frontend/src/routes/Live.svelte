@@ -11,16 +11,12 @@
   import LiveSidebar from '../lib/components/LiveSidebar.svelte';
   import LiveControlBar from '../lib/components/LiveControlBar.svelte';
   import OverlayConfigModal from '../lib/components/OverlayConfigModal.svelte';
-  import LogsDrawer from '../lib/components/LogsDrawer.svelte';
   import EmotionBars from '../lib/components/EmotionBars.svelte';
   import ValenceArousalPlot from '../lib/components/ValenceArousalPlot.svelte';
   import PoseCube from '../lib/components/PoseCube.svelte';
   import OverlayCanvas from '../lib/components/OverlayCanvas.svelte';
   import { placeMetaStack } from '../lib/overlay/metaStack';
   import { FrameCache } from '../lib/overlay/frameCache';
-
-  type Props = { showLogs?: boolean; onCloseLogs?: () => void };
-  let { showLogs = false, onCloseLogs = () => {} }: Props = $props();
 
   // Detection upload budget: the longest edge (px) we downscale a captured
   // frame to before sending it for detection. The camera's native ASPECT
@@ -206,9 +202,13 @@
 
   async function applyConfig(c: LiveConfigure) {
     if (c.detector_type !== config.detector_type) {
-      // Default to feature-contour 'lines' for every detector (cleaner than the
-      // full tessellation); the overlay-config dropdown can switch to mesh/points.
-      const ls = 'lines';
+      // Reset the landmark style to each detector's natural default on switch:
+      // the 478-mesh detectors (Detectorv2 / MPDetector) → 'mesh' tessellation;
+      // the dlib-68 Detectorv1 → feature-contour 'lines' (it has no 478 mesh).
+      // Previously this forced 'lines' for ALL detectors, so switching v1→v2
+      // left v2 stuck on lines instead of restoring its mesh. The overlay-config
+      // dropdown can still override to mesh/lines/points afterwards.
+      const ls: LandmarkStyle = c.detector_type === 'Detectorv1' ? 'lines' : 'mesh';
       landmarkStyle = ls;
       overlayStyle = { ...overlayStyle, landmarks: { ...overlayStyle.landmarks, style: ls } };
     }
@@ -369,6 +369,12 @@
         continue;
       }
       const tNet = profile ? performance.now() : 0;
+
+      // Stop may have fired DURING the upload await. Without this guard the
+      // resolving response would re-paint and re-set liveFaces AFTER
+      // stopStream() already cleared them, leaving a frozen facebox/mesh on a
+      // stopped (camera-off) stage.
+      if (signal.aborted) return;
 
       // 5. Paint the cached frame that detection ran on (lock-to-detection).
       const fid = result.id;
@@ -554,7 +560,7 @@
         <div class="absolute inset-0" style="transform: scaleX(-1);">
           <canvas
             bind:this={displayCanvas}
-            class="absolute inset-0 w-full h-full object-contain object-right"
+            class="absolute inset-0 w-full h-full object-contain"
           ></canvas>
 
           <!-- OverlayCanvas is inside the same mirrored wrapper, so its
@@ -646,9 +652,6 @@
         {/if}
       </div>
     </div>
-      {#if showLogs}
-        <LogsDrawer onClose={onCloseLogs} />
-      {/if}
     </div>
 
     <LiveControlBar

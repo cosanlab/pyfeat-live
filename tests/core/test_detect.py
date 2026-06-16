@@ -64,11 +64,14 @@ def test_mpdetector_native_aus_and_pose_on_real_face():
 
 
 def test_stabilize_facebox_from_meshes():
-    """Facebox is recomputed from the mesh extent, padded W*1.2 / H*1.4
-    about the mesh centre and clamped to the frame."""
+    """Facebox is recomputed from the mesh extent, padded by the calibrated
+    W/H pads about the mesh centre and clamped to the frame. Expected values
+    track the module constants so a recalibration updates here too."""
     import numpy as np
     import pandas as pd
-    from pyfeatlive_core.detect import _stabilize_facebox_from_meshes
+    from pyfeatlive_core.detect import (
+        _stabilize_facebox_from_meshes, _FACEBOX_W_PAD, _FACEBOX_H_PAD,
+    )
 
     # 100x100 square mesh spanning (200,150)-(300,250); centre (250,200).
     mesh = np.array([[200, 150], [300, 150], [200, 250], [300, 250]], float)
@@ -77,10 +80,15 @@ def test_stabilize_facebox_from_meshes():
         "FaceRectWidth": [0.0], "FaceRectHeight": [0.0],
     })
     _stabilize_facebox_from_meshes(df, [mesh], frame_w=640, frame_h=480)
-    assert df["FaceRectWidth"].iloc[0] == pytest.approx(120.0)   # 100*1.2
-    assert df["FaceRectHeight"].iloc[0] == pytest.approx(140.0)  # 100*1.4
-    assert df["FaceRectX"].iloc[0] == pytest.approx(190.0)       # 250-60
-    assert df["FaceRectY"].iloc[0] == pytest.approx(130.0)       # 200-70
+    exp_w = 100 * _FACEBOX_W_PAD
+    exp_h = 100 * _FACEBOX_H_PAD
+    assert df["FaceRectWidth"].iloc[0] == pytest.approx(exp_w)
+    assert df["FaceRectHeight"].iloc[0] == pytest.approx(exp_h)
+    assert df["FaceRectX"].iloc[0] == pytest.approx(250 - exp_w / 2)
+    assert df["FaceRectY"].iloc[0] == pytest.approx(200 - exp_h / 2)
+    # Regression guard: the calibrated box must hug the face (not the old
+    # over-padded 1.2/1.4 that ballooned the live box).
+    assert _FACEBOX_W_PAD < 1.1 and _FACEBOX_H_PAD < 1.25
 
 
 def test_stabilize_facebox_empty_mesh_left_nan():
