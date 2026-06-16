@@ -229,6 +229,13 @@ export const sessionsApi = {
     request<{ path: string }>(
       `/api/sessions/${encodeURIComponent(id)}/reveal`, { method: 'POST' },
     ),
+  // True per-frame presentation timestamps (seconds) of the session video, in
+  // presentation order. Used to map video time ⇄ overlay frame for
+  // variable-rate (live) recordings instead of a synthetic fps.
+  frameTimes: (id: string) =>
+    request<{ times: number[] }>(
+      `/api/sessions/${encodeURIComponent(id)}/frame-times`,
+    ),
 };
 
 // ---------------- identities ----------------
