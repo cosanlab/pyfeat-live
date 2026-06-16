@@ -1,5 +1,6 @@
 <script lang="ts">
   import FileText from '@lucide/svelte/icons/file-text';
+  import logoUrl from '../../assets/logo.png';
   import type { View } from '../types';
 
   type Props = { view: View; onViewChange: (v: View) => void; onToggleLogs: () => void; logsOpen: boolean };
@@ -15,6 +16,15 @@
 </script>
 
 <header class="flex items-center gap-3 px-4 py-2 border-b border-zinc-900 bg-zinc-950">
+  <!-- Logo + wordmark live here (not in the Live drawer) so they stay
+       visible on every tab and when the drawer is collapsed. -->
+  <div class="flex items-center gap-2">
+    <img src={logoUrl} alt="Py-feat" class="w-6 h-6" />
+    <div class="leading-tight">
+      <div class="text-[12px] font-semibold text-zinc-50">Py-feat</div>
+      <div class="text-[9px] uppercase tracking-wider text-zinc-500">Live</div>
+    </div>
+  </div>
   <nav class="ml-auto flex gap-1 items-center">
     {#each tabs as tab (tab.id)}
       <button

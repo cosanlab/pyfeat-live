@@ -1,7 +1,6 @@
 <script lang="ts">
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import { cameraStore } from '../webrtc/useCamera.svelte';
-  import logoUrl from '../../assets/logo.png';
   import type { LiveConfigure, ComputeInfo, DetectorCapabilities } from '../api';
 
   type Props = {
@@ -115,15 +114,6 @@
 </script>
 
 <aside class="w-[200px] p-4 bg-zinc-900 border-r border-zinc-900 space-y-4">
-  <!-- Logo -->
-  <div class="flex items-center gap-2 -mt-1">
-    <img src={logoUrl} alt="Py-feat" class="w-8 h-8" />
-    <div class="leading-tight">
-      <div class="text-[12px] font-semibold text-zinc-50">Py-feat</div>
-      <div class="text-[9.5px] uppercase tracking-wider text-zinc-500">Live</div>
-    </div>
-  </div>
-
   <!-- Camera (above Detector so device selection is the first thing) -->
   <div>
     <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 font-semibold">Camera</div>
