@@ -206,9 +206,13 @@
 
   async function applyConfig(c: LiveConfigure) {
     if (c.detector_type !== config.detector_type) {
-      // Default to feature-contour 'lines' for every detector (cleaner than the
-      // full tessellation); the overlay-config dropdown can switch to mesh/points.
-      const ls = 'lines';
+      // Reset the landmark style to each detector's natural default on switch:
+      // the 478-mesh detectors (Detectorv2 / MPDetector) → 'mesh' tessellation;
+      // the dlib-68 Detectorv1 → feature-contour 'lines' (it has no 478 mesh).
+      // Previously this forced 'lines' for ALL detectors, so switching v1→v2
+      // left v2 stuck on lines instead of restoring its mesh. The overlay-config
+      // dropdown can still override to mesh/lines/points afterwards.
+      const ls: LandmarkStyle = c.detector_type === 'Detectorv1' ? 'lines' : 'mesh';
       landmarkStyle = ls;
       overlayStyle = { ...overlayStyle, landmarks: { ...overlayStyle.landmarks, style: ls } };
     }
@@ -554,7 +558,7 @@
         <div class="absolute inset-0" style="transform: scaleX(-1);">
           <canvas
             bind:this={displayCanvas}
-            class="absolute inset-0 w-full h-full object-contain object-right"
+            class="absolute inset-0 w-full h-full object-contain"
           ></canvas>
 
           <!-- OverlayCanvas is inside the same mirrored wrapper, so its

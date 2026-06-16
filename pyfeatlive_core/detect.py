@@ -339,8 +339,16 @@ def _meshes_from_fex(fex) -> list:
 # (the 478-mesh is roughly the landmark hull; RetinaFace's box adds
 # forehead/chin margin). Calibrated so a typical face's mesh-derived box
 # matches its RetinaFace box to within a few px.
-_FACEBOX_W_PAD = 1.2
-_FACEBOX_H_PAD = 1.4
+#
+# RECALIBRATED for py-feat 2.0.0's isotropic square-pad chip (Detectorv2 v2.5).
+# The earlier 1.2/1.4 values were tuned against the pre-square-pad mesh, which
+# was vertically compressed; the fixed mesh is correct (taller/wider relative
+# to the face), so those pads over-shot — the displayed box ballooned (~25%
+# too tall/wide, the "facebox way too long" regression). Measured across faces,
+# mesh-extent × (0.97 W, 1.11 H) reproduces the tight RetinaFace box that
+# py-feat no longer exposes as FaceRect (it now reports the square crop box).
+_FACEBOX_W_PAD = 0.97
+_FACEBOX_H_PAD = 1.11
 
 
 def _stabilize_facebox_from_meshes(fex, meshes: list, frame_w, frame_h) -> None:
