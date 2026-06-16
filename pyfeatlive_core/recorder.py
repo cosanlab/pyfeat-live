@@ -39,9 +39,23 @@ from pathlib import Path
 from typing import Optional
 
 import av
+import numpy as np
 import pandas as pd
 
 from pyfeatlive_core.capabilities import capabilities_for
+
+
+def _to_video_frame(frame) -> av.VideoFrame:
+    """Coerce an offered frame to an av.VideoFrame. Accepts an av.VideoFrame
+    (returned as-is), a PIL image, or an HxWx3 RGB ndarray. The np.asarray +
+    from_ndarray conversion runs on the RECORDER WRITER THREAD (not the live
+    event loop), so a full-res recording frame no longer throttles detection."""
+    if isinstance(frame, av.VideoFrame):
+        return frame
+    arr = np.asarray(frame)
+    if not arr.flags["C_CONTIGUOUS"]:
+        arr = np.ascontiguousarray(arr)
+    return av.VideoFrame.from_ndarray(arr, format="rgb24")
 
 logger = logging.getLogger(__name__)
 
@@ -153,12 +167,16 @@ class SessionRecorder:
     # ------------------------------------------------------------------
     # Public API used by the WebRTC worker thread.
     # ------------------------------------------------------------------
-    def offer_frame(self, av_frame: av.VideoFrame, fex: Optional[pd.DataFrame]) -> None:
-        """Non-blocking enqueue. Drops the frame if the writer is behind."""
+    def offer_frame(self, frame, fex: Optional[pd.DataFrame]) -> None:
+        """Non-blocking enqueue. Drops the frame if the writer is behind.
+
+        ``frame`` may be an av.VideoFrame, a PIL image, or an HxWx3 RGB ndarray;
+        the (potentially costly) conversion to a VideoFrame is deferred to the
+        writer thread so the caller's event loop stays free."""
         idx = self.frame_index
         self.frame_index += 1
         try:
-            self._queue.put_nowait((idx, av_frame, fex))
+            self._queue.put_nowait((idx, frame, fex))
         except queue.Full:
             self.dropped_frames += 1
 
@@ -264,7 +282,10 @@ class SessionRecorder:
                 if item is None:
                     break
                 idx, frame, fex = item
+                # Convert raw PIL/ndarray -> VideoFrame HERE, on the writer
+                # thread, so the live event loop never pays it (see offer_frame).
                 if self.config.record_video:
+                    frame = _to_video_frame(frame)
                     self._write_video(frame, idx)
                 if self.config.record_fex and fex is not None and len(fex):
                     self._write_fex(fex, idx, frame)

@@ -201,12 +201,18 @@ async def _run_detection(live, img: Image.Image, frame_id: int = -1) -> None:
         rec = live.recorder
         if rec is not None:
             try:
-                src = baked_arr if rec.config.video_mode == "overlay" \
-                    else np.ascontiguousarray(np.asarray(img))
-                av_frame = av.VideoFrame.from_ndarray(src, format="rgb24")
+                # Hand the recorder the RAW frame — the PIL image (clean mode) or
+                # the already-baked ndarray (overlay mode) — WITHOUT converting on
+                # the event loop. The np.asarray + ascontiguousarray +
+                # VideoFrame.from_ndarray of a full-res frame cost ~15ms/frame
+                # here while recording, throttling the detection feed (measured:
+                # frame gap 44ms idle -> 66ms recording, detection itself
+                # unchanged at 36ms). The recorder's writer thread — which only
+                # does the cheap h264 encode and has spare headroom — now does
+                # that conversion instead, keeping the loop free.
+                src = baked_arr if rec.config.video_mode == "overlay" else img
                 rec.offer_frame(
-                    av_frame,
-                    fex if fex is not None and len(fex) else None,
+                    src, fex if fex is not None and len(fex) else None,
                 )
             except Exception:
                 logging.getLogger(__name__).exception("recorder offer_frame failed")
