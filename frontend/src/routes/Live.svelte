@@ -11,16 +11,12 @@
   import LiveSidebar from '../lib/components/LiveSidebar.svelte';
   import LiveControlBar from '../lib/components/LiveControlBar.svelte';
   import OverlayConfigModal from '../lib/components/OverlayConfigModal.svelte';
-  import LogsDrawer from '../lib/components/LogsDrawer.svelte';
   import EmotionBars from '../lib/components/EmotionBars.svelte';
   import ValenceArousalPlot from '../lib/components/ValenceArousalPlot.svelte';
   import PoseCube from '../lib/components/PoseCube.svelte';
   import OverlayCanvas from '../lib/components/OverlayCanvas.svelte';
   import { placeMetaStack } from '../lib/overlay/metaStack';
   import { FrameCache } from '../lib/overlay/frameCache';
-
-  type Props = { showLogs?: boolean; onCloseLogs?: () => void };
-  let { showLogs = false, onCloseLogs = () => {} }: Props = $props();
 
   // Detection upload budget: the longest edge (px) we downscale a captured
   // frame to before sending it for detection. The camera's native ASPECT
@@ -656,9 +652,6 @@
         {/if}
       </div>
     </div>
-      {#if showLogs}
-        <LogsDrawer onClose={onCloseLogs} />
-      {/if}
     </div>
 
     <LiveControlBar

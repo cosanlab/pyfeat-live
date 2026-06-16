@@ -4,6 +4,7 @@
   import Live from './routes/Live.svelte';
   import Analyze from './routes/Analyze.svelte';
   import Viewer from './routes/Viewer.svelte';
+  import LogsDrawer from './lib/components/LogsDrawer.svelte';
   import type { View } from './lib/types';
 
   let view: View = $state('live');
@@ -16,12 +17,17 @@
   <div class="flex-1 flex min-h-0">
     <main class="flex-1 flex flex-col min-w-0 min-h-0">
       {#if view === 'live'}
-        <Live showLogs={showLogs} onCloseLogs={() => (showLogs = false)} />
+        <Live />
       {:else if view === 'analyze'}
         <Analyze onSwitchView={(v) => view = v} />
       {:else if view === 'viewer'}
         <Viewer />
       {/if}
     </main>
+    <!-- Logs drawer lives at the app level (flex sibling of the view) so the
+         Logs toggle works on every tab, not just Live. -->
+    {#if showLogs}
+      <LogsDrawer onClose={() => (showLogs = false)} />
+    {/if}
   </div>
 </div>
