@@ -374,6 +374,12 @@
       }
       const tNet = profile ? performance.now() : 0;
 
+      // Stop may have fired DURING the upload await. Without this guard the
+      // resolving response would re-paint and re-set liveFaces AFTER
+      // stopStream() already cleared them, leaving a frozen facebox/mesh on a
+      // stopped (camera-off) stage.
+      if (signal.aborted) return;
+
       // 5. Paint the cached frame that detection ran on (lock-to-detection).
       const fid = result.id;
       if (fid != null && fid > lastPaintedId) {
