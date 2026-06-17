@@ -48,6 +48,7 @@
     { key: 'poses', label: 'Pose' },
     { key: 'gaze', label: 'Gaze' },
     { key: 'aus', label: 'AUs' },
+    { key: 'blendshapes', label: 'Blendshapes' },
     { key: 'emotions', label: 'Emotions' },
     { key: 'valenceArousal', label: 'Valence / Arousal' },
   ];
@@ -226,6 +227,40 @@
                   <input type="range" min="1" max="8" step="0.5" class="accent-green-500 w-20" value={style.aus.pointSize ?? 2}
                     oninput={(e) => upd('aus', { pointSize: +(e.target as HTMLInputElement).value })} />
                   <span class="font-mono text-zinc-400 w-7">{(style.aus.pointSize ?? 2).toFixed(1)}</span>
+                </label>
+              {/if}
+
+            {:else if s.key === 'blendshapes'}
+              <label class="flex items-center gap-1.5">mode
+                <select class="px-1.5 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-zinc-200"
+                  value={style.blendshapes.mode ?? 'heatmap'}
+                  onchange={(e) => upd('blendshapes', { mode: (e.target as HTMLSelectElement).value as 'heatmap' | 'points' })}>
+                  <option value="heatmap">Heatmap</option>
+                  <option value="points">Points</option>
+                </select>
+              </label>
+              <label class="flex items-center gap-1.5">colormap
+                <select class="px-1.5 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-zinc-200"
+                  value={style.blendshapes.colormap}
+                  onchange={(e) => upd('blendshapes', { colormap: (e.target as HTMLSelectElement).value as OverlayStyleConfig['blendshapes']['colormap'] })}>
+                  {#each COLORMAP_NAMES as cm}<option value={cm}>{cm}</option>{/each}
+                </select>
+              </label>
+              <span class="inline-block h-3 w-20 rounded border border-zinc-700" style:background={colormapGradient(style.blendshapes.colormap)}></span>
+              <label class="flex items-center gap-1.5">opacity
+                <input type="range" min="0.1" max="1" step="0.05" class="accent-green-500 w-20" value={style.blendshapes.opacity}
+                  oninput={(e) => upd('blendshapes', { opacity: +(e.target as HTMLInputElement).value })} />
+              </label>
+              <label class="flex items-center gap-1.5">gamma
+                <input type="range" min="0.5" max="4" step="0.1" class="accent-green-500 w-20" value={style.blendshapes.gamma ?? 2.2}
+                  oninput={(e) => upd('blendshapes', { gamma: +(e.target as HTMLInputElement).value })} />
+                <span class="font-mono text-zinc-400 w-7">{(style.blendshapes.gamma ?? 2.2).toFixed(1)}</span>
+              </label>
+              {#if (style.blendshapes.mode ?? 'heatmap') === 'points'}
+                <label class="flex items-center gap-1.5">dot size
+                  <input type="range" min="1" max="8" step="0.5" class="accent-green-500 w-20" value={style.blendshapes.pointSize ?? 2}
+                    oninput={(e) => upd('blendshapes', { pointSize: +(e.target as HTMLInputElement).value })} />
+                  <span class="font-mono text-zinc-400 w-7">{(style.blendshapes.pointSize ?? 2).toFixed(1)}</span>
                 </label>
               {/if}
 
