@@ -3,7 +3,7 @@
 // math is unchanged; types and ES module exports are new.
 
 import type { Face } from './types';
-import type { AuTable, AuMeshTable } from '../api';
+import type { AuTable, AuMeshTable, BlendshapeMeshTable } from '../api';
 import type { Lut } from './colormaps';
 
 const LIVE_GREEN = '#22c55e';
@@ -483,29 +483,31 @@ const HEATMAP_THRESH = 0.08;
  * @param opts.opacity  Overall opacity multiplier (0–1)
  * @param opts.radius   Dot radius for 'points' mode (default 2)
  */
-export function drawAuMeshHeatmap(
+/**
+ * Monochrome 478-mesh region heatmap shared by the AU and blendshape overlays.
+ * Each region maps to a disjoint set of mesh vertices; per-vertex intensity is
+ * the max over the regions covering it, then triangle (or dot) shading runs the
+ * single `lut` by that intensity. `values` is the per-region intensity map
+ * (face.aus or face.blendshapes); `regionToVertices` is the matching table.
+ */
+function drawMeshRegionHeatmap(
   ctx: CanvasRenderingContext2D,
-  face: Face,
-  table: AuMeshTable,
+  lm: (number | null)[],
+  regionToVertices: Record<string, number[]>,
+  values: Record<string, number | null>,
+  lut: Lut,
   tessTris?: [number, number, number][] | null,
-  opts?: { mode?: 'heatmap' | 'points'; lut?: Lut; radius?: number; opacity?: number; gamma?: number },
+  opts?: { mode?: 'heatmap' | 'points'; radius?: number; opacity?: number; gamma?: number },
 ): void {
-  const lm = face.lm;
-  const aus = face.aus;
-  if (!lm || !aus) return;
-
   const mode = opts?.mode ?? 'heatmap';
-  const lut: Lut = (opts?.lut ?? table.lut) as Lut;
   const opacity = opts?.opacity ?? 1.0;
   const gamma = opts?.gamma ?? HEATMAP_GAMMA;
 
   if (mode === 'heatmap' && tessTris && tessTris.length > 0) {
-    // --- Filled triangle heatmap (port of backend _draw_au_mesh_heatmap) ---
-    //
-    // 1. Build per-vertex intensity: max over all AUs that drive each vertex.
+    // 1. per-vertex intensity: max over regions covering each vertex.
     const vint = new Float32Array(478);
-    for (const [au, verts] of Object.entries(table.auToVertices)) {
-      const raw = aus[au];
+    for (const [region, verts] of Object.entries(regionToVertices)) {
+      const raw = values[region];
       if (raw == null) continue;
       const v = typeof raw === 'number' && Number.isFinite(raw) ? raw : 0;
       if (v <= 0) continue;
@@ -514,7 +516,7 @@ export function drawAuMeshHeatmap(
       }
     }
 
-    // 2. Render each tessellation triangle.
+    // 2. shade each tessellation triangle.
     ctx.save();
     for (const [a, b, c] of tessTris) {
       const m = (vint[a]! + vint[b]! + vint[c]!) / 3.0;
@@ -530,7 +532,6 @@ export function drawAuMeshHeatmap(
       const rgb = lut[lutIdx];
       if (!rgb) continue;
 
-      // Alpha: faint at rest, strong when active — matches the backend formula.
       const alpha = Math.min(185, disp * 240) * opacity / 255;
       ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(3)})`;
       ctx.beginPath();
@@ -542,12 +543,12 @@ export function drawAuMeshHeatmap(
     }
     ctx.restore();
   } else {
-    // --- Dots fallback (original 'points' behaviour) ---
+    // dots fallback.
     const radius = opts?.radius ?? 2;
     ctx.save();
     ctx.globalAlpha = opacity;
-    for (const [au, verts] of Object.entries(table.auToVertices)) {
-      const raw = aus[au];
+    for (const [region, verts] of Object.entries(regionToVertices)) {
+      const raw = values[region];
       if (raw == null || (raw as number) <= 0) continue;
       const disp = Math.pow(raw as number, gamma);
       const rgb = lut[Math.min(255, Math.max(0, Math.floor(disp * 255)))];
@@ -564,4 +565,45 @@ export function drawAuMeshHeatmap(
     }
     ctx.restore();
   }
+}
+
+/**
+ * Draw the AU heatmap for 478-mesh detectors (Detectorv2, MPDetector).
+ *
+ * @param table      AuMeshTable from systemApi.auMeshTable()
+ * @param tessTris   MP-478 tessellation triangles (required for 'heatmap').
+ */
+export function drawAuMeshHeatmap(
+  ctx: CanvasRenderingContext2D,
+  face: Face,
+  table: AuMeshTable,
+  tessTris?: [number, number, number][] | null,
+  opts?: { mode?: 'heatmap' | 'points'; lut?: Lut; radius?: number; opacity?: number; gamma?: number },
+): void {
+  if (!face.lm || !face.aus) return;
+  const lut: Lut = (opts?.lut ?? table.lut) as Lut;
+  drawMeshRegionHeatmap(
+    ctx, face.lm, table.regionToVertices ?? table.auToVertices, face.aus, lut, tessTris, opts,
+  );
+}
+
+/**
+ * Draw the ARKit-blendshape heatmap for 478-mesh detectors (Detectorv2).
+ * Blendshape vertices are pre-split Left/Right in the table, so each side
+ * shades only its half of the face.
+ *
+ * @param table      BlendshapeMeshTable from systemApi.blendshapeMeshTable()
+ */
+export function drawBlendshapeMeshHeatmap(
+  ctx: CanvasRenderingContext2D,
+  face: Face,
+  table: BlendshapeMeshTable,
+  tessTris?: [number, number, number][] | null,
+  opts?: { mode?: 'heatmap' | 'points'; lut?: Lut; radius?: number; opacity?: number; gamma?: number },
+): void {
+  if (!face.lm || !face.blendshapes) return;
+  const lut: Lut = (opts?.lut ?? table.lut) as Lut;
+  drawMeshRegionHeatmap(
+    ctx, face.lm, table.regionToVertices, face.blendshapes, lut, tessTris, opts,
+  );
 }

@@ -48,6 +48,7 @@
     { key: 'poses', label: 'Pose' },
     { key: 'gaze', label: 'Gaze', requires: 'gaze_model' },
     { key: 'aus', label: 'AUs', requires: 'au_model' },
+    { key: 'blendshapes', label: 'Blendshapes', detectorv2Only: true },
     { key: 'emotions', label: 'Emotions', requires: 'emotion_model' },
     { key: 'valenceArousal', label: 'Valence / Arousal', detectorv2Only: true },
   ];
