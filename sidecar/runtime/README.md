@@ -12,11 +12,16 @@ loudly if anything is missing a hash.
 2. Regenerate the lock:
 
    ```sh
-   # from the repo root
+   # from the repo root. --python-platform is REQUIRED: this lock is installed
+   # on the user's Mac (the .app's bundled runtime), so it must resolve for
+   # macOS — NOT for whatever host runs the compile. Omitting it on a Linux/CUDA
+   # box resolves torch's CUDA variant (nvidia-* / cuda-bindings), which has no
+   # macOS wheels and makes the first-run `uv pip install` unsatisfiable.
    uv pip compile \
      --quiet \
      --generate-hashes \
-     --python 3.12 \
+     --python-version 3.12 \
+     --python-platform aarch64-apple-darwin \
      --output-file sidecar/runtime/requirements.txt \
      sidecar/runtime/requirements.in
    ```
