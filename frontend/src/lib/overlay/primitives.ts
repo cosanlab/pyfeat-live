@@ -478,9 +478,11 @@ const HEATMAP_THRESH = 0.08;
 // (the jagged "comical" edges) — matching py-feat's plot_face_regions. It also
 // makes SMALL regions (e.g. L/R-split blendshapes) visible: intensity is
 // interpolated to the new midpoints, so a triangle near a small region no
-// longer averages its lone in-region vertex down below HEATMAP_THRESH. 2 levels
-// = 16x triangles (~14k). Drop to 1 if live FPS suffers.
-const HEATMAP_SUBDIV = 2;
+// longer averages its lone in-region vertex down below HEATMAP_THRESH.
+// Each level = 4x triangles: 3 = ~57k, 2 = ~14k. 3 reads visibly smoother; the
+// overlay redraws at the (detection-limited) frame rate so the cost is hidden
+// in practice — drop to 2 if live FPS suffers (topology is cached either way).
+const HEATMAP_SUBDIV = 3;
 
 // Subdivision topology (midpoint parent pairs + dense triangle list) for a base
 // tessellation. Pure index math — independent of per-frame landmark positions —
