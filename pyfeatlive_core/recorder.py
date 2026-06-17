@@ -39,9 +39,23 @@ from pathlib import Path
 from typing import Optional
 
 import av
+import numpy as np
 import pandas as pd
 
 from pyfeatlive_core.capabilities import capabilities_for
+
+
+def _to_video_frame(frame) -> av.VideoFrame:
+    """Coerce an offered frame to an av.VideoFrame. Accepts an av.VideoFrame
+    (returned as-is), a PIL image, or an HxWx3 RGB ndarray. The np.asarray +
+    from_ndarray conversion runs on the RECORDER WRITER THREAD (not the live
+    event loop), so a full-res recording frame no longer throttles detection."""
+    if isinstance(frame, av.VideoFrame):
+        return frame
+    arr = np.asarray(frame)
+    if not arr.flags["C_CONTIGUOUS"]:
+        arr = np.ascontiguousarray(arr)
+    return av.VideoFrame.from_ndarray(arr, format="rgb24")
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +64,27 @@ def default_sessions_root() -> Path:
     """Where session folders live by default. ~/Documents/pyfeat-live/
     is discoverable for users who want to do post-hoc analysis."""
     return Path.home() / "Documents" / "pyfeat-live" / "sessions"
+
+
+def _scale_fex_pixel_cols(fex: pd.DataFrame, sx: float, sy: float) -> pd.DataFrame:
+    """Multiply every source-pixel coord column by (sx, sy), in place-ish.
+
+    Same column set as backend.routers.live._scale_fex_coords: FaceRect{X,Y,
+    Width,Height}, x_/y_ landmarks, mesh_x_/mesh_y_ (mesh_z_ depth is left
+    alone — it's relative, not a source pixel). Kept here so the core recorder
+    has no dependency on the backend package.
+    """
+    x_cols = [c for c in fex.columns
+              if c in ("FaceRectX", "FaceRectWidth")
+              or c.startswith("x_") or c.startswith("mesh_x_")]
+    y_cols = [c for c in fex.columns
+              if c in ("FaceRectY", "FaceRectHeight")
+              or c.startswith("y_") or c.startswith("mesh_y_")]
+    if x_cols:
+        fex.loc[:, x_cols] = fex[x_cols].values * sx
+    if y_cols:
+        fex.loc[:, y_cols] = fex[y_cols].values * sy
+    return fex
 
 
 def reveal_in_file_manager(path: Path) -> None:
@@ -132,12 +167,16 @@ class SessionRecorder:
     # ------------------------------------------------------------------
     # Public API used by the WebRTC worker thread.
     # ------------------------------------------------------------------
-    def offer_frame(self, av_frame: av.VideoFrame, fex: Optional[pd.DataFrame]) -> None:
-        """Non-blocking enqueue. Drops the frame if the writer is behind."""
+    def offer_frame(self, frame, fex: Optional[pd.DataFrame]) -> None:
+        """Non-blocking enqueue. Drops the frame if the writer is behind.
+
+        ``frame`` may be an av.VideoFrame, a PIL image, or an HxWx3 RGB ndarray;
+        the (potentially costly) conversion to a VideoFrame is deferred to the
+        writer thread so the caller's event loop stays free."""
         idx = self.frame_index
         self.frame_index += 1
         try:
-            self._queue.put_nowait((idx, av_frame, fex))
+            self._queue.put_nowait((idx, frame, fex))
         except queue.Full:
             self.dropped_frames += 1
 
@@ -243,10 +282,13 @@ class SessionRecorder:
                 if item is None:
                     break
                 idx, frame, fex = item
+                # Convert raw PIL/ndarray -> VideoFrame HERE, on the writer
+                # thread, so the live event loop never pays it (see offer_frame).
                 if self.config.record_video:
+                    frame = _to_video_frame(frame)
                     self._write_video(frame, idx)
                 if self.config.record_fex and fex is not None and len(fex):
-                    self._write_fex(fex, idx)
+                    self._write_fex(fex, idx, frame)
                 self.frames_written += 1
         except Exception as e:
             logger.exception("Writer thread crashed: %s", e)
@@ -340,7 +382,9 @@ class SessionRecorder:
         self._csv_writer = csv.DictWriter(self._csv_file, fieldnames=list(columns))
         self._csv_writer.writeheader()
 
-    def _write_fex(self, fex: pd.DataFrame, frame_idx: int) -> None:
+    def _write_fex(
+        self, fex: pd.DataFrame, frame_idx: int, frame=None,
+    ) -> None:
         try:
             # Live mode runs one detector call per frame, so fex.frame is
             # always 0 — stamp the recorder's monotonic frame index instead.
@@ -351,6 +395,20 @@ class SessionRecorder:
             # as the natural primary key, so two faces in frame 7 must be
             # (7,0) and (7,1), never (7,0)/(8,1).
             fex = fex.copy()
+            # Normalize coords to the ENCODED video resolution. Every frame is
+            # re-encoded to (enc_w, enc_h); when the offered frame's native
+            # size differs the fex coords would be in the wrong pixel space.
+            # This happens at record start: the in-flight PRE-record detection
+            # ran on a downscaled (~640) upload, so the first stored row's
+            # coords are ~half scale while video.mp4 is full-res — producing a
+            # mangled frame-0 overlay and a wrong identity thumbnail (the crop
+            # uses raw bbox pixels). Scaling here keeps fex.csv in video.mp4
+            # space. No-op (scale 1.0) on the common full-res path.
+            enc_w = getattr(self, "_enc_w", None)
+            fw = getattr(frame, "width", None) if frame is not None else None
+            if enc_w and fw and fw != enc_w:
+                s = enc_w / fw
+                fex = _scale_fex_pixel_cols(fex, s, s)
             if not (self.config.trust_fex_frame and "frame" in fex.columns):
                 fex["frame"] = int(frame_idx)
             fex["face_idx"] = fex.groupby("frame").cumcount().to_numpy()

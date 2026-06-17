@@ -11,7 +11,7 @@
 #     -o sidecar/runtime/requirements.txt --generate-hashes --python-version 3.12
 # (--python-version 3.12 matches the runtime venv so the build is
 # reproducible regardless of the host's default Python.)
-py-feat @ git+https://github.com/cosanlab/py-feat@v2.0.1
+py-feat==2.0.1
 fastapi>=0.115
 uvicorn[standard]>=0.34
 python-multipart>=0.0.18

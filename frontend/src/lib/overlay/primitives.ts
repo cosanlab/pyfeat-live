@@ -126,6 +126,11 @@ export function drawGaze(
     const [, , w, h] = face.rect;
     if (w != null && h != null) length = Math.min(w, h) * 0.9;
   }
+  // Gaze direction in SOURCE coordinates, drawn in the same space as the
+  // landmarks (the Live page's CSS scaleX(-1) mirror flips it with the face).
+  // NOTE: the multitask (Detectorv2) yaw sign is under active investigation —
+  // its gaze_yaw appears unstable (sometimes the same sign for left and right
+  // turns), so the arrow can read reversed/erratic independent of this sign.
   const dirX = opts?.convention === 'multitask'
     ? Math.sin(yaw) * Math.cos(pitch)
     : -Math.sin(yaw);

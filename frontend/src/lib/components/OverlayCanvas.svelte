@@ -99,8 +99,21 @@
     // Guard against a 0-sized frame (a `frame:[0,0]` response or a pre-init
     // Viewer): dividing by it yields a NaN/Infinity transform.
     if (!width || !height) return;
-    ctx.setTransform(bw / width, 0, 0, bh / height, 0, 0);
-    ctx.clearRect(0, 0, width, height);
+    // Map logical (width×height) onto the backing store with OBJECT-CONTAIN
+    // semantics: ONE uniform scale + centering offset — so the overlay
+    // letterboxes EXACTLY like the <video>/display canvas (which use CSS
+    // `object-contain`). Scaling bw/width and bh/height separately stretched
+    // the overlay to fill the box; when the box aspect != width/height (the
+    // `aspect-ratio` CSS gets clamped by max-width/max-height in the Live
+    // layout — e.g. a 16:9 frame in a 1.32:1 box) that stretch pushed the mesh
+    // vertically off the face ("eyes too high"). min()+center is a no-op when
+    // the box already matches the frame aspect (the Viewer's usual case).
+    const scale = Math.min(bw / width, bh / height);
+    const offX = (bw - width * scale) / 2;
+    const offY = (bh - height * scale) / 2;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, bw, bh);
+    ctx.setTransform(scale, 0, 0, scale, offX, offY);
     for (const face of faces) {
       // Draw order matches the validated baked overlay (overlay_render.py):
       // rect → AU heatmap → landmarks → pose → gaze → emotions, so the AU

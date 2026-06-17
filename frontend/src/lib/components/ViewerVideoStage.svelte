@@ -14,6 +14,10 @@
     height: number;
     currentFrame: number;
     fps: number;
+    // Real per-frame video timestamps (s), indexed by fex frame value. When
+    // present, video⇄frame maps by ACTUAL time (correct for variable-rate live
+    // recordings); when empty, falls back to the synthetic currentFrame/fps.
+    frameTimes?: number[];
     isPlaying: boolean;
     faces: Face[];
     toggles: OverlayToggles;
@@ -34,7 +38,7 @@
     onPlaybackEnd: () => void;
   };
   let {
-    videoUrl, width, height, currentFrame, fps, isPlaying,
+    videoUrl, width, height, currentFrame, fps, frameTimes = [], isPlaying,
     faces, toggles, mpLandmarks,
     edges, auTable = null, mpToDlib68 = null, style = null, showVideo = true,
     smooth = true, smoothStrength = 0.3,
@@ -60,17 +64,58 @@
   // would cause a feedback loop).
   let seekingFromProp = false;
 
-  // Sync prop `currentFrame` → video.currentTime. Triggered when the
-  // user scrubs, clicks an annotation, presses arrow keys, etc.
+  // --- Time⇄frame mapping ------------------------------------------------
+  // Prefer the real per-frame timestamps (variable-rate safe); fall back to a
+  // synthetic fps when they're absent. Built once per frameTimes change: a list
+  // sorted by time plus a frame→position map for O(1) lookups.
+  const frameTimeIndex = $derived.by(() => {
+    if (!frameTimes || frameTimes.length === 0) return null;
+    const pairs: { t: number; f: number }[] = [];
+    frameTimes.forEach((t, f) => { if (typeof t === 'number') pairs.push({ t, f }); });
+    if (pairs.length === 0) return null;
+    pairs.sort((a, b) => a.t - b.t);
+    const posByFrame = new Map<number, number>();
+    pairs.forEach((p, i) => posByFrame.set(p.f, i));
+    return { pairs, posByFrame };
+  });
+  function frameStartTime(f: number): number {
+    const idx = frameTimeIndex;
+    if (idx) { const p = idx.posByFrame.get(f); if (p != null) return idx.pairs[p].t; }
+    return f / fps;
+  }
+  function frameEndTime(f: number): number {
+    const idx = frameTimeIndex;
+    if (idx) {
+      const p = idx.posByFrame.get(f);
+      if (p != null) return idx.pairs[p + 1]?.t ?? idx.pairs[p].t + 1 / fps;
+    }
+    return (f + 1) / fps;
+  }
+  function timeToFrame(t: number): number {
+    const idx = frameTimeIndex;
+    if (!idx) return Math.round(t * fps);
+    // Largest frame whose start time is <= t (binary search).
+    let lo = 0, hi = idx.pairs.length - 1, ans = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (idx.pairs[mid].t <= t) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return idx.pairs[ans].f;
+  }
+
+  // Sync prop `currentFrame` → video.currentTime. Triggered when the user
+  // scrubs, clicks an annotation, presses arrow keys, etc. Only seek when the
+  // video time is OUTSIDE currentFrame's [start,end) interval — so normal
+  // playback (where onTimeUpdate keeps currentFrame in step) never re-seeks and
+  // stutters, even with uneven frame spacing.
   $effect(() => {
     if (!video) return;
-    const targetTime = currentFrame / fps;
-    // Only seek when there's a meaningful difference — avoids
-    // self-feedback when the timeupdate handler below advances
-    // currentFrame during normal playback.
-    if (Math.abs(video.currentTime - targetTime) > 0.5 / fps) {
+    const t0 = frameStartTime(currentFrame);
+    const t1 = frameEndTime(currentFrame);
+    const cur = video.currentTime;
+    if (cur < t0 - 1e-3 || cur >= t1) {
       seekingFromProp = true;
-      video.currentTime = targetTime;
+      video.currentTime = t0;
     }
   });
 
@@ -87,7 +132,7 @@
   function onTimeUpdate() {
     if (!video) return;
     if (seekingFromProp) { seekingFromProp = false; return; }
-    const f = Math.round(video.currentTime * fps);
+    const f = timeToFrame(video.currentTime);
     if (f !== currentFrame) onFrameAdvance(f);
   }
 
