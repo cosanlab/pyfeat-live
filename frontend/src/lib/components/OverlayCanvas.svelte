@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Face, OverlayToggles, OverlayStyleConfig, LandmarkStyle } from '../overlay/types';
-  import type { AuTable, AuMeshTable } from '../api';
+  import type { AuTable, AuMeshTable, BlendshapeMeshTable } from '../api';
   import { systemApi } from '../api';
   import { colormapLut } from '../overlay/colormaps';
   import * as O from '../overlay/primitives';
@@ -37,6 +37,10 @@
   // AU render mode: fall back to 'heatmap' if absent (persisted styles
   // predating this field won't have it).
   const auMode = $derived(style?.aus.mode ?? 'heatmap');
+  // Blendshape overlay style (mirrors AU; optional so pre-existing persisted
+  // styles without a `blendshapes` block don't break).
+  const bsLut = $derived(style?.blendshapes ? colormapLut(style.blendshapes.colormap) : null);
+  const bsMode = $derived(style?.blendshapes?.mode ?? 'heatmap');
 
   let canvas: HTMLCanvasElement | null = $state(null);
 
@@ -44,6 +48,9 @@
   // detectors (Detectorv2, MPDetector) where mpLandmarks is true; the
   // Detectorv1 keeps the dlib-68 polygon heatmap below.
   let auMeshTable: AuMeshTable | null = $state(null);
+  // Static 478-mesh blendshape→vertex table (Detectorv2 only); same fetch-once
+  // pattern as the AU mesh table.
+  let blendshapeMeshTable: BlendshapeMeshTable | null = $state(null);
   // MP tessellation triangles for the filled heatmap. Reconstructed from the
   // mp_tess edge list using the same consecutive-triple rule as the backend
   // _mesh_au_topology: edges[i] closes the triangle (edges[i][0], edges[i][1],
@@ -51,11 +58,13 @@
   let tessTris: [number, number, number][] | null = $state(null);
 
   onMount(async () => {
-    const [meshTable, overlayEdges] = await Promise.all([
+    const [meshTable, bsMeshTable, overlayEdges] = await Promise.all([
       systemApi.auMeshTable().catch(() => null),
+      systemApi.blendshapeMeshTable().catch(() => null),
       systemApi.overlayEdges().catch(() => null),
     ]);
     auMeshTable = meshTable;
+    blendshapeMeshTable = bsMeshTable;
     if (overlayEdges?.mp_tess) {
       const E = overlayEdges.mp_tess;
       const tris: [number, number, number][] = [];
@@ -125,6 +134,17 @@
           O.drawAuHeatmap(ctx, face, auTable ?? null, mpLandmarks, mpToDlib68 ?? null,
             style ? { lut: auLut ?? undefined, opacity: style.aus.opacity } : undefined);
         }
+      }
+      // Blendshape mesh heatmap — mesh detectors only (Detectorv2). Drawn after
+      // AUs (both sit under the mesh/gaze); blendshape verts are L/R pre-split.
+      if (toggles.blendshapes && mpLandmarks && blendshapeMeshTable) {
+        O.drawBlendshapeMeshHeatmap(
+          ctx, face, blendshapeMeshTable,
+          bsMode === 'heatmap' ? (tessTris ?? null) : null,
+          style?.blendshapes
+            ? { mode: bsMode, lut: bsLut ?? undefined, opacity: style.blendshapes.opacity, gamma: style.blendshapes.gamma, radius: style.blendshapes.pointSize }
+            : { mode: bsMode },
+        );
       }
       if (toggles.landmarks) {
         const useEdges = lmStyle === 'points' ? undefined : edges;

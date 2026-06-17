@@ -78,7 +78,7 @@
 
   let toggles: OverlayToggles = $state({
     rects: true, landmarks: true, poses: false,
-    gaze: false, aus: false, emotions: false, valenceArousal: false,
+    gaze: false, aus: false, blendshapes: false, emotions: false, valenceArousal: false,
   });
 
   // Live face data from the unified Face payload — drives both OverlayCanvas

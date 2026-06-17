@@ -1,4 +1,4 @@
-py-feat==2.0.0
+py-feat==2.0.1
 watchdog
 plotly
 fastapi>=0.115

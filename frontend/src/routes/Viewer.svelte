@@ -54,7 +54,7 @@
 
   let toggles: OverlayToggles = $state({
     rects: true, landmarks: true, poses: false, gaze: true,
-    aus: false, emotions: false, valenceArousal: true,
+    aus: false, blendshapes: false, emotions: false, valenceArousal: true,
   });
 
   // Display smoothing for the HTML meta panels (mirrors Live). No `track`
@@ -70,6 +70,7 @@
     { key: 'poses', label: 'Pose' },
     { key: 'gaze', label: 'Gaze' },
     { key: 'aus', label: 'AUs' },
+    { key: 'blendshapes', label: 'Blendshapes' },
     { key: 'emotions', label: 'Emotions' },
     { key: 'valenceArousal', label: 'Valence / Arousal' },
   ];

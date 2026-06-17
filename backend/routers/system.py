@@ -162,6 +162,27 @@ def au_mesh_table() -> dict:
     return _AU_MESH_TABLE_CACHE
 
 
+_BLENDSHAPE_MESH_TABLE_CACHE: dict | None = None
+
+
+@router.get("/blendshape-mesh-table")
+def blendshape_mesh_table() -> dict:
+    """478-vertex ARKit-blendshape region map for the mesh detectors.
+
+    Response keys (parallel to /au-mesh-table):
+      regionToVertices - {blendshape: [mp478_vertex_idx, ...]}  (L/R-split)
+      lut              - [[r, g, b], ...] x 256  (monochrome palette)
+      regionSide       - {blendshape: "L"|"R"|"C"}
+      regionAu         - {blendshape: "AUxx"}
+    Static; cached after first call.
+    """
+    global _BLENDSHAPE_MESH_TABLE_CACHE
+    if _BLENDSHAPE_MESH_TABLE_CACHE is None:
+        from pyfeatlive_core.region_mesh import build_region_mesh_table
+        _BLENDSHAPE_MESH_TABLE_CACHE = build_region_mesh_table("blendshape")
+    return _BLENDSHAPE_MESH_TABLE_CACHE
+
+
 @router.get("/blendshape-names")
 def blendshape_names() -> list[str]:
     """The 52 MediaPipe/ARKit blendshape coefficient names emitted by
