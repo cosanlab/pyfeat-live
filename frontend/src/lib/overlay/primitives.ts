@@ -473,6 +473,51 @@ export function drawAuHeatmap(
 // Gamma and threshold constants match the backend _draw_au_mesh_heatmap.
 const HEATMAP_GAMMA = 2.2;
 const HEATMAP_THRESH = 0.08;
+// Midpoint subdivisions applied to the 478 tessellation before filling, so
+// region edges follow fine triangles instead of the coarse ~900-triangle mesh
+// (the jagged "comical" edges) — matching py-feat's plot_face_regions. It also
+// makes SMALL regions (e.g. L/R-split blendshapes) visible: intensity is
+// interpolated to the new midpoints, so a triangle near a small region no
+// longer averages its lone in-region vertex down below HEATMAP_THRESH. 2 levels
+// = 16x triangles (~14k). Drop to 1 if live FPS suffers.
+const HEATMAP_SUBDIV = 2;
+
+// Subdivision topology (midpoint parent pairs + dense triangle list) for a base
+// tessellation. Pure index math — independent of per-frame landmark positions —
+// so it's computed once per tessellation and cached by reference.
+const _subdivCache = new WeakMap<object, { parents: Int32Array; tris: Int32Array }>();
+
+function subdivideTopology(
+  tessTris: [number, number, number][], nBase: number, levels: number,
+): { parents: Int32Array; tris: Int32Array } {
+  const hit = _subdivCache.get(tessTris as unknown as object);
+  if (hit) return hit;
+  const parents: number[] = []; // flat [a0,b0, a1,b1, ...]; midpoint i = nBase+i
+  let next = nBase;
+  let cur: number[][] = tessTris.map((t) => [t[0], t[1], t[2]]);
+  for (let lvl = 0; lvl < levels; lvl++) {
+    const cache = new Map<number, number>();
+    const mid = (a: number, b: number): number => {
+      const k = a < b ? a * 1e7 + b : b * 1e7 + a;
+      let id = cache.get(k);
+      if (id === undefined) { id = next++; cache.set(k, id); parents.push(a, b); }
+      return id;
+    };
+    const nt: number[][] = [];
+    for (const [a, b, c] of cur) {
+      const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a);
+      nt.push([a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]);
+    }
+    cur = nt;
+  }
+  const tris = new Int32Array(cur.length * 3);
+  for (let i = 0; i < cur.length; i++) {
+    tris[i * 3] = cur[i][0]; tris[i * 3 + 1] = cur[i][1]; tris[i * 3 + 2] = cur[i][2];
+  }
+  const out = { parents: Int32Array.from(parents), tris };
+  _subdivCache.set(tessTris as unknown as object, out);
+  return out;
+}
 
 /**
  * Draw the AU heatmap for 478-mesh detectors (Detectorv2, MPDetector).
@@ -509,40 +554,57 @@ function drawMeshRegionHeatmap(
   const gamma = opts?.gamma ?? HEATMAP_GAMMA;
 
   if (mode === 'heatmap' && tessTris && tessTris.length > 0) {
-    // 1. per-vertex intensity: max over regions covering each vertex.
-    const vint = new Float32Array(478);
+    const nBase = 478;
+    // 1. per-(base)vertex intensity: max over regions covering each vertex.
+    const vint = new Float32Array(nBase);
     for (const [region, verts] of Object.entries(regionToVertices)) {
       const raw = values[region];
       if (raw == null) continue;
       const v = typeof raw === 'number' && Number.isFinite(raw) ? raw : 0;
       if (v <= 0) continue;
       for (const vi of verts) {
-        if (vi < 478 && v > vint[vi]!) vint[vi] = v;
+        if (vi < nBase && v > vint[vi]!) vint[vi] = v;
       }
     }
 
-    // 2. shade each tessellation triangle.
+    // 2. subdivide the mesh and LINEARLY INTERPOLATE position + intensity to the
+    //    new midpoints (Gouraud-style). Smooths region edges and lifts small
+    //    regions above threshold (see HEATMAP_SUBDIV).
+    const { parents, tris } = subdivideTopology(tessTris, nBase, HEATMAP_SUBDIV);
+    const nDense = nBase + parents.length / 2;
+    const px = new Float64Array(nDense);
+    const py = new Float64Array(nDense);
+    const di = new Float64Array(nDense);
+    for (let i = 0; i < nBase; i++) {
+      const x = lm[i * 2], y = lm[i * 2 + 1];
+      px[i] = x == null ? NaN : x;
+      py[i] = y == null ? NaN : y;
+      di[i] = vint[i]!;
+    }
+    for (let j = 0; j < parents.length / 2; j++) {
+      const a = parents[j * 2]!, b = parents[j * 2 + 1]!, id = nBase + j;
+      px[id] = (px[a]! + px[b]!) / 2;
+      py[id] = (py[a]! + py[b]!) / 2;
+      di[id] = (di[a]! + di[b]!) / 2;
+    }
+
+    // 3. shade each (dense) triangle by the mean of its 3 interpolated values.
     ctx.save();
-    for (const [a, b, c] of tessTris) {
-      const m = (vint[a]! + vint[b]! + vint[c]!) / 3.0;
+    for (let t = 0; t < tris.length; t += 3) {
+      const a = tris[t]!, b = tris[t + 1]!, c = tris[t + 2]!;
+      const m = (di[a]! + di[b]! + di[c]!) / 3.0;
       if (m < HEATMAP_THRESH) continue;
+      const ax = px[a]!, bx = px[b]!, cx = px[c]!;
+      if (ax !== ax || bx !== bx || cx !== cx) continue; // NaN → missing landmark
       const disp = Math.pow(m, gamma);
-
-      const ax = lm[a * 2], ay = lm[a * 2 + 1];
-      const bx = lm[b * 2], by = lm[b * 2 + 1];
-      const cx = lm[c * 2], cy = lm[c * 2 + 1];
-      if (ax == null || ay == null || bx == null || by == null || cx == null || cy == null) continue;
-
-      const lutIdx = Math.min(255, Math.max(0, Math.floor(disp * 255)));
-      const rgb = lut[lutIdx];
+      const rgb = lut[Math.min(255, Math.max(0, Math.floor(disp * 255)))];
       if (!rgb) continue;
-
       const alpha = Math.min(185, disp * 240) * opacity / 255;
       ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(3)})`;
       ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(bx, by);
-      ctx.lineTo(cx, cy);
+      ctx.moveTo(ax, py[a]!);
+      ctx.lineTo(bx, py[b]!);
+      ctx.lineTo(cx, py[c]!);
       ctx.closePath();
       ctx.fill();
     }
