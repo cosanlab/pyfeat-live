@@ -1,0 +1,44 @@
+# Guards the bundled sidecar runtime lock against the failure that shipped in
+# 0.8.13: the lock (sidecar/runtime/requirements.txt) is installed on the END
+# USER's Mac at first launch, but it had been compiled on a Linux/CUDA host, so
+# it pinned torch's CUDA wheels (cuda-bindings / nvidia-*) that have NO macOS
+# wheels — making the app's first-run `uv pip install --require-hashes`
+# unsatisfiable on Apple Silicon.
+#
+# This job dry-run-installs the committed lock on a macOS runner — exactly the
+# first-run resolution the app does, minus the download — so a lock that can't
+# install on macOS fails the PR instead of shipping. (Don't replace this with a
+# regenerate-and-diff check: the lock is a point-in-time pin, so a fresh compile
+# would drift whenever any dependency publishes a new release.)
+name: Verify runtime lock (macOS)
+
+on:
+  pull_request:
+    paths:
+      - sidecar/runtime/requirements.txt
+      - sidecar/runtime/requirements.in
+      - .github/workflows/verify-runtime-lock.yml
+  push:
+    branches: [main]
+    paths:
+      - sidecar/runtime/requirements.txt
+      - sidecar/runtime/requirements.in
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: dry-run install on macOS arm64
+    runs-on: macos-14  # Apple Silicon, matching the release target
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Dry-run install the bundled runtime lock
+        run: |
+          uv venv --python 3.12
+          # Resolves + checks a macOS wheel exists for every hash-pinned dep,
+          # exactly as the .app's bootstrap does on first launch (no download).
+          # Fails loudly if the lock pins anything without a macOS wheel.
+          uv pip install --dry-run --require-hashes \
+            -r sidecar/runtime/requirements.txt
