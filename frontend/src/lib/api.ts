@@ -60,7 +60,9 @@ export interface AuTable {
 }
 
 export interface AuMeshTable {
-  /** AU name → list of MP-478 vertex indices it drives (disjoint, non-overlapping) */
+  /** AU name → MP-478 triangles [[a,b,c], ...] to fill (per-triangle partition) */
+  regionToTriangles?: Record<string, [number, number, number][]>;
+  /** AU name → MP-478 vertex indices (dot "points" fallback only) */
   auToVertices: Record<string, number[]>;
   /** alias of auToVertices (region-map naming) */
   regionToVertices?: Record<string, number[]>;
@@ -69,7 +71,9 @@ export interface AuMeshTable {
 }
 
 export interface BlendshapeMeshTable {
-  /** blendshape name → list of MP-478 vertex indices (Left/Right pre-split) */
+  /** blendshape → MP-478 triangles [[a,b,c], ...] to fill (Left/Right pre-split) */
+  regionToTriangles?: Record<string, [number, number, number][]>;
+  /** blendshape name → MP-478 vertex indices (dot "points" fallback only) */
   regionToVertices: Record<string, number[]>;
   /** 256-entry monochrome colormap as [r, g, b] in 0–255 */
   lut: [number, number, number][];
