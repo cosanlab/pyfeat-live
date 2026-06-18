@@ -6,12 +6,17 @@
 #     bundle as resources, loaded via PYTHONPATH; not installed)
 #   - pins exact versions for first-run determinism
 #
-# Bumping a pin: edit the version, then recompile the lock:
+# Bumping a pin: edit the version, then recompile the lock. The
+# --python-platform flag is REQUIRED — the lock installs on the END USER's
+# Mac at first launch and release.yml builds macOS-arm64 only, so compiling
+# on a Linux/CUDA host without it pins CUDA wheels that have no macOS build
+# and the first-run install fails (the 0.8.13 regression):
 #   uv pip compile sidecar/runtime/requirements.in \
-#     -o sidecar/runtime/requirements.txt --generate-hashes --python-version 3.12
+#     -o sidecar/runtime/requirements.txt --generate-hashes \
+#     --python-version 3.12 --python-platform aarch64-apple-darwin
 # (--python-version 3.12 matches the runtime venv so the build is
 # reproducible regardless of the host's default Python.)
-py-feat==2.0.1
+py-feat==2.0.2
 fastapi>=0.115
 uvicorn[standard]>=0.34
 python-multipart>=0.0.18
