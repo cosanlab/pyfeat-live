@@ -29,13 +29,15 @@ def build_au_mesh_table() -> dict:
     """Payload for the frontend monochrome mesh-AU heatmap renderer.
 
     Keys:
-      regionToVertices – {AU: [vertex_idx, ...]}  (disjoint, non-overlapping)
-      auToVertices     – alias of regionToVertices (back-compat)
-      lut              – [[r,g,b], ...] × 256 monochrome palette (Blues)
+      regionToTriangles – {AU: [[a,b,c], ...]}  (mp478 vertex triples to fill)
+      regionToVertices  – {AU: [vertex_idx, ...]}  (dot fallback only)
+      auToVertices      – alias of regionToVertices (back-compat)
+      lut               – [[r,g,b], ...] × 256 monochrome palette (Blues)
     """
     from pyfeatlive_core.region_mesh import build_region_mesh_table
     table = build_region_mesh_table("au")
     return {
+        "regionToTriangles": table["regionToTriangles"],
         "regionToVertices": table["regionToVertices"],
         "auToVertices": table["regionToVertices"],  # back-compat
         "lut": table["lut"],

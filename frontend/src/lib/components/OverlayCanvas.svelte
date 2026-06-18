@@ -52,28 +52,13 @@
   // pattern as the AU mesh table.
   let blendshapeMeshTable: BlendshapeMeshTable | null = $state(null);
   // MP tessellation triangles for the filled heatmap. Reconstructed from the
-  // mp_tess edge list using the same consecutive-triple rule as the backend
-  // _mesh_au_topology: edges[i] closes the triangle (edges[i][0], edges[i][1],
-  // edges[i+1][1]) for i = 0, 3, 6, ... (every group of 3 edges is one tri).
-  let tessTris: [number, number, number][] | null = $state(null);
-
   onMount(async () => {
-    const [meshTable, bsMeshTable, overlayEdges] = await Promise.all([
+    const [meshTable, bsMeshTable] = await Promise.all([
       systemApi.auMeshTable().catch(() => null),
       systemApi.blendshapeMeshTable().catch(() => null),
-      systemApi.overlayEdges().catch(() => null),
     ]);
     auMeshTable = meshTable;
     blendshapeMeshTable = bsMeshTable;
-    if (overlayEdges?.mp_tess) {
-      const E = overlayEdges.mp_tess;
-      const tris: [number, number, number][] = [];
-      for (let i = 0; i + 2 < E.length; i += 3) {
-        const ea = E[i], eb = E[i + 1];
-        if (ea && eb) tris.push([ea[0]!, ea[1]!, eb[1]!]);
-      }
-      tessTris = tris;
-    }
   });
 
   $effect(() => {
@@ -125,7 +110,6 @@
           // (default) or vertex dots, depending on aus.mode from the style.
           O.drawAuMeshHeatmap(
             ctx, face, auMeshTable,
-            auMode === 'heatmap' ? (tessTris ?? null) : null,
             style
               ? { mode: auMode, lut: auLut ?? undefined, opacity: style.aus.opacity, gamma: style.aus.gamma, radius: style.aus.pointSize }
               : { mode: auMode },
@@ -140,7 +124,6 @@
       if (toggles.blendshapes && mpLandmarks && blendshapeMeshTable) {
         O.drawBlendshapeMeshHeatmap(
           ctx, face, blendshapeMeshTable,
-          bsMode === 'heatmap' ? (tessTris ?? null) : null,
           style?.blendshapes
             ? { mode: bsMode, lut: bsLut ?? undefined, opacity: style.blendshapes.opacity, gamma: style.blendshapes.gamma, radius: style.blendshapes.pointSize }
             : { mode: bsMode },
