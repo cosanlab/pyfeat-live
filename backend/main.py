@@ -74,6 +74,8 @@ def create_app() -> FastAPI:
     # Live session state lives for the app's lifetime.
     from backend.live_state import LiveSession
     app.state.live = LiveSession()
+    import asyncio as _asyncio
+    app.state.generate_lock = _asyncio.Lock()
 
     from pyfeatlive_core.analyze_queue import AnalyzeQueue
     app.state.analyze_queue = AnalyzeQueue()
@@ -93,6 +95,8 @@ def create_app() -> FastAPI:
     app.include_router(annotations_router.router)
     app.include_router(presets_router.router)
     app.include_router(analyze_router.router)
+    from backend.routers import generate as generate_router
+    app.include_router(generate_router.router)
 
     # ----- Frontend serving --------------------------------------------
     # The built Svelte SPA lives at this path. Set PYFEAT_FRONTEND_DIST
