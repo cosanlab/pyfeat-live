@@ -2,6 +2,7 @@
   import TopNav from './lib/components/TopNav.svelte';
   import UpdateBanner from './lib/components/UpdateBanner.svelte';
   import Live from './routes/Live.svelte';
+  import Generate from './routes/Generate.svelte';
   import Analyze from './routes/Analyze.svelte';
   import Viewer from './routes/Viewer.svelte';
   import LogsDrawer from './lib/components/LogsDrawer.svelte';
@@ -18,6 +19,8 @@
     <main class="flex-1 flex flex-col min-w-0 min-h-0">
       {#if view === 'live'}
         <Live />
+      {:else if view === 'generate'}
+        <Generate />
       {:else if view === 'analyze'}
         <Analyze onSwitchView={(v) => view = v} />
       {:else if view === 'viewer'}

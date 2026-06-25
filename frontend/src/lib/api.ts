@@ -400,6 +400,27 @@ export const analyzeApi = {
   },
 };
 
+// ---------------- generate ----------------
+export const generateApi = {
+  editFrame: async (
+    jpeg: Blob,
+    ctrl: { expression: string; strength: number; mouthMode: string },
+  ): Promise<Blob> => {
+    const r = await fetch('/api/generate/frame', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'image/jpeg',
+        'X-Expression': ctrl.expression,
+        'X-Strength': String(ctrl.strength),
+        'X-Mouth-Mode': ctrl.mouthMode,
+      },
+      body: jpeg,
+    });
+    if (!r.ok) throw new ApiError(r.status, `generateFrame: ${r.status} ${r.statusText}`);
+    return r.blob();
+  },
+};
+
 // ---------------- annotations ----------------
 export const annotationsApi = {
   list: (sessionId: string) =>
