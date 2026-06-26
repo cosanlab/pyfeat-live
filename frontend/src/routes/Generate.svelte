@@ -1,26 +1,51 @@
 <!-- frontend/src/routes/Generate.svelte -->
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onDestroy } from 'svelte';
   import { generateApi } from '../lib/api';
 
+  type Mode = 'live' | 'image';
+  let mode = $state<Mode>('live');
+
+  // ---- live ----
   let videoEl: HTMLVideoElement;
   let displayCanvas: HTMLCanvasElement;
   let captureCanvas: HTMLCanvasElement | null = null;
   let stream: MediaStream | null = null;
   let loopAbort: AbortController | null = null;
   let isStreaming = $state(false);
-  let apiError = $state<string | null>(null);
   let fps = $state(0);
 
-  // controls
+  // ---- image ----
+  let srcBitmap: ImageBitmap | null = null;
+  let srcName = $state('image');
+  let editedUrl = $state<string | null>(null); // object URL of the edited result (display + download)
+  let imageBusy = $state(false);
+  let dragOver = $state(false);
+
+  let apiError = $state<string | null>(null);
+
+  // ---- shared controls ----
   let expression = $state('smile');
   let strength = $state(0.6);
   let mouthMode = $state('inpaint_v6');
 
   const DET_BUDGET = 512;
 
+  function setMode(m: Mode) {
+    if (m === mode) return;
+    if (mode === 'live') stop(); // leaving live → release the camera
+    apiError = null;
+    mode = m;
+  }
+
+  // ---- live mode ----
   async function start() {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+    } catch (e: any) {
+      apiError = `Camera error: ${e.message}`;
+      return;
+    }
     videoEl.srcObject = stream;
     await videoEl.play();
     isStreaming = true;
@@ -38,7 +63,7 @@
   async function runLoop(signal: AbortSignal) {
     if (!captureCanvas) captureCanvas = document.createElement('canvas');
     const fpsWin: number[] = [];
-    while (!signal.aborted && isStreaming) {
+    while (!signal.aborted && isStreaming && mode === 'live') {
       if (!videoEl || videoEl.readyState < 2) { await new Promise((r) => setTimeout(r, 33)); continue; }
       const sW = videoEl.videoWidth, sH = videoEl.videoHeight;
       const s = Math.min(1, DET_BUDGET / Math.max(sW, sH));
@@ -71,40 +96,142 @@
     }
   }
 
-  onMount(() => { /* camera starts on user click (getUserMedia needs a gesture) */ });
-  onDestroy(stop);
+  // ---- image mode ----
+  async function loadFile(files: FileList | null) {
+    const f = files?.[0];
+    if (!f) return;
+    if (!f.type.startsWith('image/')) { apiError = 'Please choose an image file'; return; }
+    srcName = f.name.replace(/\.[^.]+$/, '');
+    srcBitmap?.close?.();
+    srcBitmap = await createImageBitmap(f);
+    await renderImage();
+  }
+
+  async function renderImage() {
+    if (!srcBitmap) return;
+    imageBusy = true; apiError = null;
+    try {
+      // full-resolution still (no downscale — quality matters for a saved image)
+      const c = document.createElement('canvas');
+      c.width = srcBitmap.width; c.height = srcBitmap.height;
+      c.getContext('2d')!.drawImage(srcBitmap, 0, 0);
+      const jpeg: Blob = await new Promise((res, rej) =>
+        c.toBlob((b) => (b ? res(b) : rej(new Error('encode failed'))), 'image/jpeg', 0.95));
+      const edited = await generateApi.editFrame(jpeg, { expression, strength, mouthMode });
+      if (editedUrl) URL.revokeObjectURL(editedUrl);
+      editedUrl = URL.createObjectURL(edited);
+    } catch (e: any) {
+      apiError = e.message;
+    } finally {
+      imageBusy = false;
+    }
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault(); dragOver = false;
+    loadFile(e.dataTransfer?.files ?? null);
+  }
+
+  onDestroy(() => {
+    stop();
+    if (editedUrl) URL.revokeObjectURL(editedUrl);
+    srcBitmap?.close?.();
+  });
+
+  const segBtn = 'px-3 py-1 rounded text-[11px]';
+  const primaryBtn =
+    'w-full px-3 py-1.5 rounded-md text-[11.5px] font-medium border text-center bg-green-500 text-green-950 border-green-500 hover:bg-green-400';
+  const neutralBtn =
+    'w-full px-3 py-1.5 rounded-md text-[11.5px] font-medium bg-zinc-900 border border-zinc-800 text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed';
+  const selectCls =
+    'w-full appearance-none pl-2 pr-7 py-1.5 rounded bg-zinc-900 border border-zinc-800 text-[11.5px] text-zinc-200';
+  const fieldLabel = 'text-[11px] text-zinc-400 mb-1';
+  const sectionLabel = 'text-[10px] uppercase tracking-wider text-zinc-500 font-semibold';
 </script>
 
-<div class="flex h-full">
-  <div class="flex-1 flex items-center justify-center bg-black min-h-0">
-    <!-- hidden source; we only show the edited canvas -->
-    <video bind:this={videoEl} class="hidden" muted playsinline></video>
-    <canvas bind:this={displayCanvas} class="max-h-full max-w-full"></canvas>
+<div class="flex h-full flex-col bg-zinc-950 text-zinc-300">
+  <!-- mode switcher (matches TopNav/LiveSidebar segmented style) -->
+  <div class="flex items-center px-4 py-2 border-b border-zinc-900">
+    <div class="flex gap-0.5 bg-zinc-900 rounded-md p-0.5">
+      <button class="{segBtn} {mode === 'live' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
+              onclick={() => setMode('live')}>Live</button>
+      <button class="{segBtn} {mode === 'image' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
+              onclick={() => setMode('image')}>Image</button>
+      <button class="{segBtn} text-zinc-700 cursor-not-allowed" disabled title="coming soon">Video</button>
+    </div>
   </div>
-  <aside class="w-72 p-4 space-y-4 border-l overflow-y-auto">
-    {#if !isStreaming}
-      <button class="w-full py-2 bg-blue-600 text-white rounded" onclick={start}>Start camera</button>
-    {:else}
-      <button class="w-full py-2 bg-red-600 text-white rounded" onclick={stop}>Stop</button>
-      <div class="text-xs text-gray-500">{fps} fps</div>
-    {/if}
-    {#if apiError}<div class="text-xs text-red-600">{apiError}</div>{/if}
-    <label class="block text-sm">Expression
-      <select bind:value={expression} class="w-full border rounded p-1">
-        <option value="smile">smile</option>
-        <option value="disgust">disgust</option>
-        <option value="surprise">surprise</option>
-      </select>
-    </label>
-    <label class="block text-sm">Strength: {strength.toFixed(2)}
-      <input type="range" min="0" max="1" step="0.05" bind:value={strength} class="w-full" />
-    </label>
-    <label class="block text-sm">Teeth
-      <select bind:value={mouthMode} class="w-full border rounded p-1">
-        <option value="inpaint_v6">inpaint_v6</option>
-        <option value="pbr">pbr</option>
-        <option value="proc">proc</option>
-      </select>
-    </label>
-  </aside>
+
+  <div class="flex flex-1 min-h-0">
+    <div class="flex-1 flex items-center justify-center bg-zinc-950 min-h-0 p-4">
+      {#if mode === 'live'}
+        <video bind:this={videoEl} class="hidden" muted playsinline></video>
+        <canvas bind:this={displayCanvas} class="max-h-full max-w-full rounded"></canvas>
+      {:else}
+        <div
+          class="w-full h-full flex items-center justify-center rounded-lg border border-dashed transition {dragOver ? 'border-green-400 bg-green-500/5' : 'border-zinc-800 bg-zinc-900/40'}"
+          role="region" aria-label="Drop an image to edit"
+          ondragover={(e) => { e.preventDefault(); dragOver = true; }}
+          ondragleave={() => (dragOver = false)}
+          ondrop={onDrop}
+        >
+          {#if editedUrl}
+            <img src={editedUrl} alt="edited result" class="max-h-full max-w-full rounded" />
+          {:else}
+            <div class="text-center">
+              <div class="text-[12.5px] font-medium text-zinc-300">Drag an image here</div>
+              <div class="text-[11px] text-zinc-500 mt-0.5">or use “Choose image”</div>
+            </div>
+          {/if}
+        </div>
+      {/if}
+    </div>
+
+    <aside class="w-[220px] p-4 bg-zinc-900 border-l border-zinc-900 space-y-4">
+      <div class={sectionLabel}>Source</div>
+      {#if mode === 'live'}
+        {#if !isStreaming}
+          <button class={primaryBtn} onclick={start}>Start camera</button>
+        {:else}
+          <button class="w-full px-3 py-1.5 rounded-md text-[11.5px] font-medium bg-red-600 text-white border border-red-600 hover:bg-red-500" onclick={stop}>Stop</button>
+          <div class="text-[11px] text-zinc-500">{fps} fps</div>
+        {/if}
+      {:else}
+        <label class="{primaryBtn} block cursor-pointer">
+          Choose image
+          <input type="file" accept="image/*" class="hidden"
+                 onchange={(e) => loadFile((e.currentTarget as HTMLInputElement).files)} />
+        </label>
+        <button class={neutralBtn} disabled={!srcBitmap || imageBusy} onclick={renderImage}>
+          {imageBusy ? 'Rendering…' : 'Re-run'}
+        </button>
+        {#if editedUrl}
+          <a href={editedUrl} download={`${srcName}_${expression}.jpg`} class="{primaryBtn} block">Save rendered output</a>
+        {/if}
+      {/if}
+
+      {#if apiError}<div class="text-[11px] text-red-400">{apiError}</div>{/if}
+
+      <div class="{sectionLabel} pt-2">Controls</div>
+      <div>
+        <div class={fieldLabel}>Expression</div>
+        <select bind:value={expression} class={selectCls}>
+          <option value="smile">smile</option>
+          <option value="disgust">disgust</option>
+          <option value="surprise">surprise</option>
+        </select>
+      </div>
+      <div>
+        <div class={fieldLabel}>Strength: {strength.toFixed(2)}</div>
+        <input type="range" min="0" max="1" step="0.05" bind:value={strength} class="w-full accent-green-500" />
+      </div>
+      <div>
+        <div class={fieldLabel}>Teeth</div>
+        <select bind:value={mouthMode} class={selectCls}>
+          <option value="inpaint_v6">inpaint_v6</option>
+          <option value="pbr">pbr</option>
+          <option value="proc">proc</option>
+        </select>
+      </div>
+    </aside>
+  </div>
 </div>
