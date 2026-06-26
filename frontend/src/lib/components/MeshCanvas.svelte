@@ -57,7 +57,7 @@
   let lStart: Float32Array, lStartD: Float32Array, lEnd: Float32Array, lEndD: Float32Array;
   let sNormN: Float32Array, sNormD: Float32Array;   // per-vertex normals at neutral + (target-neutral)
   let surfaceMesh: any, surfaceProg: any;
-  let irisMesh: any, irisProg: any, pupilMesh: any, pupilProg: any;
+  let irisMesh: any, irisProg: any, pupilMesh: any, pupilProg: any, eyeMaskMesh: any, eyeMaskProg: any;
   const CORNERS = [[-1, 0], [1, 0], [-1, 1], [1, 1]];
   const EYE_CENTERS = [468, 473];   // iris/pupil drawn as round, perspective-scaled points here
   // eye-opening contour landmarks (MediaPipe), for eye centre + height + eyeball radius
@@ -72,10 +72,10 @@
     const yr = (gaze.yaw * Math.PI) / 180, pr = (gaze.pitch * Math.PI) / 180;
     // eyeball rotation: iris + pupil translate TOGETHER across the eye opening
     let sx = Math.sin(yr) * Math.cos(pr) * gazeMag, sy = -Math.sin(pr) * gazeMag;   // mesh space (x: joystick-right -> look right)
-    // constrain the iris centre to the eye-opening ELLIPSE shrunk by the iris radius, so the
-    // whole disc stays inside (horizontal room is large; vertical is tiny since the eye is short)
-    const irisR = 0.46 * eyeHeight;
-    const mx = Math.max(1e-4, eyeWidth / 2 - irisR), my = Math.max(1e-4, eyeHeight / 2 - irisR);
+    // The iris is now CLIPPED against the eye opening in-shader, so the centre may travel all the way
+    // to the opening edge (and slightly past vertically) — it occludes into a crescent at the extremes
+    // instead of being held back. Far more up/down range than the old iris-radius-shrunk clamp.
+    const mx = Math.max(1e-4, eyeWidth * 0.5), my = Math.max(1e-4, eyeHeight * 0.5);
     const e = Math.hypot(sx / mx, sy / my);
     if (e > 1) { sx /= e; sy /= e; }
     const shift = [s * sx, -s * sy, 0];   // tx: scale + flip y
@@ -153,6 +153,7 @@
     surfaceMesh.visible = config.surface.show;
     irisMesh.visible = config.eyes.show;
     pupilMesh.visible = config.eyes.show;
+    if (eyeMaskMesh) eyeMaskMesh.visible = config.eyes.show;   // stencil mask only needed when eyes are drawn
     if (curColormap !== config.colormap) {
       curColormap = config.colormap;
       const t = colormapTex(config.colormap);
@@ -178,7 +179,7 @@
     }`;
 
   onMount(() => {
-    renderer = new Renderer({ canvas, dpr: Math.min(2, window.devicePixelRatio), alpha: true });
+    renderer = new Renderer({ canvas, dpr: Math.min(2, window.devicePixelRatio), alpha: true, stencil: true });
     gl = renderer.gl;
     dpr = renderer.dpr;
     camera = new Camera(gl, { fov: 35 });
@@ -329,9 +330,43 @@
     pupilMesh = new Mesh(gl, { mode: gl.POINTS, program: pupilProg, geometry: eyeGeo() });
     pupilMesh.frustumCulled = false; pupilMesh.renderOrder = 11;
 
+    // ---- eyelid occlusion: stencil the iris/pupil to the REAL eye opening (eyelid-contour triangle fans) ----
+    const fan: number[] = [];
+    for (const [eye, c] of [[LEFT_EYE, 468], [RIGHT_EYE, 473]] as [number[], number][]) {
+      // the contour arrays aren't a clean perimeter loop (both lids run outer->inner), so sort by
+      // angle around the eye centroid -> a true perimeter -> the centre fan tiles it with no gaps.
+      let mx = 0, my = 0;
+      for (const i of eye) { mx += neutral[i][0]; my += neutral[i][1]; }
+      mx /= eye.length; my /= eye.length;
+      const ord = [...eye].sort((a, b) =>
+        Math.atan2(neutral[a][1] - my, neutral[a][0] - mx) - Math.atan2(neutral[b][1] - my, neutral[b][0] - mx));
+      for (let i = 0; i < ord.length; i++) fan.push(c, ord[i], ord[(i + 1) % ord.length]);
+    }
+    eyeMaskProg = new Program(gl, {
+      vertex: `attribute vec3 position; attribute vec3 aDelta; uniform mat4 modelViewMatrix; uniform mat4 projectionMatrix; uniform float uPhase;
+               void main(){ gl_Position = projectionMatrix*modelViewMatrix*vec4(position + aDelta*uPhase, 1.0); }`,
+      fragment: `precision highp float; uniform vec3 uColor; void main(){ gl_FragColor = vec4(uColor, 1.0); }`,
+      depthTest: false, depthWrite: false, cullFace: false,   // Y-flip reverses winding; keep BOTH so the whole eye stencils
+      uniforms: { uPhase: { value: 0 }, uColor: { value: new Vec3(0.80, 0.78, 0.74) } },   // sclera (eye-white) fill
+    });
+    eyeMaskMesh = new Mesh(gl, { mode: gl.TRIANGLES, program: eyeMaskProg,
+      geometry: new Geometry(gl, { position: { size: 3, data: pPos }, aDelta: { size: 3, data: pDelta }, index: { data: new Uint16Array(fan) } }) });
+    eyeMaskMesh.frustumCulled = false; eyeMaskMesh.renderOrder = 9;   // after the face, before the iris (10/11)
+    // write stencil=1 inside the eyelid fans (colour off); iris/pupil then draw only where stencil==1.
+    // NOTE: OGL onBeforeRender/onAfterRender are METHODS that REGISTER a callback (not assignable props).
+    eyeMaskMesh.onBeforeRender(() => {                          // draw the sclera AND write stencil=1 over the eye opening
+      gl.enable(gl.STENCIL_TEST); gl.stencilMask(0xff);
+      gl.clearStencil(0); gl.clear(gl.STENCIL_BUFFER_BIT);
+      gl.stencilFunc(gl.ALWAYS, 1, 0xff); gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
+    });
+    eyeMaskMesh.onAfterRender(() => {                           // iris/pupil then draw only where stencil==1 (inside the eye)
+      gl.stencilFunc(gl.EQUAL, 1, 0xff); gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP); gl.stencilMask(0x00);
+    });
+    pupilMesh.onAfterRender(() => { gl.disable(gl.STENCIL_TEST); gl.stencilMask(0xff); });
+
     scene = new Transform();
     surfaceMesh.setParent(scene); pointsMesh.setParent(scene); linesMesh.setParent(scene);
-    irisMesh.setParent(scene); pupilMesh.setParent(scene);
+    eyeMaskMesh.setParent(scene); irisMesh.setParent(scene); pupilMesh.setParent(scene);
 
     ready = true;
     resize();
@@ -347,7 +382,7 @@
         else if (u <= 0) { u = 0; dir = 1; }
       }
       const e = (1 - Math.cos(Math.PI * u)) / 2;
-      for (const p of [pointsProg, linesProg, surfaceProg, irisProg, pupilProg]) p.uniforms.uPhase.value = e;
+      for (const p of [pointsProg, linesProg, surfaceProg, irisProg, pupilProg, eyeMaskProg]) p.uniforms.uPhase.value = e;
       controls.update();
       renderer.render({ scene, camera });
     }
