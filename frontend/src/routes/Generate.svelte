@@ -3,6 +3,9 @@
   import { onDestroy } from 'svelte';
   import { generateApi } from '../lib/api';
   import MeshCanvas from '../lib/components/MeshCanvas.svelte';
+  import MeshConfigModal from '../lib/components/MeshConfigModal.svelte';
+  import { DEFAULT_MESH_CONFIG, type MeshConfig } from '../lib/mesh/config';
+  import Settings from '@lucide/svelte/icons/settings';
 
   type Mode = 'live' | 'image' | 'mesh';
   let mode = $state<Mode>('live');
@@ -53,6 +56,8 @@
   let meshTarget = $state<number[][] | null>(null);    // current expression verts (updates live)
   let meshEdges = $state<number[][] | null>(null);     // tessellation index pairs (constant)
   let meshBusy = $state(false);
+  let meshConfig = $state<MeshConfig>({ ...DEFAULT_MESH_CONFIG });
+  let meshConfigOpen = $state(false);
   function meshCtrl() {
     return { expression: ctrlMode === 'preset' ? expression : undefined, strength, aus: activeAus() };
   }
@@ -290,7 +295,7 @@
       {:else}
         <!-- mesh mode: WebGL 478-mesh viewer (OGL) -->
         {#if meshNeutral && meshTarget && meshEdges}
-          <MeshCanvas neutral={meshNeutral} target={meshTarget} edges={meshEdges} />
+          <MeshCanvas neutral={meshNeutral} target={meshTarget} edges={meshEdges} config={meshConfig} />
         {:else}
           <div class="text-[12.5px] text-zinc-500">{meshBusy ? 'Loading mesh…' : ''}</div>
         {/if}
@@ -324,6 +329,9 @@
         {/if}
       {:else}
         {#if meshBusy}<div class="text-[11px] text-zinc-500">Loading mesh…</div>{/if}
+        <button class="{neutralBtn} inline-flex items-center justify-center gap-1.5" onclick={() => (meshConfigOpen = true)}>
+          <Settings size={13} /> Appearance
+        </button>
         <div class="text-[11px] text-zinc-500 leading-relaxed">
           WebGL mesh — loops neutral ↔ expression and morphs live as you adjust. <b>Pause</b> / <b>Loop</b> in the view; drag to rotate.
         </div>
@@ -380,3 +388,7 @@
     </aside>
   </div>
 </div>
+
+{#if meshConfigOpen}
+  <MeshConfigModal config={meshConfig} onChange={(c) => (meshConfig = c)} onClose={() => (meshConfigOpen = false)} />
+{/if}
