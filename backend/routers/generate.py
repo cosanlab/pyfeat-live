@@ -49,7 +49,8 @@ def _mesh_html(editor, aus, expression: str | None, strength: float) -> str:
     from feat.plotting import plot_face_mesh_plotly
     if not aus and expression and expression in editor._R.EXPRESSIONS:
         aus = dict(editor._R.EXPRESSIONS[expression])      # expand preset -> AU dict
-    mesh = editor.edit_mesh(aus=aus, strength=strength)
+    mesh = editor.edit_mesh(aus=aus, strength=strength).copy()
+    mesh[:, 1] = -mesh[:, 1]                                # mesh is y-down (MediaPipe); Plotly is z-up -> flip
     fig = plot_face_mesh_plotly(mesh=mesh)
     return fig.to_html(full_html=True, include_plotlyjs="cdn")
 
