@@ -64,10 +64,24 @@ def _mesh_html(editor, aus, expression: str | None, strength: float, frames: int
     figs = [_fig_at(strength * math.sin(math.pi * (i / (frames - 1)))) for i in range(frames)]
     base = figs[0]
     base.frames = [go.Frame(data=figs[i].data, name=str(i)) for i in range(frames)]
+    dur = 150  # ms/frame — slower cadence redraws the heavy 3D wireframe more smoothly
     base.update_layout(updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=0.05, buttons=[
         dict(label="▶ Play", method="animate",
-             args=[None, dict(frame=dict(duration=120, redraw=True), fromcurrent=True, transition=dict(duration=0))])])])
-    return base.to_html(full_html=True, include_plotlyjs="cdn", auto_play=True)
+             args=[None, dict(frame=dict(duration=dur, redraw=True), fromcurrent=True, transition=dict(duration=0))])])])
+    # continuous loop (re-fire on animation end) + a Loop on/off toggle button.
+    # plotly replaces {plot_id} via str.replace, so JS braces are safe.
+    loop_js = (
+        "var gd=document.getElementById('{plot_id}');var loop=true;"
+        "function step(){if(loop)Plotly.animate(gd,null,{frame:{duration:%d,redraw:true},"
+        "transition:{duration:0},mode:'immediate'});}"
+        "gd.on('plotly_animated',step);"
+        "var b=document.createElement('button');b.textContent='Loop: on';"
+        "b.style.cssText='position:fixed;top:10px;right:10px;z-index:99;padding:4px 10px;"
+        "font:12px sans-serif;border-radius:4px;border:1px solid #888;background:#fff;cursor:pointer;';"
+        "b.onclick=function(){loop=!loop;b.textContent='Loop: '+(loop?'on':'off');if(loop)step();};"
+        "document.body.appendChild(b);"
+    ) % dur
+    return base.to_html(full_html=True, include_plotlyjs="cdn", auto_play=True, post_script=loop_js)
 
 
 def _parse_controls(request: Request):

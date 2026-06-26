@@ -295,7 +295,7 @@
         <button class={primaryBtn} disabled={meshBusy} onclick={() => renderMesh()}>
           {meshBusy ? 'Rendering…' : 'Render mesh'}
         </button>
-        <button class={neutralBtn} disabled={meshBusy} onclick={() => renderMesh(16)}>Animate mesh</button>
+        <button class={neutralBtn} disabled={meshBusy} onclick={() => renderMesh(12)}>Animate mesh</button>
         <div class="text-[11px] text-zinc-500">478-landmark mesh, PLS-driven. Drag to rotate; animation auto-plays.</div>
       {/if}
 
