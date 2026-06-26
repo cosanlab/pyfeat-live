@@ -71,7 +71,7 @@
     if (!ready) return;
     const yr = (gaze.yaw * Math.PI) / 180, pr = (gaze.pitch * Math.PI) / 180;
     // eyeball rotation: iris + pupil translate TOGETHER across the eye opening
-    let sx = -Math.sin(yr) * Math.cos(pr) * gazeMag, sy = -Math.sin(pr) * gazeMag;   // mesh space
+    let sx = Math.sin(yr) * Math.cos(pr) * gazeMag, sy = -Math.sin(pr) * gazeMag;   // mesh space (x: joystick-right -> look right)
     // constrain the iris centre to the eye-opening ELLIPSE shrunk by the iris radius, so the
     // whole disc stays inside (horizontal room is large; vertical is tiny since the eye is short)
     const irisR = 0.46 * eyeHeight;
