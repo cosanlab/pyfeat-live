@@ -62,12 +62,15 @@
   const CORNERS = [[-1, 0], [1, 0], [-1, 1], [1, 1]];
   const EYE_CENTERS = [468, 473];   // iris/pupil drawn as round, perspective-scaled points here
 
-  // gaze (deg) -> pupil shift in local display space (rotates with the face). py-feat's model.
+  // gaze (deg) -> shift the whole eye (iris + pupil together) in local display space
+  // (rotates with the face). Magnitude ~2x iris radius so ±30deg reads clearly.
   $effect(() => {
     if (!ready) return;
     const yr = (gaze.yaw * Math.PI) / 180, pr = (gaze.pitch * Math.PI) / 180;
-    const mag = irisRadius * 0.45;
-    pupilProg.uniforms.uShift.value = [s * -Math.sin(yr) * Math.cos(pr) * mag, -s * Math.sin(pr) * mag, 0];
+    const mag = irisRadius * 2.0;
+    const shift = [s * -Math.sin(yr) * Math.cos(pr) * mag, -s * Math.sin(pr) * mag, 0];
+    irisProg.uniforms.uShift.value = shift;
+    pupilProg.uniforms.uShift.value = shift;
   });
 
   // area-weighted per-vertex normals (display space) for a getter over the N verts
@@ -181,9 +184,9 @@
       res[0] = r.width * dpr; res[1] = r.height * dpr;
       if (linesProg) linesProg.uniforms.uResolution.value = res;
       if (irisProg) {                                   // size eye disks to the iris world radius
-        const k = irisRadius * s * res[1] * 1.6;
+        const k = irisRadius * s * res[1] * 2.6;
         irisProg.uniforms.uSize.value = k;
-        pupilProg.uniforms.uSize.value = k * 0.5;
+        pupilProg.uniforms.uSize.value = k * 0.45;
       }
     }
     const ro = new ResizeObserver(resize); ro.observe(wrap);
