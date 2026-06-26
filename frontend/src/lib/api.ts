@@ -404,18 +404,17 @@ export const analyzeApi = {
 export const generateApi = {
   editFrame: async (
     jpeg: Blob,
-    ctrl: { expression: string; strength: number; mouthMode: string },
+    ctrl: { expression: string; strength: number; mouthMode: string; aus?: Record<string, number> | null },
   ): Promise<Blob> => {
-    const r = await fetch('/api/generate/frame', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'image/jpeg',
-        'X-Expression': ctrl.expression,
-        'X-Strength': String(ctrl.strength),
-        'X-Mouth-Mode': ctrl.mouthMode,
-      },
-      body: jpeg,
-    });
+    const headers: Record<string, string> = {
+      'Content-Type': 'image/jpeg',
+      'X-Expression': ctrl.expression,
+      'X-Strength': String(ctrl.strength),
+      'X-Mouth-Mode': ctrl.mouthMode,
+    };
+    // per-AU dict (overrides the preset server-side); only sent when non-empty
+    if (ctrl.aus && Object.keys(ctrl.aus).length > 0) headers['X-AUs'] = JSON.stringify(ctrl.aus);
+    const r = await fetch('/api/generate/frame', { method: 'POST', headers, body: jpeg });
     if (!r.ok) throw new ApiError(r.status, `generateFrame: ${r.status} ${r.statusText}`);
     return r.blob();
   },

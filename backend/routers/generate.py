@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 
@@ -34,8 +35,10 @@ def _get_editor(app):
     return editor
 
 
-def _edit_sync(editor, img: Image.Image, expression: str, strength: float, mouth_mode: str) -> bytes:
-    out = editor.edit_frame(np.asarray(img), expression=expression, strength=strength, mouth_mode=mouth_mode)
+def _edit_sync(editor, img: Image.Image, expression, strength: float, mouth_mode: str, aus) -> bytes:
+    # aus (per-AU dict) takes precedence over the expression preset when provided
+    out = editor.edit_frame(np.asarray(img), expression=(None if aus else expression),
+                            aus=aus, strength=strength, mouth_mode=mouth_mode)
     buf = io.BytesIO()
     Image.fromarray(out).save(buf, format="JPEG", quality=92)
     return buf.getvalue()
@@ -56,8 +59,16 @@ async def generate_frame(request: Request) -> Response:
     except ValueError:
         strength = 0.6
     mouth_mode = request.headers.get("X-Mouth-Mode", "inpaint_v6")
+    aus = None
+    aus_hdr = request.headers.get("X-AUs")
+    if aus_hdr:
+        try:
+            parsed = json.loads(aus_hdr)
+            aus = {str(k): float(v) for k, v in parsed.items()} or None   # {} -> None (fall back to preset)
+        except (ValueError, AttributeError) as exc:
+            raise HTTPException(400, f"bad X-AUs header: {exc}") from exc
     editor = _get_editor(request.app)
     loop = asyncio.get_running_loop()
     async with request.app.state.generate_lock:
-        jpeg = await loop.run_in_executor(_EXECUTOR, _edit_sync, editor, img, expression, strength, mouth_mode)
+        jpeg = await loop.run_in_executor(_EXECUTOR, _edit_sync, editor, img, expression, strength, mouth_mode, aus)
     return Response(content=jpeg, media_type="image/jpeg")

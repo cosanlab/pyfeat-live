@@ -30,6 +30,21 @@
   let strength = $state(0.6);
   let mouthMode = $state('inpaint_v6');
 
+  // per-AU controls (the 8 AUs the generator/PLS actually lands)
+  let ctrlMode = $state<'preset' | 'aus'>('preset');
+  const AU_LIST: [string, string][] = [
+    ['AU01', 'Inner brow'], ['AU02', 'Outer brow'], ['AU04', 'Brow lower'], ['AU06', 'Cheek raise'],
+    ['AU09', 'Nose wrinkle'], ['AU12', 'Lip corner'], ['AU25', 'Lips part'], ['AU26', 'Jaw drop'],
+  ];
+  let aus = $state<Record<string, number>>(Object.fromEntries(AU_LIST.map(([k]) => [k, 0])));
+  function activeAus(): Record<string, number> | null {
+    if (ctrlMode !== 'aus') return null;
+    const out: Record<string, number> = {};
+    for (const [k] of AU_LIST) if (aus[k]) out[k] = aus[k];
+    return Object.keys(out).length ? out : null;
+  }
+  function resetAus() { for (const [k] of AU_LIST) aus[k] = 0; }
+
   const DET_BUDGET = 512;
 
   function setMode(m: Mode) {
@@ -77,7 +92,7 @@
       if (!blob) { await new Promise((r) => setTimeout(r, 16)); continue; }
       let editedBlob: Blob;
       try {
-        editedBlob = await generateApi.editFrame(blob, { expression, strength, mouthMode });
+        editedBlob = await generateApi.editFrame(blob, { expression, strength, mouthMode, aus: activeAus() });
         apiError = null;
       } catch (e: any) {
         if (signal.aborted) return;
@@ -127,7 +142,7 @@
       c.getContext('2d')!.drawImage(srcBitmap, 0, 0);
       const jpeg: Blob = await new Promise((res, rej) =>
         c.toBlob((b) => (b ? res(b) : rej(new Error('encode failed'))), 'image/jpeg', 0.95));
-      const edited = await generateApi.editFrame(jpeg, { expression, strength, mouthMode });
+      const edited = await generateApi.editFrame(jpeg, { expression, strength, mouthMode, aus: activeAus() });
       if (editedUrl) URL.revokeObjectURL(editedUrl);
       editedUrl = URL.createObjectURL(edited);
     } catch (e: any) {
@@ -226,14 +241,37 @@
       {#if apiError}<div class="text-[11px] text-red-400">{apiError}</div>{/if}
 
       <div class="{sectionLabel} pt-2">Controls</div>
-      <div>
-        <div class={fieldLabel}>Expression</div>
-        <select bind:value={expression} class={selectCls}>
-          <option value="smile">smile</option>
-          <option value="disgust">disgust</option>
-          <option value="surprise">surprise</option>
-        </select>
+      <div class="flex gap-0.5 bg-zinc-950 rounded-md p-0.5">
+        <button class="flex-1 {segBtn} {ctrlMode === 'preset' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
+                onclick={() => (ctrlMode = 'preset')}>Preset</button>
+        <button class="flex-1 {segBtn} {ctrlMode === 'aus' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
+                onclick={() => (ctrlMode = 'aus')}>AUs</button>
       </div>
+      {#if ctrlMode === 'preset'}
+        <div>
+          <div class={fieldLabel}>Expression</div>
+          <select bind:value={expression} class={selectCls}>
+            <option value="smile">smile</option>
+            <option value="disgust">disgust</option>
+            <option value="surprise">surprise</option>
+          </select>
+        </div>
+      {:else}
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class={fieldLabel}>Action units</span>
+            <button class="text-[10px] text-zinc-500 hover:text-zinc-300" onclick={resetAus}>reset</button>
+          </div>
+          <div class="space-y-2">
+            {#each AU_LIST as [au, label]}
+              <div>
+                <div class="flex justify-between text-[10px] text-zinc-400"><span>{au} · {label}</span><span>{aus[au].toFixed(1)}</span></div>
+                <input type="range" min="0" max="3" step="0.5" bind:value={aus[au]} class="w-full accent-green-500" />
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
       <div>
         <div class={fieldLabel}>Strength: {strength.toFixed(2)}</div>
         <input type="range" min="0" max="1" step="0.05" bind:value={strength} class="w-full accent-green-500" />
