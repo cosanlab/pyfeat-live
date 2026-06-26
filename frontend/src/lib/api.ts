@@ -418,6 +418,17 @@ export const generateApi = {
     if (!r.ok) throw new ApiError(r.status, `generateFrame: ${r.status} ${r.statusText}`);
     return r.blob();
   },
+  // geometry-only 478 mesh -> interactive Plotly 3D HTML (for Mesh mode)
+  meshHtml: async (
+    ctrl: { expression?: string; strength: number; aus?: Record<string, number> | null },
+  ): Promise<string> => {
+    const headers: Record<string, string> = { 'X-Strength': String(ctrl.strength) };
+    if (ctrl.expression) headers['X-Expression'] = ctrl.expression;
+    if (ctrl.aus && Object.keys(ctrl.aus).length > 0) headers['X-AUs'] = JSON.stringify(ctrl.aus);
+    const r = await fetch('/api/generate/mesh', { method: 'POST', headers });
+    if (!r.ok) throw new ApiError(r.status, `generateMesh: ${r.status} ${r.statusText}`);
+    return r.text();
+  },
 };
 
 // ---------------- annotations ----------------

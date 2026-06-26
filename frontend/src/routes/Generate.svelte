@@ -3,7 +3,7 @@
   import { onDestroy } from 'svelte';
   import { generateApi } from '../lib/api';
 
-  type Mode = 'live' | 'image';
+  type Mode = 'live' | 'image' | 'mesh';
   let mode = $state<Mode>('live');
 
   // ---- live ----
@@ -45,6 +45,20 @@
   }
   function resetAus() { for (const [k] of AU_LIST) aus[k] = 0; }
 
+  // ---- mesh ----
+  let meshHtml = $state<string | null>(null);
+  let meshBusy = $state(false);
+  async function renderMesh() {
+    meshBusy = true; apiError = null;
+    try {
+      meshHtml = await generateApi.meshHtml({
+        expression: ctrlMode === 'preset' ? expression : undefined,
+        strength, aus: activeAus(),
+      });
+    } catch (e: any) { apiError = e.message; }
+    finally { meshBusy = false; }
+  }
+
   const DET_BUDGET = 512;
 
   function setMode(m: Mode) {
@@ -52,6 +66,7 @@
     if (mode === 'live') stop(); // leaving live → release the camera
     apiError = null;
     mode = m;
+    if (m === 'mesh') renderMesh();   // render on entry with current controls
   }
 
   // ---- live mode ----
@@ -183,6 +198,8 @@
               onclick={() => setMode('live')}>Live</button>
       <button class="{segBtn} {mode === 'image' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
               onclick={() => setMode('image')}>Image</button>
+      <button class="{segBtn} {mode === 'mesh' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
+              onclick={() => setMode('mesh')}>Mesh</button>
       <button class="{segBtn} text-zinc-700 cursor-not-allowed" disabled title="coming soon">Video</button>
     </div>
   </div>
@@ -192,7 +209,7 @@
       {#if mode === 'live'}
         <video bind:this={videoEl} class="hidden" muted playsinline></video>
         <canvas bind:this={displayCanvas} class="max-h-full max-w-full rounded"></canvas>
-      {:else}
+      {:else if mode === 'image'}
         <div
           class="w-full h-full flex items-center justify-center rounded-lg border border-dashed transition {dragOver ? 'border-green-400 bg-green-500/5' : 'border-zinc-800 bg-zinc-900/40'}"
           role="region" aria-label="Drop an image to edit"
@@ -211,6 +228,13 @@
             </div>
           {/if}
         </div>
+      {:else}
+        <!-- mesh mode: interactive Plotly 3D 478-mesh from py-feat -->
+        {#if meshHtml}
+          <iframe title="478 mesh" srcdoc={meshHtml} class="w-full h-full border-0 rounded bg-white"></iframe>
+        {:else}
+          <div class="text-[12.5px] text-zinc-500">{meshBusy ? 'Rendering mesh…' : 'Render the mesh →'}</div>
+        {/if}
       {/if}
     </div>
 
@@ -223,7 +247,7 @@
           <button class="w-full px-3 py-1.5 rounded-md text-[11.5px] font-medium bg-red-600 text-white border border-red-600 hover:bg-red-500" onclick={stop}>Stop</button>
           <div class="text-[11px] text-zinc-500">{fps} fps</div>
         {/if}
-      {:else}
+      {:else if mode === 'image'}
         <label class="{primaryBtn} block cursor-pointer">
           Choose image
           <input type="file" accept="image/*" class="hidden"
@@ -236,6 +260,11 @@
           <a href={editedUrl} download={`${srcName}_${expression}.jpg`} class="{primaryBtn} block">Save rendered output</a>
           <button class={neutralBtn} onclick={revertOriginal}>Revert to original</button>
         {/if}
+      {:else}
+        <button class={primaryBtn} disabled={meshBusy} onclick={renderMesh}>
+          {meshBusy ? 'Rendering…' : 'Render mesh'}
+        </button>
+        <div class="text-[11px] text-zinc-500">478-landmark mesh, PLS-driven. Drag to rotate.</div>
       {/if}
 
       {#if apiError}<div class="text-[11px] text-red-400">{apiError}</div>{/if}
@@ -276,14 +305,16 @@
         <div class={fieldLabel}>Strength: {strength.toFixed(2)}</div>
         <input type="range" min="0" max="1" step="0.05" bind:value={strength} class="w-full accent-green-500" />
       </div>
-      <div>
-        <div class={fieldLabel}>Teeth</div>
-        <select bind:value={mouthMode} class={selectCls}>
-          <option value="inpaint_v6">inpaint_v6</option>
-          <option value="pbr">pbr</option>
-          <option value="proc">proc</option>
-        </select>
-      </div>
+      {#if mode !== 'mesh'}
+        <div>
+          <div class={fieldLabel}>Teeth</div>
+          <select bind:value={mouthMode} class={selectCls}>
+            <option value="inpaint_v6">inpaint_v6</option>
+            <option value="pbr">pbr</option>
+            <option value="proc">proc</option>
+          </select>
+        </div>
+      {/if}
     </aside>
   </div>
 </div>

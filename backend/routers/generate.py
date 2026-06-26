@@ -44,6 +44,43 @@ def _edit_sync(editor, img: Image.Image, expression, strength: float, mouth_mode
     return buf.getvalue()
 
 
+def _mesh_html(editor, aus, expression: str | None, strength: float) -> str:
+    """Geometry-only 478 mesh (PLS from AUs / expression preset) -> interactive Plotly 3D HTML."""
+    from feat.plotting import plot_face_mesh_plotly
+    if not aus and expression and expression in editor._R.EXPRESSIONS:
+        aus = dict(editor._R.EXPRESSIONS[expression])      # expand preset -> AU dict
+    mesh = editor.edit_mesh(aus=aus, strength=strength)
+    fig = plot_face_mesh_plotly(mesh=mesh)
+    return fig.to_html(full_html=True, include_plotlyjs="cdn")
+
+
+def _parse_controls(request: Request):
+    expression = request.headers.get("X-Expression")
+    try:
+        strength = float(request.headers.get("X-Strength", "0.6"))
+    except ValueError:
+        strength = 0.6
+    aus = None
+    aus_hdr = request.headers.get("X-AUs")
+    if aus_hdr:
+        try:
+            parsed = json.loads(aus_hdr)
+            aus = {str(k): float(v) for k, v in parsed.items()} or None
+        except (ValueError, AttributeError) as exc:
+            raise HTTPException(400, f"bad X-AUs header: {exc}") from exc
+    return expression, strength, aus
+
+
+@router.post("/mesh")
+async def generate_mesh(request: Request) -> Response:
+    expression, strength, aus = _parse_controls(request)
+    editor = _get_editor(request.app)
+    loop = asyncio.get_running_loop()
+    async with request.app.state.generate_lock:
+        html = await loop.run_in_executor(_EXECUTOR, _mesh_html, editor, aus, expression, strength)
+    return Response(content=html, media_type="text/html")
+
+
 @router.post("/frame")
 async def generate_frame(request: Request) -> Response:
     body = await request.body()
@@ -53,20 +90,9 @@ async def generate_frame(request: Request) -> Response:
         img = Image.open(io.BytesIO(body)).convert("RGB")
     except Exception as exc:
         raise HTTPException(400, f"could not decode image: {exc}") from exc
-    expression = request.headers.get("X-Expression", "smile")
-    try:
-        strength = float(request.headers.get("X-Strength", "0.6"))
-    except ValueError:
-        strength = 0.6
+    expression, strength, aus = _parse_controls(request)
+    expression = expression or "smile"                       # /frame defaults to the smile preset
     mouth_mode = request.headers.get("X-Mouth-Mode", "inpaint_v6")
-    aus = None
-    aus_hdr = request.headers.get("X-AUs")
-    if aus_hdr:
-        try:
-            parsed = json.loads(aus_hdr)
-            aus = {str(k): float(v) for k, v in parsed.items()} or None   # {} -> None (fall back to preset)
-        except (ValueError, AttributeError) as exc:
-            raise HTTPException(400, f"bad X-AUs header: {exc}") from exc
     editor = _get_editor(request.app)
     loop = asyncio.get_running_loop()
     async with request.app.state.generate_lock:
