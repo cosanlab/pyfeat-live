@@ -18,6 +18,7 @@
   // ---- image ----
   let srcBitmap: ImageBitmap | null = null;
   let srcName = $state('image');
+  let srcUrl = $state<string | null>(null); // object URL of the ORIGINAL (for "revert to original")
   let editedUrl = $state<string | null>(null); // object URL of the edited result (display + download)
   let imageBusy = $state(false);
   let dragOver = $state(false);
@@ -102,9 +103,18 @@
     if (!f) return;
     if (!f.type.startsWith('image/')) { apiError = 'Please choose an image file'; return; }
     srcName = f.name.replace(/\.[^.]+$/, '');
+    if (srcUrl) URL.revokeObjectURL(srcUrl);
+    srcUrl = URL.createObjectURL(f);
     srcBitmap?.close?.();
     srcBitmap = await createImageBitmap(f);
     await renderImage();
+  }
+
+  function revertOriginal() {
+    // drop the rendering, show the original source again (Re-run re-edits)
+    if (editedUrl) URL.revokeObjectURL(editedUrl);
+    editedUrl = null;
+    apiError = null;
   }
 
   async function renderImage() {
@@ -135,6 +145,7 @@
   onDestroy(() => {
     stop();
     if (editedUrl) URL.revokeObjectURL(editedUrl);
+    if (srcUrl) URL.revokeObjectURL(srcUrl);
     srcBitmap?.close?.();
   });
 
@@ -176,6 +187,8 @@
         >
           {#if editedUrl}
             <img src={editedUrl} alt="edited result" class="max-h-full max-w-full rounded" />
+          {:else if srcUrl}
+            <img src={srcUrl} alt="original" class="max-h-full max-w-full rounded" />
           {:else}
             <div class="text-center">
               <div class="text-[12.5px] font-medium text-zinc-300">Drag an image here</div>
@@ -206,6 +219,7 @@
         </button>
         {#if editedUrl}
           <a href={editedUrl} download={`${srcName}_${expression}.jpg`} class="{primaryBtn} block">Save rendered output</a>
+          <button class={neutralBtn} onclick={revertOriginal}>Revert to original</button>
         {/if}
       {/if}
 
