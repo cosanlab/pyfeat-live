@@ -99,3 +99,55 @@ async def generate_frame(request: Request) -> Response:
     async with request.app.state.generate_lock:
         jpeg = await loop.run_in_executor(_EXECUTOR, _edit_sync, editor, img, expression, strength, mouth_mode, aus)
     return Response(content=jpeg, media_type="image/jpeg")
+
+
+def _animate_sync(editor, img, expression, aus, strength, mouth_mode, frames, fps) -> bytes:
+    """Animate a neutral reference: ramp the edit 0 -> strength -> 0 over `frames`, encode mp4 (PyAV)."""
+    import math
+    import av
+    arr = np.asarray(img)
+    H, W = arr.shape[0] - arr.shape[0] % 2, arr.shape[1] - arr.shape[1] % 2   # even dims for yuv420p
+    arr = np.ascontiguousarray(arr[:H, :W])
+    buf = io.BytesIO()
+    container = av.open(buf, mode="w", format="mp4")
+    stream = container.add_stream("h264", rate=fps)
+    stream.width, stream.height, stream.pix_fmt = W, H, "yuv420p"
+    for i in range(frames):
+        t = i / (frames - 1) if frames > 1 else 1.0
+        s = strength * math.sin(math.pi * t)                                  # onset + offset (loops seamlessly)
+        f = editor.edit_frame(arr, expression=(None if aus else expression), aus=aus,
+                              strength=float(s), mouth_mode=mouth_mode)
+        for p in stream.encode(av.VideoFrame.from_ndarray(np.ascontiguousarray(f), format="rgb24")):
+            container.mux(p)
+    for p in stream.encode():
+        container.mux(p)
+    container.close()
+    return buf.getvalue()
+
+
+@router.post("/animate")
+async def generate_animate(request: Request) -> Response:
+    body = await request.body()
+    if not body:
+        raise HTTPException(400, "empty body")
+    try:
+        img = Image.open(io.BytesIO(body)).convert("RGB")
+    except Exception as exc:
+        raise HTTPException(400, f"could not decode image: {exc}") from exc
+    expression, strength, aus = _parse_controls(request)
+    expression = expression or "smile"
+    mouth_mode = request.headers.get("X-Mouth-Mode", "inpaint_v6")
+    try:
+        frames = max(2, min(60, int(request.headers.get("X-Frames", "20"))))
+    except ValueError:
+        frames = 20
+    try:
+        fps = max(1, min(30, int(request.headers.get("X-FPS", "12"))))
+    except ValueError:
+        fps = 12
+    editor = _get_editor(request.app)
+    loop = asyncio.get_running_loop()
+    async with request.app.state.generate_lock:
+        mp4 = await loop.run_in_executor(_EXECUTOR, _animate_sync, editor, img, expression, aus,
+                                         strength, mouth_mode, frames, fps)
+    return Response(content=mp4, media_type="video/mp4")

@@ -429,6 +429,25 @@ export const generateApi = {
     if (!r.ok) throw new ApiError(r.status, `generateMesh: ${r.status} ${r.statusText}`);
     return r.text();
   },
+  // animate a neutral reference image: ramp 0->strength->0 -> mp4
+  animate: async (
+    jpeg: Blob,
+    ctrl: { expression: string; strength: number; mouthMode: string; aus?: Record<string, number> | null },
+    opts: { frames: number; fps: number } = { frames: 20, fps: 12 },
+  ): Promise<Blob> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'image/jpeg',
+      'X-Strength': String(ctrl.strength),
+      'X-Mouth-Mode': ctrl.mouthMode,
+      'X-Frames': String(opts.frames),
+      'X-FPS': String(opts.fps),
+    };
+    if (ctrl.expression) headers['X-Expression'] = ctrl.expression;
+    if (ctrl.aus && Object.keys(ctrl.aus).length > 0) headers['X-AUs'] = JSON.stringify(ctrl.aus);
+    const r = await fetch('/api/generate/animate', { method: 'POST', headers, body: jpeg });
+    if (!r.ok) throw new ApiError(r.status, `generateAnimate: ${r.status} ${r.statusText}`);
+    return r.blob();
+  },
 };
 
 // ---------------- annotations ----------------

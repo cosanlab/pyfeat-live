@@ -22,6 +22,8 @@
   let editedUrl = $state<string | null>(null); // object URL of the edited result (display + download)
   let imageBusy = $state(false);
   let dragOver = $state(false);
+  let animUrl = $state<string | null>(null);   // object URL of the animation mp4
+  let animBusy = $state(false);
 
   let apiError = $state<string | null>(null);
 
@@ -132,6 +134,7 @@
     const f = files?.[0];
     if (!f) return;
     if (!f.type.startsWith('image/')) { apiError = 'Please choose an image file'; return; }
+    clearAnim();
     srcName = f.name.replace(/\.[^.]+$/, '');
     if (srcUrl) URL.revokeObjectURL(srcUrl);
     srcUrl = URL.createObjectURL(f);
@@ -144,6 +147,7 @@
     // drop the rendering, show the original source again (Re-run re-edits)
     if (editedUrl) URL.revokeObjectURL(editedUrl);
     editedUrl = null;
+    clearAnim();
     apiError = null;
   }
 
@@ -167,6 +171,24 @@
     }
   }
 
+  async function animateImage() {
+    if (!srcBitmap) return;
+    animBusy = true; apiError = null;
+    try {
+      const sc = Math.min(1, 720 / Math.max(srcBitmap.width, srcBitmap.height));   // downscale for speed/size
+      const w = Math.max(2, Math.round(srcBitmap.width * sc)), h = Math.max(2, Math.round(srcBitmap.height * sc));
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d')!.drawImage(srcBitmap, 0, 0, w, h);
+      const jpeg: Blob = await new Promise((res, rej) =>
+        c.toBlob((b) => (b ? res(b) : rej(new Error('encode failed'))), 'image/jpeg', 0.92));
+      const mp4 = await generateApi.animate(jpeg, { expression, strength, mouthMode, aus: activeAus() });
+      if (animUrl) URL.revokeObjectURL(animUrl);
+      animUrl = URL.createObjectURL(mp4);
+    } catch (e: any) { apiError = e.message; }
+    finally { animBusy = false; }
+  }
+  function clearAnim() { if (animUrl) URL.revokeObjectURL(animUrl); animUrl = null; }
+
   function onDrop(e: DragEvent) {
     e.preventDefault(); dragOver = false;
     loadFile(e.dataTransfer?.files ?? null);
@@ -176,6 +198,7 @@
     stop();
     if (editedUrl) URL.revokeObjectURL(editedUrl);
     if (srcUrl) URL.revokeObjectURL(srcUrl);
+    if (animUrl) URL.revokeObjectURL(animUrl);
     srcBitmap?.close?.();
   });
 
@@ -217,7 +240,10 @@
           ondragleave={() => (dragOver = false)}
           ondrop={onDrop}
         >
-          {#if editedUrl}
+          {#if animUrl}
+            <!-- svelte-ignore a11y_media_has_caption -->
+            <video src={animUrl} autoplay loop controls class="max-h-full max-w-full rounded"></video>
+          {:else if editedUrl}
             <img src={editedUrl} alt="edited result" class="max-h-full max-w-full rounded" />
           {:else if srcUrl}
             <img src={srcUrl} alt="original" class="max-h-full max-w-full rounded" />
@@ -256,7 +282,13 @@
         <button class={neutralBtn} disabled={!srcBitmap || imageBusy} onclick={renderImage}>
           {imageBusy ? 'Rendering…' : 'Re-run'}
         </button>
-        {#if editedUrl}
+        <button class={neutralBtn} disabled={!srcBitmap || animBusy} onclick={animateImage}>
+          {animBusy ? 'Animating…' : 'Animate'}
+        </button>
+        {#if animUrl}
+          <a href={animUrl} download={`${srcName}_${expression}.mp4`} class="{primaryBtn} block">Save animation</a>
+          <button class={neutralBtn} onclick={clearAnim}>Clear animation</button>
+        {:else if editedUrl}
           <a href={editedUrl} download={`${srcName}_${expression}.jpg`} class="{primaryBtn} block">Save rendered output</a>
           <button class={neutralBtn} onclick={revertOriginal}>Revert to original</button>
         {/if}
