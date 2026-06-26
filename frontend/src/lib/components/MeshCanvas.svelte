@@ -67,10 +67,10 @@
   $effect(() => {
     if (!ready) return;
     const yr = (gaze.yaw * Math.PI) / 180, pr = (gaze.pitch * Math.PI) / 180;
-    const mag = irisRadius * 2.0;
-    const shift = [s * -Math.sin(yr) * Math.cos(pr) * mag, -s * Math.sin(pr) * mag, 0];
-    irisProg.uniforms.uShift.value = shift;
-    pupilProg.uniforms.uShift.value = shift;
+    const mag = irisRadius * 1.6;
+    const ix = s * -Math.sin(yr) * Math.cos(pr) * mag, iy = -s * Math.sin(pr) * mag;
+    irisProg.uniforms.uShift.value = [ix, iy, 0];
+    pupilProg.uniforms.uShift.value = [ix * 1.35, iy * 1.35, 0];   // pupil moves a bit more (within the iris)
   });
 
   // area-weighted per-vertex normals (display space) for a getter over the N verts
@@ -290,7 +290,8 @@
       void main(){ gl_Position = projectionMatrix*modelViewMatrix*vec4(position + aDelta*uPhase + uShift, 1.0);
         gl_PointSize = clamp(uSize / gl_Position.w, 1.0, 400.0); }`;
     const diskFrag = `precision highp float; uniform vec3 uColor;
-      void main(){ vec2 c = gl_PointCoord - 0.5; if (dot(c,c) > 0.25) discard; gl_FragColor = vec4(uColor, 1.0); }`;
+      void main(){ vec2 c = gl_PointCoord - 0.5; c.y /= 0.62;   // ellipse: full width, ~62% height (almond eye)
+        if (dot(c,c) > 0.25) discard; gl_FragColor = vec4(uColor, 1.0); }`;
     const eyeGeo = () => new Geometry(gl, { position: { size: 3, data: pPos }, aDelta: { size: 3, data: pDelta }, index: { data: new Uint16Array(EYE_CENTERS) } });
 
     irisProg = new Program(gl, {
