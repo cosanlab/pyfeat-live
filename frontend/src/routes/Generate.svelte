@@ -27,6 +27,12 @@
   let editedUrl = $state<string | null>(null); // object URL of the edited result (display + download)
   let imageBusy = $state(false);
   let dragOver = $state(false);
+  // ---- per-face (selective multi-person) editing — image mode ----
+  type FaceEdit = { ctrlMode: 'preset' | 'aus' | 'blendshapes'; expression: string;
+                    aus: Record<string, number>; bs: Record<string, number>; strength: number; mouthMode: string };
+  let faceBoxes = $state<number[][]>([]);   // detected bboxes [x1,y1,x2,y2] in source-natural coords
+  let faceEdits: FaceEdit[] = [];           // parallel per-face edit state (plain; controls mirror the selected one)
+  let selFace = $state(0);                  // selected face index
   let animUrl = $state<string | null>(null);   // object URL of the animation mp4
   let animBusy = $state(false);
 
@@ -182,6 +188,54 @@
   }
 
   // ---- image mode ----
+  // snapshot the live controls into a per-face edit, and load one back into the controls
+  function snapshotControls(): FaceEdit {
+    return { ctrlMode, expression, aus: { ...aus }, bs: { ...bs }, strength, mouthMode };
+  }
+  function loadFaceEdit(fe: FaceEdit) {
+    ctrlMode = fe.ctrlMode; expression = fe.expression; strength = fe.strength; mouthMode = fe.mouthMode;
+    for (const [k] of AU_LIST) aus[k] = fe.aus[k] ?? 0;
+    for (const n of BS_ALL) bs[n] = fe.bs[n] ?? 0;
+  }
+  function selectFace(i: number) {
+    if (faceEdits[selFace]) faceEdits[selFace] = snapshotControls();   // save the face we're leaving
+    selFace = i;
+    if (faceEdits[i]) loadFaceEdit(faceEdits[i]);                      // bring its edit into the controls
+  }
+  function copyEditToAll() {
+    const cur = snapshotControls();
+    faceEdits = faceBoxes.map(() => ({ ...cur, aus: { ...cur.aus }, bs: { ...cur.bs } }));
+    renderImage();
+  }
+  function removeFace(i: number) {                                  // drop a face (e.g. a false positive) from the picker
+    faceBoxes = faceBoxes.filter((_, j) => j !== i);
+    faceEdits = faceEdits.filter((_, j) => j !== i);
+    if (selFace >= i) selFace = Math.max(0, selFace - 1);
+    if (faceBoxes.length && faceEdits[selFace]) loadFaceEdit(faceEdits[selFace]);
+    renderImage();                                                 // removed face renders unedited (original pixels)
+  }
+  // a per-face edit -> the wire payload (only the active control kind is sent)
+  function faceEditPayload(fe: FaceEdit, bbox: number[]) {
+    const sparse = (src: Record<string, number>, keys: string[]) => {
+      const o: Record<string, number> = {};
+      for (const k of keys) if (src[k]) o[k] = src[k];
+      return Object.keys(o).length ? o : null;
+    };
+    return {
+      bbox,
+      expression: fe.ctrlMode === 'preset' ? fe.expression : undefined,
+      aus: fe.ctrlMode === 'aus' ? sparse(fe.aus, AU_LIST.map(([k]) => k)) : null,
+      blendshapes: fe.ctrlMode === 'blendshapes' ? sparse(fe.bs, BS_ALL) : null,
+      strength: fe.strength, mouth_mode: fe.mouthMode,
+    };
+  }
+  function srcJpeg(): Promise<Blob> {                                 // full-res source as a jpeg (quality matters for a still)
+    const c = document.createElement('canvas');
+    c.width = srcBitmap!.width; c.height = srcBitmap!.height;
+    c.getContext('2d')!.drawImage(srcBitmap!, 0, 0);
+    return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('encode failed'))), 'image/jpeg', 0.95));
+  }
+
   async function loadFile(files: FileList | null) {
     const f = files?.[0];
     if (!f) return;
@@ -192,6 +246,13 @@
     srcUrl = URL.createObjectURL(f);
     srcBitmap?.close?.();
     srcBitmap = await createImageBitmap(f);
+    try {                                          // detect faces for the per-face picker; each starts from current controls
+      const det = await generateApi.detectFaces(await srcJpeg());
+      faceBoxes = det.map((d) => d.bbox);
+      const base = snapshotControls();
+      faceEdits = faceBoxes.map(() => ({ ...base, aus: { ...base.aus }, bs: { ...base.bs } }));
+      selFace = 0;
+    } catch { faceBoxes = []; faceEdits = []; }
     await renderImage();
   }
 
@@ -207,13 +268,14 @@
     if (!srcBitmap) return;
     imageBusy = true; apiError = null;
     try {
-      // full-resolution still (no downscale — quality matters for a saved image)
-      const c = document.createElement('canvas');
-      c.width = srcBitmap.width; c.height = srcBitmap.height;
-      c.getContext('2d')!.drawImage(srcBitmap, 0, 0);
-      const jpeg: Blob = await new Promise((res, rej) =>
-        c.toBlob((b) => (b ? res(b) : rej(new Error('encode failed'))), 'image/jpeg', 0.95));
-      const edited = await generateApi.editFrame(jpeg, { expression, strength, mouthMode, aus: activeAus(), blendshapes: activeBlendshapes() });
+      const jpeg = await srcJpeg();
+      let edited: Blob;
+      if (faceBoxes.length) {                      // selective per-face edit (each face its own params)
+        if (faceEdits[selFace]) faceEdits[selFace] = snapshotControls();
+        edited = await generateApi.editFrameMulti(jpeg, faceBoxes.map((b, i) => faceEditPayload(faceEdits[i], b)));
+      } else {                                     // no faces detected -> whole-frame edit
+        edited = await generateApi.editFrame(jpeg, { expression, strength, mouthMode, aus: activeAus(), blendshapes: activeBlendshapes() });
+      }
       if (editedUrl) URL.revokeObjectURL(editedUrl);
       editedUrl = URL.createObjectURL(edited);
     } catch (e: any) {
@@ -257,7 +319,12 @@
   async function autoUpdate() {
     if (mode === 'image') {
       if (!srcBitmap) return;
-      const sig = 'img|' + expression + '|' + strength + '|' + mouthMode + '|' + JSON.stringify(activeAus()) + '|' + JSON.stringify(activeBlendshapes());
+      // persist the active controls into the selected face, then dedupe on the WHOLE per-face set
+      // (so editing re-renders, but merely SWITCHING the selected face does not).
+      if (faceBoxes.length && faceEdits[selFace]) faceEdits[selFace] = snapshotControls();
+      const sig = 'img|' + (faceBoxes.length
+        ? JSON.stringify(faceEdits)
+        : expression + '|' + strength + '|' + mouthMode + '|' + JSON.stringify(activeAus()) + '|' + JSON.stringify(activeBlendshapes()));
       if (sig === lastSig) return;
       lastSig = sig;
       clearAnim();                       // tweaking controls returns to the live still
@@ -322,10 +389,23 @@
           {#if animUrl}
             <!-- svelte-ignore a11y_media_has_caption -->
             <video src={animUrl} autoplay loop controls class="max-h-full max-w-full rounded"></video>
-          {:else if editedUrl}
-            <img src={editedUrl} alt="edited result" class="max-h-full max-w-full rounded" />
-          {:else if srcUrl}
-            <img src={srcUrl} alt="original" class="max-h-full max-w-full rounded" />
+          {:else if editedUrl || srcUrl}
+            <div class="relative inline-block max-h-full max-w-full">
+              <img src={editedUrl ?? srcUrl} alt={editedUrl ? 'edited result' : 'original'} class="block max-h-full max-w-full rounded" />
+              {#if faceBoxes.length > 1 && srcBitmap}
+                {#each faceBoxes as b, i}
+                  <div role="button" tabindex="0" title={`Face ${i + 1}`}
+                    class="absolute rounded-sm border-2 cursor-pointer {i === selFace ? 'border-green-400' : 'border-white/50 hover:border-white'}"
+                    style="left:{(b[0] / srcBitmap.width) * 100}%; top:{(b[1] / srcBitmap.height) * 100}%; width:{((b[2] - b[0]) / srcBitmap.width) * 100}%; height:{((b[3] - b[1]) / srcBitmap.height) * 100}%"
+                    onclick={() => selectFace(i)} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectFace(i)}>
+                    <span class="absolute -top-2 -left-2 w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold {i === selFace ? 'bg-green-400 text-green-950' : 'bg-zinc-800 text-zinc-100'}">{i + 1}</span>
+                    <button type="button" title="Remove this face (false detection)"
+                      class="absolute -top-2 -right-2 w-4 h-4 flex items-center justify-center rounded-full bg-red-600 text-white text-[11px] leading-none hover:bg-red-500"
+                      onclick={(e) => { e.stopPropagation(); removeFace(i); }}>×</button>
+                  </div>
+                {/each}
+              {/if}
+            </div>
           {:else}
             <div class="text-center">
               <div class="text-[12.5px] font-medium text-zinc-300">Drag an image here</div>
@@ -361,6 +441,24 @@
         <button class={neutralBtn} disabled={!srcBitmap || animBusy} onclick={animateImage}>
           {animBusy ? 'Animating…' : 'Animate'}
         </button>
+        {#if faceBoxes.length > 1}
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <span class={sectionLabel}>Faces — editing #{selFace + 1}</span>
+              <div class="flex items-center gap-2">
+                <button class="text-[10px] text-zinc-500 hover:text-zinc-300" onclick={copyEditToAll}>copy to all</button>
+                <button class="text-[10px] text-red-400/80 hover:text-red-400" onclick={() => removeFace(selFace)}>remove #{selFace + 1}</button>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-1">
+              {#each faceBoxes as _, i}
+                <button class="w-7 h-7 rounded text-[11px] font-medium border {i === selFace ? 'bg-green-500 text-green-950 border-green-500' : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:bg-zinc-800'}"
+                        onclick={() => selectFace(i)}>{i + 1}</button>
+              {/each}
+            </div>
+            <div class="text-[10px] text-zinc-500 mt-1 leading-snug">Each face keeps its own edit — click a box on the image or a number to edit that person.</div>
+          </div>
+        {/if}
         {#if animUrl}
           <a href={animUrl} download={`${srcName}_${expression}.mp4`} class="{primaryBtn} block">Save animation</a>
           <button class={neutralBtn} onclick={clearAnim}>Clear animation</button>

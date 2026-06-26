@@ -421,6 +421,24 @@ export const generateApi = {
     if (!r.ok) throw new ApiError(r.status, `generateFrame: ${r.status} ${r.statusText}`);
     return r.blob();
   },
+  // detect every face (bboxes, left-to-right) so the UI can offer a per-face picker
+  detectFaces: async (jpeg: Blob): Promise<{ bbox: number[]; score?: number }[]> => {
+    const r = await fetch('/api/generate/detect', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: jpeg });
+    if (!r.ok) throw new ApiError(r.status, `detectFaces: ${r.status} ${r.statusText}`);
+    return (await r.json()).faces;
+  },
+  // edit each face with its OWN params (selective multi-person edit)
+  editFrameMulti: async (
+    jpeg: Blob,
+    faceEdits: Array<{ bbox: number[]; expression?: string; aus?: Record<string, number> | null;
+                       blendshapes?: Record<string, number> | null; strength: number; mouth_mode: string }>,
+  ): Promise<Blob> => {
+    const r = await fetch('/api/generate/frame-multi', {
+      method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'X-Face-Edits': JSON.stringify(faceEdits) }, body: jpeg,
+    });
+    if (!r.ok) throw new ApiError(r.status, `editFrameMulti: ${r.status} ${r.statusText}`);
+    return r.blob();
+  },
   // 478x3 mesh vertices for the WebGL viewer (neutral base + live per-control updates)
   meshVertices: async (
     ctrl: { expression?: string; strength: number; aus?: Record<string, number> | null;

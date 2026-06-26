@@ -152,6 +152,57 @@ async def generate_frame(request: Request) -> Response:
     return Response(content=jpeg, media_type="image/jpeg")
 
 
+def _read_image(body: bytes) -> Image.Image:
+    try:
+        return Image.open(io.BytesIO(body)).convert("RGB")
+    except Exception as exc:
+        raise HTTPException(400, f"could not decode image: {exc}") from exc
+
+
+@router.post("/detect")
+async def generate_detect(request: Request) -> dict:
+    """Detect every face (bboxes, left-to-right) so the UI can offer a per-face picker. No editing."""
+    body = await request.body()
+    if not body:
+        raise HTTPException(400, "empty body")
+    img = _read_image(body)
+    try:
+        min_score = float(request.headers.get("X-Min-Score", "0.9"))
+    except ValueError:
+        min_score = 0.9
+    editor = _get_editor(request.app)
+    loop = asyncio.get_running_loop()
+    async with request.app.state.generate_lock:
+        boxes = await loop.run_in_executor(_EXECUTOR, lambda: editor.detect_faces(np.asarray(img), min_score=min_score))
+    return {"faces": boxes}
+
+
+def _edit_faces_sync(editor, img: Image.Image, face_edits) -> bytes:
+    out = editor.edit_frame_faces(np.asarray(img), face_edits)
+    return _encode_jpeg(out)
+
+
+@router.post("/frame-multi")
+async def generate_frame_multi(request: Request) -> Response:
+    """Edit each face with its OWN params (selective multi-person edit). The image is the body;
+    X-Face-Edits is a JSON list of {bbox, expression, aus, blendshapes, strength, mouth_mode}."""
+    body = await request.body()
+    if not body:
+        raise HTTPException(400, "empty body")
+    img = _read_image(body)
+    hdr = request.headers.get("X-Face-Edits")
+    if not hdr:
+        raise HTTPException(400, "missing X-Face-Edits header")
+    try:
+        face_edits = json.loads(hdr)
+    except ValueError as exc:
+        raise HTTPException(400, f"bad X-Face-Edits header: {exc}") from exc
+    loop = asyncio.get_running_loop()
+    async with request.app.state.generate_lock:
+        jpeg = await loop.run_in_executor(_EXECUTOR, _edit_faces_sync, _get_editor(request.app), img, face_edits)
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
 def _animate_sync(editor, img, expression, aus, strength, mouth_mode, frames, fps, blendshapes=None) -> bytes:
     """Animate a neutral reference: ramp the edit 0 -> strength -> 0 over `frames`, encode mp4 (PyAV)."""
     import math
