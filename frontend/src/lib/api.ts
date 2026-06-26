@@ -418,27 +418,22 @@ export const generateApi = {
     if (!r.ok) throw new ApiError(r.status, `generateFrame: ${r.status} ${r.statusText}`);
     return r.blob();
   },
-  // geometry-only 478 mesh -> interactive Plotly 3D HTML (for Mesh mode)
-  meshHtml: async (
+  // 478x3 mesh vertices for the WebGL viewer (neutral base + live per-control updates)
+  meshVertices: async (
     ctrl: { expression?: string; strength: number; aus?: Record<string, number> | null },
-  ): Promise<string> => {
+  ): Promise<number[][]> => {
     const headers: Record<string, string> = { 'X-Strength': String(ctrl.strength) };
     if (ctrl.expression) headers['X-Expression'] = ctrl.expression;
     if (ctrl.aus && Object.keys(ctrl.aus).length > 0) headers['X-AUs'] = JSON.stringify(ctrl.aus);
-    const r = await fetch('/api/generate/mesh', { method: 'POST', headers });
-    if (!r.ok) throw new ApiError(r.status, `generateMesh: ${r.status} ${r.statusText}`);
-    return r.text();
+    const r = await fetch('/api/generate/mesh-vertices', { method: 'POST', headers });
+    if (!r.ok) throw new ApiError(r.status, `meshVertices: ${r.status} ${r.statusText}`);
+    return (await r.json()).vertices;
   },
-  // just the mesh trace coords (for live slider updates, postMessaged into the mesh iframe)
-  meshData: async (
-    ctrl: { expression?: string; strength: number; aus?: Record<string, number> | null },
-  ): Promise<{ traces: { x: (number | null)[]; y: (number | null)[]; z: (number | null)[] }[] }> => {
-    const headers: Record<string, string> = { 'X-Strength': String(ctrl.strength) };
-    if (ctrl.expression) headers['X-Expression'] = ctrl.expression;
-    if (ctrl.aus && Object.keys(ctrl.aus).length > 0) headers['X-AUs'] = JSON.stringify(ctrl.aus);
-    const r = await fetch('/api/generate/mesh-data', { method: 'POST', headers });
-    if (!r.ok) throw new ApiError(r.status, `meshData: ${r.status} ${r.statusText}`);
-    return r.json();
+  // mesh tessellation edge pairs (constant; fetched once for the wireframe index buffer)
+  meshEdges: async (): Promise<number[][]> => {
+    const r = await fetch('/api/system/overlay-edges');
+    if (!r.ok) throw new ApiError(r.status, `meshEdges: ${r.status} ${r.statusText}`);
+    return (await r.json()).mp_tess;
   },
   // animate a neutral reference image: ramp 0->strength->0 -> mp4
   animate: async (

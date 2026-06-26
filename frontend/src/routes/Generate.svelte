@@ -1,7 +1,8 @@
 <!-- frontend/src/routes/Generate.svelte -->
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy } from 'svelte';
   import { generateApi } from '../lib/api';
+  import MeshCanvas from '../lib/components/MeshCanvas.svelte';
 
   type Mode = 'live' | 'image' | 'mesh';
   let mode = $state<Mode>('live');
@@ -47,19 +48,21 @@
   }
   function resetAus() { for (const [k] of AU_LIST) aus[k] = 0; }
 
-  // ---- mesh ----
-  let meshHtml = $state<string | null>(null);
+  // ---- mesh (WebGL viewer) ----
+  let meshNeutral = $state<number[][] | null>(null);   // rig-neutral verts (loop start; constant)
+  let meshTarget = $state<number[][] | null>(null);    // current expression verts (updates live)
+  let meshEdges = $state<number[][] | null>(null);     // tessellation index pairs (constant)
   let meshBusy = $state(false);
-  let meshFrame: HTMLIFrameElement;        // iframe ref (for live postMessage updates)
-  let meshReady = $state(false);           // true once the live static mesh announces 'meshready'
   function meshCtrl() {
     return { expression: ctrlMode === 'preset' ? expression : undefined, strength, aus: activeAus() };
   }
-  async function renderMesh() {
-    // render the looping mesh iframe ONCE (on mesh entry) with the current controls as the target
-    meshBusy = true; apiError = null; meshReady = false;
+  async function loadMesh() {
+    meshBusy = true; apiError = null;
     try {
-      meshHtml = await generateApi.meshHtml(meshCtrl());
+      if (!meshEdges) meshEdges = await generateApi.meshEdges();
+      if (!meshNeutral) meshNeutral = await generateApi.meshVertices({ strength: 0 });   // neutral base
+      meshTarget = await generateApi.meshVertices(meshCtrl());                            // current target
+      lastSig = 'mesh|' + JSON.stringify(meshCtrl());   // seed dedupe so the entry effect won't re-fetch
     } catch (e: any) { apiError = e.message; }
     finally { meshBusy = false; }
   }
@@ -71,7 +74,7 @@
     if (mode === 'live') stop(); // leaving live → release the camera
     apiError = null;
     mode = m;
-    if (m === 'mesh') renderMesh();   // render the looping mesh iframe once on entry
+    if (m === 'mesh') loadMesh();      // load edges/neutral/target for the WebGL viewer
   }
 
   // ---- live mode ----
@@ -196,13 +199,6 @@
     loadFile(e.dataTransfer?.files ?? null);
   }
 
-  // the live static mesh iframe posts {type:'meshready'} once Plotly is up
-  onMount(() => {
-    const onMsg = (e: MessageEvent) => { if (e.data?.type === 'meshready') meshReady = true; };
-    window.addEventListener('message', onMsg);
-    return () => window.removeEventListener('message', onMsg);
-  });
-
   // Auto-update: sliders drive the output live (no Render/Re-run button). Debounced so a drag
   // fires once on settle; a signature guard skips redundant work if nothing actually changed.
   let autoTimer: ReturnType<typeof setTimeout>;
@@ -221,13 +217,12 @@
       clearAnim();                       // tweaking controls returns to the live still
       await renderImage();
     } else if (mode === 'mesh') {
-      if (!meshReady) return;            // iframe not up yet — the entry render already shows current controls
+      if (!meshNeutral) return;          // not loaded yet — loadMesh() on entry handles the initial target
       const sig = 'mesh|' + JSON.stringify(meshCtrl());
       if (sig === lastSig) return;
       lastSig = sig;
-      try {                              // morph the looping mesh's target live (no reload)
-        const { traces } = await generateApi.meshData(meshCtrl());
-        meshFrame?.contentWindow?.postMessage({ type: 'target', traces }, '*');
+      try {                              // morph the mesh's target live (the viewer interpolates to it)
+        meshTarget = await generateApi.meshVertices(meshCtrl());
       } catch (e: any) { apiError = e.message; }
     }
   }
@@ -293,11 +288,11 @@
           {/if}
         </div>
       {:else}
-        <!-- mesh mode: interactive Plotly 3D 478-mesh from py-feat -->
-        {#if meshHtml}
-          <iframe bind:this={meshFrame} title="478 mesh" srcdoc={meshHtml} class="w-full h-full border-0 rounded bg-white"></iframe>
+        <!-- mesh mode: WebGL 478-mesh viewer (OGL) -->
+        {#if meshNeutral && meshTarget && meshEdges}
+          <MeshCanvas neutral={meshNeutral} target={meshTarget} edges={meshEdges} />
         {:else}
-          <div class="text-[12.5px] text-zinc-500">{meshBusy ? 'Rendering mesh…' : 'Render the mesh →'}</div>
+          <div class="text-[12.5px] text-zinc-500">{meshBusy ? 'Loading mesh…' : ''}</div>
         {/if}
       {/if}
     </div>
@@ -328,9 +323,9 @@
           <button class={neutralBtn} onclick={revertOriginal}>Revert to original</button>
         {/if}
       {:else}
-        {#if meshBusy}<div class="text-[11px] text-zinc-500">Rendering mesh…</div>{/if}
+        {#if meshBusy}<div class="text-[11px] text-zinc-500">Loading mesh…</div>{/if}
         <div class="text-[11px] text-zinc-500 leading-relaxed">
-          Mesh loops neutral ↔ expression and morphs live as you adjust. Use <b>Pause</b> / <b>Loop</b> in the view; drag to rotate.
+          WebGL mesh — loops neutral ↔ expression and morphs live as you adjust. <b>Pause</b> / <b>Loop</b> in the view; drag to rotate.
         </div>
       {/if}
 

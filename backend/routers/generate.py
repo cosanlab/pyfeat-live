@@ -44,57 +44,12 @@ def _edit_sync(editor, img: Image.Image, expression, strength: float, mouth_mode
     return buf.getvalue()
 
 
-def _mesh_figure(editor, aus, expression: str | None, strength: float):
-    """Plotly 3D 478-mesh figure for a control state (PLS from AUs / preset; geometry-only)."""
-    from feat.plotting import plot_face_mesh_plotly
+def _mesh_vertices(editor, aus, expression: str | None, strength: float):
+    """478x3 mesh vertices (geometry-only) for a control state — a tiny payload for the WebGL
+    viewer (the frontend owns rendering: orientation, centering, wireframe, morph)."""
     if not aus and expression and expression in editor._R.EXPRESSIONS:
         aus = dict(editor._R.EXPRESSIONS[expression])      # expand preset -> AU dict
-    mesh = editor.edit_mesh(aus=aus, strength=strength).copy()
-    mesh[:, 1] = -mesh[:, 1]                                # mesh is y-down (MediaPipe); Plotly is z-up -> flip
-    return plot_face_mesh_plotly(mesh=mesh)
-
-
-def _trace_coords(fig):
-    """Per-trace {x,y,z} lists (JSON-safe) for live mesh updates via Plotly.animate."""
-    def conv(a):
-        return [None if v is None else float(v) for v in (a if a is not None else [])]
-    return [{"x": conv(t.x), "y": conv(t.y), "z": conv(t.z)} for t in fig.data]
-
-
-# Live (static) mesh: morph to incoming vertex sets via Plotly.animate (no reload), and
-# announce readiness to the parent. plotly str.replace's {plot_id}, so JS braces are safe.
-def _mesh_html(editor, aus, expression: str | None, strength: float) -> str:
-    """478 mesh as an interactive Plotly 3D scene that LOOPS neutral<->expression and accepts
-    live 'target' updates (postMessage) so sliders morph it WHILE it plays. Pause holds a static
-    pose (still live-adjustable); Loop toggles continuous play; drag to rotate. Rendered once."""
-    import json as _json
-    neutral = _trace_coords(_mesh_figure(editor, None, None, 0.0))            # loop start
-    target = _trace_coords(_mesh_figure(editor, aus, expression, strength))   # loop peak / current target
-    base = _mesh_figure(editor, None, None, 0.0)                              # initial render = neutral
-    # The iframe owns the animation: interpolate NEU->TGT on a timer, re-fire forever when looping,
-    # and swap TGT on incoming 'target' messages. plotly str.replace's {plot_id}; JS braces are safe.
-    js = (
-        "var gd=document.getElementById('{plot_id}');"
-        "var NEU=" + _json.dumps(neutral) + ";var TGT=" + _json.dumps(target) + ";"
-        "var playing=true,loop=true,u=0,dir=1;"
-        "function blend(uu){var e=(1-Math.cos(Math.PI*uu))/2;return TGT.map(function(t,i){var n=NEU[i];"
-        "return{x:t.x.map(function(v,j){return v===null?null:n.x[j]+(v-n.x[j])*e;}),"
-        "y:t.y.map(function(v,j){return v===null?null:n.y[j]+(v-n.y[j])*e;}),"
-        "z:t.z.map(function(v,j){return v===null?null:n.z[j]+(v-n.z[j])*e;})};});}"
-        "function draw(){Plotly.animate(gd,{data:blend(u)},{transition:{duration:0},frame:{duration:0,redraw:true},mode:'immediate'});}"
-        "function tick(){if(playing){u+=dir*0.07;if(u>=1){u=1;if(loop)dir=-1;else playing=false;}"
-        "else if(u<=0){u=0;dir=1;}draw();}setTimeout(tick,60);}"
-        "window.addEventListener('message',function(ev){if(ev.data&&ev.data.type==='target'){TGT=ev.data.traces;if(!playing)draw();}});"
-        "if(window.parent)window.parent.postMessage({type:'meshready'},'*');"
-        "var bar=document.createElement('div');bar.style.cssText='position:fixed;left:10px;bottom:10px;z-index:99;display:flex;gap:6px;';"
-        "var bs='padding:4px 10px;font:12px sans-serif;border-radius:4px;border:1px solid #888;background:#fff;cursor:pointer;';"
-        "var pb=document.createElement('button');pb.textContent='⏸ Pause';pb.style.cssText=bs;"
-        "pb.onclick=function(){playing=!playing;pb.textContent=playing?'⏸ Pause':'▶ Play';};"
-        "var lb=document.createElement('button');lb.textContent='Loop: on';lb.style.cssText=bs;"
-        "lb.onclick=function(){loop=!loop;lb.textContent='Loop: '+(loop?'on':'off');if(loop){playing=true;pb.textContent='⏸ Pause';}};"
-        "bar.appendChild(pb);bar.appendChild(lb);document.body.appendChild(bar);tick();"
-    )
-    return base.to_html(full_html=True, include_plotlyjs="cdn", post_script=js)
+    return editor.edit_mesh(aus=aus, strength=strength).astype(float).tolist()
 
 
 def _parse_controls(request: Request):
@@ -114,26 +69,16 @@ def _parse_controls(request: Request):
     return expression, strength, aus
 
 
-@router.post("/mesh")
-async def generate_mesh(request: Request) -> Response:
+@router.post("/mesh-vertices")
+async def generate_mesh_vertices(request: Request) -> dict:
+    """478x3 mesh vertices for the WebGL viewer (tiny ~6 KB payload). Called for the neutral
+    base once and for the current control state on each slider change."""
     expression, strength, aus = _parse_controls(request)
     editor = _get_editor(request.app)
     loop = asyncio.get_running_loop()
     async with request.app.state.generate_lock:
-        html = await loop.run_in_executor(_EXECUTOR, _mesh_html, editor, aus, expression, strength)
-    return Response(content=html, media_type="text/html")
-
-
-@router.post("/mesh-data")
-async def generate_mesh_data(request: Request) -> dict:
-    """Just the mesh trace coords (JSON) for live slider updates — postMessaged into the mesh iframe."""
-    expression, strength, aus = _parse_controls(request)
-    editor = _get_editor(request.app)
-    loop = asyncio.get_running_loop()
-    async with request.app.state.generate_lock:
-        traces = await loop.run_in_executor(
-            _EXECUTOR, lambda: _trace_coords(_mesh_figure(editor, aus, expression, strength)))
-    return {"traces": traces}
+        verts = await loop.run_in_executor(_EXECUTOR, _mesh_vertices, editor, aus, expression, strength)
+    return {"vertices": verts}
 
 
 @router.post("/frame")
