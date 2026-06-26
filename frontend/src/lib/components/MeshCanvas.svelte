@@ -63,17 +63,24 @@
   // eye-opening contour landmarks (MediaPipe), for eye centre + height + eyeball radius
   const LEFT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 246, 161, 160, 159, 158, 157, 173];
   const RIGHT_EYE = [263, 249, 390, 373, 374, 380, 381, 382, 362, 466, 388, 387, 386, 385, 384, 398];
-  let eyeHeight = 0.02, gazeMag = 0.025;   // mesh space; computed from neutral on mount
+  let eyeHeight = 0.02, eyeWidth = 0.04, gazeMag = 0.025;   // mesh space; computed from neutral on mount
 
   // gaze (deg) -> shift the whole eye (iris + pupil together) in local display space
   // (rotates with the face). Magnitude ~2x iris radius so ±30deg reads clearly.
   $effect(() => {
     if (!ready) return;
     const yr = (gaze.yaw * Math.PI) / 180, pr = (gaze.pitch * Math.PI) / 180;
-    // eyeball rotation: iris + pupil translate TOGETHER by ~R*sin(angle) across the eye opening
-    const ix = s * -Math.sin(yr) * Math.cos(pr) * gazeMag, iy = -s * Math.sin(pr) * gazeMag;
-    irisProg.uniforms.uShift.value = [ix, iy, 0];
-    pupilProg.uniforms.uShift.value = [ix, iy, 0];
+    // eyeball rotation: iris + pupil translate TOGETHER across the eye opening
+    let sx = -Math.sin(yr) * Math.cos(pr) * gazeMag, sy = -Math.sin(pr) * gazeMag;   // mesh space
+    // constrain the iris centre to the eye-opening ELLIPSE shrunk by the iris radius, so the
+    // whole disc stays inside (horizontal room is large; vertical is tiny since the eye is short)
+    const irisR = 0.46 * eyeHeight;
+    const mx = Math.max(1e-4, eyeWidth / 2 - irisR), my = Math.max(1e-4, eyeHeight / 2 - irisR);
+    const e = Math.hypot(sx / mx, sy / my);
+    if (e > 1) { sx /= e; sy /= e; }
+    const shift = [s * sx, -s * sy, 0];   // tx: scale + flip y
+    irisProg.uniforms.uShift.value = shift;
+    pupilProg.uniforms.uShift.value = shift;
   });
 
   // area-weighted per-vertex normals (display space) for a getter over the N verts
@@ -291,7 +298,8 @@
       };
       const l = stat(LEFT_EYE), r = stat(RIGHT_EYE);
       eyeHeight = (l.h + r.h) / 2;
-      gazeMag = ((l.w + r.w) / 2) * 0.5;   // iris can travel ~half the eye width toward the corner
+      eyeWidth = (l.w + r.w) / 2;
+      gazeMag = eyeWidth * 0.55;   // raw travel; the elliptical clamp keeps the iris inside the eye
     }
     // round, perspective-scaled point disks (gl_PointSize ~ uSize/clip.w so they scale like the face)
     const irisVert = `attribute vec3 position; attribute vec3 aDelta;

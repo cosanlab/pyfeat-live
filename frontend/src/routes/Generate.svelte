@@ -4,6 +4,7 @@
   import { generateApi } from '../lib/api';
   import MeshCanvas from '../lib/components/MeshCanvas.svelte';
   import MeshConfigModal from '../lib/components/MeshConfigModal.svelte';
+  import GazePad from '../lib/components/GazePad.svelte';
   import { DEFAULT_MESH_CONFIG, type MeshConfig } from '../lib/mesh/config';
   import Settings from '@lucide/svelte/icons/settings';
 
@@ -384,10 +385,7 @@
             <span class={fieldLabel}>Gaze</span>
             <button class="text-[10px] text-zinc-500 hover:text-zinc-300" onclick={() => (gaze = { yaw: 0, pitch: 0 })}>reset</button>
           </div>
-          <div class="flex justify-between text-[10px] text-zinc-400"><span>yaw</span><span>{gaze.yaw}°</span></div>
-          <input type="range" min="-30" max="30" step="1" bind:value={gaze.yaw} class="w-full accent-green-500" />
-          <div class="flex justify-between text-[10px] text-zinc-400 mt-1"><span>pitch</span><span>{gaze.pitch}°</span></div>
-          <input type="range" min="-25" max="25" step="1" bind:value={gaze.pitch} class="w-full accent-green-500" />
+          <GazePad yaw={gaze.yaw} pitch={gaze.pitch} onChange={(g) => (gaze = g)} />
         </div>
       {/if}
       {#if mode !== 'mesh'}
