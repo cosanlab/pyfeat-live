@@ -58,19 +58,22 @@
   let sNormN: Float32Array, sNormD: Float32Array;   // per-vertex normals at neutral + (target-neutral)
   let surfaceMesh: any, surfaceProg: any;
   let irisMesh: any, irisProg: any, pupilMesh: any, pupilProg: any;
-  let irisRadius = 0.015;   // mean iris radius in mesh space (sets gaze-shift magnitude)
   const CORNERS = [[-1, 0], [1, 0], [-1, 1], [1, 1]];
   const EYE_CENTERS = [468, 473];   // iris/pupil drawn as round, perspective-scaled points here
+  // eye-opening contour landmarks (MediaPipe), for eye centre + height + eyeball radius
+  const LEFT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 246, 161, 160, 159, 158, 157, 173];
+  const RIGHT_EYE = [263, 249, 390, 373, 374, 380, 381, 382, 362, 466, 388, 387, 386, 385, 384, 398];
+  let eyeHeight = 0.02, gazeMag = 0.025;   // mesh space; computed from neutral on mount
 
   // gaze (deg) -> shift the whole eye (iris + pupil together) in local display space
   // (rotates with the face). Magnitude ~2x iris radius so ±30deg reads clearly.
   $effect(() => {
     if (!ready) return;
     const yr = (gaze.yaw * Math.PI) / 180, pr = (gaze.pitch * Math.PI) / 180;
-    const mag = irisRadius * 1.6;
-    const ix = s * -Math.sin(yr) * Math.cos(pr) * mag, iy = -s * Math.sin(pr) * mag;
+    // eyeball rotation: iris + pupil translate TOGETHER by ~R*sin(angle) across the eye opening
+    const ix = s * -Math.sin(yr) * Math.cos(pr) * gazeMag, iy = -s * Math.sin(pr) * gazeMag;
     irisProg.uniforms.uShift.value = [ix, iy, 0];
-    pupilProg.uniforms.uShift.value = [ix * 1.35, iy * 1.35, 0];   // pupil moves a bit more (within the iris)
+    pupilProg.uniforms.uShift.value = [ix, iy, 0];
   });
 
   // area-weighted per-vertex normals (display space) for a getter over the N verts
@@ -183,10 +186,10 @@
       camera.perspective({ aspect: r.width / r.height });
       res[0] = r.width * dpr; res[1] = r.height * dpr;
       if (linesProg) linesProg.uniforms.uResolution.value = res;
-      if (irisProg) {                                   // size eye disks to the iris world radius
-        const k = irisRadius * s * res[1] * 2.6;
+      if (irisProg) {                                   // iris diameter ~ eye-opening height (round; sclera on sides)
+        const k = eyeHeight * s * res[1] * 1.45;
         irisProg.uniforms.uSize.value = k;
-        pupilProg.uniforms.uSize.value = k * 0.45;
+        pupilProg.uniforms.uSize.value = k * 0.42;
       }
     }
     const ro = new ResizeObserver(resize); ro.observe(wrap);
@@ -280,9 +283,16 @@
     surfaceMesh.frustumCulled = false;
     surfaceMesh.renderOrder = -1;   // draw under the wireframe/points
 
-    // ---- eyes: iris disks (brown, morphing) + gaze-shifted pupils (black) ----
-    { const c = neutral[468], r = [469, 470, 471, 472].map((i) => neutral[i]);
-      irisRadius = r.reduce((a, p) => a + Math.hypot(p[0]-c[0], p[1]-c[1], p[2]-c[2]), 0) / 4; }
+    // ---- eyes: round iris sized to the eye-opening height; gaze translates iris+pupil together ----
+    { const stat = (idx: number[]) => {
+        let mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9;
+        for (const i of idx) { const p = neutral[i]; mnx = Math.min(mnx, p[0]); mxx = Math.max(mxx, p[0]); mny = Math.min(mny, p[1]); mxy = Math.max(mxy, p[1]); }
+        return { h: mxy - mny, w: mxx - mnx };
+      };
+      const l = stat(LEFT_EYE), r = stat(RIGHT_EYE);
+      eyeHeight = (l.h + r.h) / 2;
+      gazeMag = ((l.w + r.w) / 2) * 0.5;   // iris can travel ~half the eye width toward the corner
+    }
     // round, perspective-scaled point disks (gl_PointSize ~ uSize/clip.w so they scale like the face)
     const irisVert = `attribute vec3 position; attribute vec3 aDelta;
       uniform mat4 modelViewMatrix; uniform mat4 projectionMatrix;
@@ -290,8 +300,7 @@
       void main(){ gl_Position = projectionMatrix*modelViewMatrix*vec4(position + aDelta*uPhase + uShift, 1.0);
         gl_PointSize = clamp(uSize / gl_Position.w, 1.0, 400.0); }`;
     const diskFrag = `precision highp float; uniform vec3 uColor;
-      void main(){ vec2 c = gl_PointCoord - 0.5; c.y /= 0.62;   // ellipse: full width, ~62% height (almond eye)
-        if (dot(c,c) > 0.25) discard; gl_FragColor = vec4(uColor, 1.0); }`;
+      void main(){ vec2 c = gl_PointCoord - 0.5; if (dot(c,c) > 0.25) discard; gl_FragColor = vec4(uColor, 1.0); }`;
     const eyeGeo = () => new Geometry(gl, { position: { size: 3, data: pPos }, aDelta: { size: 3, data: pDelta }, index: { data: new Uint16Array(EYE_CENTERS) } });
 
     irisProg = new Program(gl, {
