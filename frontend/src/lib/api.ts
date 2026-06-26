@@ -435,6 +435,12 @@ export const generateApi = {
     if (!r.ok) throw new ApiError(r.status, `meshEdges: ${r.status} ${r.statusText}`);
     return (await r.json()).mp_tess;
   },
+  // mesh triangle topology (constant; fetched once for the filled-surface index buffer)
+  meshFaces: async (): Promise<number[][]> => {
+    const r = await fetch('/api/generate/mesh-faces');
+    if (!r.ok) throw new ApiError(r.status, `meshFaces: ${r.status} ${r.statusText}`);
+    return (await r.json()).triangles;
+  },
   // animate a neutral reference image: ramp 0->strength->0 -> mp4
   animate: async (
     jpeg: Blob,

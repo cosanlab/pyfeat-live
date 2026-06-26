@@ -55,6 +55,7 @@
   let meshNeutral = $state<number[][] | null>(null);   // rig-neutral verts (loop start; constant)
   let meshTarget = $state<number[][] | null>(null);    // current expression verts (updates live)
   let meshEdges = $state<number[][] | null>(null);     // tessellation index pairs (constant)
+  let meshFaces = $state<number[][] | null>(null);     // triangle topology (constant)
   let meshBusy = $state(false);
   let meshConfig = $state<MeshConfig>({ ...DEFAULT_MESH_CONFIG });
   let meshConfigOpen = $state(false);
@@ -65,6 +66,7 @@
     meshBusy = true; apiError = null;
     try {
       if (!meshEdges) meshEdges = await generateApi.meshEdges();
+      if (!meshFaces) meshFaces = await generateApi.meshFaces();
       if (!meshNeutral) meshNeutral = await generateApi.meshVertices({ strength: 0 });   // neutral base
       meshTarget = await generateApi.meshVertices(meshCtrl());                            // current target
       lastSig = 'mesh|' + JSON.stringify(meshCtrl());   // seed dedupe so the entry effect won't re-fetch
@@ -294,8 +296,8 @@
         </div>
       {:else}
         <!-- mesh mode: WebGL 478-mesh viewer (OGL) -->
-        {#if meshNeutral && meshTarget && meshEdges}
-          <MeshCanvas neutral={meshNeutral} target={meshTarget} edges={meshEdges} config={meshConfig} />
+        {#if meshNeutral && meshTarget && meshEdges && meshFaces}
+          <MeshCanvas neutral={meshNeutral} target={meshTarget} edges={meshEdges} faces={meshFaces} config={meshConfig} />
         {:else}
           <div class="text-[12.5px] text-zinc-500">{meshBusy ? 'Loading mesh…' : ''}</div>
         {/if}

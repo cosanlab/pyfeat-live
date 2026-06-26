@@ -7,8 +7,8 @@
   import { colormapLut, type ColormapName } from '../overlay/colormaps';
   import type { MeshConfig } from '../mesh/config';
 
-  let { neutral, target, edges, config }: {
-    neutral: number[][]; target: number[][]; edges: number[][]; config: MeshConfig;
+  let { neutral, target, edges, faces, config }: {
+    neutral: number[][]; target: number[][]; edges: number[][]; faces: number[][]; config: MeshConfig;
   } = $props();
 
   let playing = $state(true);
@@ -54,7 +54,25 @@
   // typed buffers (allocated once; refilled when target changes)
   let pPos: Float32Array, pDelta: Float32Array;
   let lStart: Float32Array, lStartD: Float32Array, lEnd: Float32Array, lEndD: Float32Array;
+  let sNormN: Float32Array, sNormD: Float32Array;   // per-vertex normals at neutral + (target-neutral)
+  let surfaceMesh: any, surfaceProg: any;
   const CORNERS = [[-1, 0], [1, 0], [-1, 1], [1, 1]];
+
+  // area-weighted per-vertex normals (display space) for a getter over the N verts
+  function normals(getp: (i: number) => number[], N: number): Float32Array {
+    const nr = new Float32Array(N * 3);
+    for (const f of faces) {
+      const a = getp(f[0]), b = getp(f[1]), c = getp(f[2]);
+      const e1 = [b[0]-a[0], b[1]-a[1], b[2]-a[2]], e2 = [c[0]-a[0], c[1]-a[1], c[2]-a[2]];
+      const fn = [e1[1]*e2[2]-e1[2]*e2[1], e1[2]*e2[0]-e1[0]*e2[2], e1[0]*e2[1]-e1[1]*e2[0]];
+      for (const vi of f) { nr[vi*3]+=fn[0]; nr[vi*3+1]+=fn[1]; nr[vi*3+2]+=fn[2]; }
+    }
+    for (let i = 0; i < N; i++) {
+      const x=nr[i*3], y=nr[i*3+1], z=nr[i*3+2], l=Math.hypot(x,y,z)||1;
+      nr[i*3]=x/l; nr[i*3+1]=y/l; nr[i*3+2]=z/l;
+    }
+    return nr;
+  }
 
   function rebuild() {
     framing(neutral);
@@ -79,11 +97,13 @@
         lEndD[v]=bd[0]; lEndD[v+1]=bd[1]; lEndD[v+2]=bd[2];
       }
     }
+    const nN = normals((i) => tx(neutral[i]), N), nT = normals((i) => tx(target[i]), N);
+    for (let i = 0; i < N * 3; i++) { sNormN[i] = nN[i]; sNormD[i] = nT[i] - nN[i]; }
     if (ready) {
       for (const k of ['position', 'aDelta']) pointsMesh.geometry.attributes[k].needsUpdate = true;
       for (const k of ['position', 'aStartD', 'aEnd', 'aEndD']) linesMesh.geometry.attributes[k].needsUpdate = true;
-      pointsProg.uniforms.uMaxDisp.value = maxD;
-      linesProg.uniforms.uMaxDisp.value = maxD;
+      for (const k of ['position', 'aDelta', 'aNormalN', 'aNormalD']) surfaceMesh.geometry.attributes[k].needsUpdate = true;
+      for (const p of [pointsProg, linesProg, surfaceProg]) p.uniforms.uMaxDisp.value = maxD;
     } else {
       _maxD = maxD;
     }
@@ -95,16 +115,21 @@
     pointsProg.uniforms.uSize.value = config.points.size * dpr;
     linesProg.uniforms.uColor.value = hex2rgb(config.lines.color);
     linesProg.uniforms.uWidth.value = config.lines.width * dpr;
+    surfaceProg.uniforms.uColor.value = hex2rgb(config.surface.color);
+    surfaceProg.uniforms.uOpacity.value = config.surface.opacity;
     const cd = config.colorByDisplacement ? 1 : 0;
     pointsProg.uniforms.uColorByDisp.value = cd;
     linesProg.uniforms.uColorByDisp.value = cd;
+    surfaceProg.uniforms.uColorByDisp.value = cd;
     pointsMesh.visible = config.points.show;
     linesMesh.visible = config.lines.show;
+    surfaceMesh.visible = config.surface.show;
     if (curColormap !== config.colormap) {
       curColormap = config.colormap;
       const t = colormapTex(config.colormap);
       pointsProg.uniforms.uColormap.value = t;
       linesProg.uniforms.uColormap.value = t;
+      surfaceProg.uniforms.uColormap.value = t;
     }
     const bg = hex2rgb(config.background);
     gl.clearColor(bg[0], bg[1], bg[2], 1);
@@ -146,6 +171,7 @@
     pPos = new Float32Array(N * 3); pDelta = new Float32Array(N * 3);
     lStart = new Float32Array(E * 4 * 3); lStartD = new Float32Array(E * 4 * 3);
     lEnd = new Float32Array(E * 4 * 3); lEndD = new Float32Array(E * 4 * 3);
+    sNormN = new Float32Array(N * 3); sNormD = new Float32Array(N * 3);
     const lSide = new Float32Array(E * 4), lAlong = new Float32Array(E * 4);
     const lIndex = new Uint16Array(E * 6);
     for (let e = 0; e < E; e++) {
@@ -202,8 +228,36 @@
     linesMesh = new Mesh(gl, { mode: gl.TRIANGLES, geometry: linesGeo, program: linesProg });   // fat-line quads
     linesMesh.frustumCulled = false;
 
+    // filled, lit surface (triangle topology); normals morph with the expression
+    surfaceProg = new Program(gl, {
+      vertex: `attribute vec3 position; attribute vec3 aDelta; attribute vec3 aNormalN; attribute vec3 aNormalD;
+        uniform mat4 modelViewMatrix; uniform mat4 projectionMatrix; uniform mat3 normalMatrix;
+        uniform float uPhase; uniform float uMaxDisp; varying float vDisp; varying vec3 vN;
+        void main(){ vec3 p = position + aDelta*uPhase;
+          gl_Position = projectionMatrix*modelViewMatrix*vec4(p,1.0);
+          vN = normalize(normalMatrix * normalize(aNormalN + aNormalD*uPhase));
+          vDisp = clamp(length(aDelta*uPhase)/uMaxDisp, 0.0, 1.0); }`,
+      fragment: `precision highp float;
+        uniform vec3 uColor; uniform float uColorByDisp; uniform sampler2D uColormap; uniform float uOpacity;
+        varying float vDisp; varying vec3 vN;
+        void main(){
+          vec3 base = uColorByDisp > 0.5 ? texture2D(uColormap, vec2(vDisp, 0.5)).rgb : uColor;
+          float d = abs(dot(normalize(vN), normalize(vec3(0.3, 0.5, 1.0))));   // two-sided
+          gl_FragColor = vec4(base * (0.35 + 0.65 * d), uOpacity); }`,
+      transparent: true, cullFace: false,
+      uniforms: { ...sharedUniforms(), uOpacity: { value: 1 } },
+    });
+    const surfaceGeo = new Geometry(gl, {
+      position: { size: 3, data: pPos }, aDelta: { size: 3, data: pDelta },
+      aNormalN: { size: 3, data: sNormN }, aNormalD: { size: 3, data: sNormD },
+      index: { data: new Uint16Array(faces.flat()) },
+    });
+    surfaceMesh = new Mesh(gl, { mode: gl.TRIANGLES, geometry: surfaceGeo, program: surfaceProg });
+    surfaceMesh.frustumCulled = false;
+    surfaceMesh.renderOrder = -1;   // draw under the wireframe/points
+
     scene = new Transform();
-    pointsMesh.setParent(scene); linesMesh.setParent(scene);
+    surfaceMesh.setParent(scene); pointsMesh.setParent(scene); linesMesh.setParent(scene);
 
     ready = true;
     resize();
@@ -221,6 +275,7 @@
       const e = (1 - Math.cos(Math.PI * u)) / 2;
       pointsProg.uniforms.uPhase.value = e;
       linesProg.uniforms.uPhase.value = e;
+      surfaceProg.uniforms.uPhase.value = e;
       controls.update();
       renderer.render({ scene, camera });
     }

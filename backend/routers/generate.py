@@ -81,6 +81,22 @@ async def generate_mesh_vertices(request: Request) -> dict:
     return {"vertices": verts}
 
 
+_MESH_FACES = None
+
+
+@router.get("/mesh-faces")
+def generate_mesh_faces() -> dict:
+    """Constant 898x3 triangle topology (468-vertex face) for the filled-surface render mode."""
+    global _MESH_FACES
+    if _MESH_FACES is None:
+        import json
+        import pathlib
+        import feat
+        p = pathlib.Path(feat.__file__).parent / "resources" / "canonical_face_tessellation.json"
+        _MESH_FACES = json.load(open(p))["triangles"]
+    return {"triangles": _MESH_FACES}
+
+
 @router.post("/frame")
 async def generate_frame(request: Request) -> Response:
     body = await request.body()
