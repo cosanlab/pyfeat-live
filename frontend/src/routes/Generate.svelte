@@ -120,9 +120,14 @@
       if (captureCanvas.width !== dW) captureCanvas.width = dW;
       if (captureCanvas.height !== dH) captureCanvas.height = dH;
       captureCanvas.getContext('2d')!.drawImage(videoEl, 0, 0, dW, dH);
-      const blob: Blob | null = await new Promise((res) => captureCanvas!.toBlob((b) => res(b), 'image/jpeg', 0.9));
+      // SYNCHRONOUS toDataURL (~3ms) instead of toBlob/convertToBlob, which stall ~1s while a
+      // webcam MediaStream is active (Chromium async-task starvation). Decode base64 -> Blob inline.
+      const dataURL = captureCanvas.toDataURL('image/jpeg', 0.9);
+      const b64 = atob(dataURL.slice(dataURL.indexOf(',') + 1));
+      const arr = new Uint8Array(b64.length);
+      for (let i = 0; i < b64.length; i++) arr[i] = b64.charCodeAt(i);
+      const blob = new Blob([arr], { type: 'image/jpeg' });
       if (signal.aborted) return;
-      if (!blob) { await new Promise((r) => setTimeout(r, 16)); continue; }
       let editedBlob: Blob;
       try {
         editedBlob = await generateApi.editFrame(blob, { expression, strength, mouthMode, aus: activeAus(), live: true, liveReset: firstFrame });
@@ -140,7 +145,8 @@
         displayCanvas.getContext('2d')!.drawImage(bmp, 0, 0);
       }
       bmp.close?.();
-      const now = performance.now(); fpsWin.push(now);
+      const now = performance.now();
+      fpsWin.push(now);
       while (fpsWin.length && fpsWin[0]! < now - 1000) fpsWin.shift();
       fps = fpsWin.length;
     }

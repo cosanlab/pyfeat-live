@@ -353,7 +353,14 @@
     }
     raf = requestAnimationFrame(frame);
 
-    return () => { cancelAnimationFrame(raf); ro.disconnect(); controls.remove?.(); };
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      controls.remove?.();
+      // free the WebGL context on unmount — otherwise each Mesh<->Live switch leaks a context,
+      // and browsers cap them (~16), then force-lose/reclaim them, which stalls the whole tab.
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+    };
   });
 </script>
 
