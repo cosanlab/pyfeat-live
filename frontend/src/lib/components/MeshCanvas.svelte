@@ -166,7 +166,7 @@
         uniform float uPhase; uniform float uSize; uniform float uMaxDisp; varying float vDisp;
         void main(){ vec3 p = position + aDelta*uPhase;
           gl_Position = projectionMatrix*modelViewMatrix*vec4(p,1.0); gl_PointSize = uSize;
-          vDisp = clamp(length(aDelta)/uMaxDisp, 0.0, 1.0); }`,
+          vDisp = clamp(length(aDelta*uPhase)/uMaxDisp, 0.0, 1.0); }`,
       fragment: FRAG,
       uniforms: { ...sharedUniforms(), uSize: { value: 4 }, uRound: { value: 1 } },
     });
@@ -188,7 +188,7 @@
           vec2 nrm = vec2(-dir.y, dir.x) * 2.0 / uResolution;   // pixels -> NDC (range is 2 across res px)
           cT.xy += nrm * aSide * (uWidth * 0.5) * cT.w;
           gl_Position = cT;
-          vDisp = clamp(mix(length(aStartD), length(aEndD), aAlong)/uMaxDisp, 0.0, 1.0); }`,
+          vDisp = clamp(mix(length(aStartD*uPhase), length(aEndD*uPhase), aAlong)/uMaxDisp, 0.0, 1.0); }`,
       fragment: FRAG,
       cullFace: false,   // fat-line quads wind both ways; don't cull them
       uniforms: { ...sharedUniforms(), uWidth: { value: 1.5 }, uResolution: { value: res }, uRound: { value: 0 } },
