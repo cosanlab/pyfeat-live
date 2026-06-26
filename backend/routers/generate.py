@@ -44,15 +44,30 @@ def _edit_sync(editor, img: Image.Image, expression, strength: float, mouth_mode
     return buf.getvalue()
 
 
-def _mesh_html(editor, aus, expression: str | None, strength: float) -> str:
-    """Geometry-only 478 mesh (PLS from AUs / expression preset) -> interactive Plotly 3D HTML."""
+def _mesh_html(editor, aus, expression: str | None, strength: float, frames: int = 1) -> str:
+    """Geometry-only 478 mesh (PLS from AUs / expression preset) -> interactive Plotly 3D HTML.
+    frames > 1 builds an animated figure: the edit ramps 0 -> strength -> 0 (auto-plays, loops)."""
+    import math
     from feat.plotting import plot_face_mesh_plotly
     if not aus and expression and expression in editor._R.EXPRESSIONS:
         aus = dict(editor._R.EXPRESSIONS[expression])      # expand preset -> AU dict
-    mesh = editor.edit_mesh(aus=aus, strength=strength).copy()
-    mesh[:, 1] = -mesh[:, 1]                                # mesh is y-down (MediaPipe); Plotly is z-up -> flip
-    fig = plot_face_mesh_plotly(mesh=mesh)
-    return fig.to_html(full_html=True, include_plotlyjs="cdn")
+
+    def _fig_at(s):
+        mesh = editor.edit_mesh(aus=aus, strength=s).copy()
+        mesh[:, 1] = -mesh[:, 1]                            # mesh is y-down (MediaPipe); Plotly is z-up -> flip
+        return plot_face_mesh_plotly(mesh=mesh)
+
+    if frames <= 1:
+        return _fig_at(strength).to_html(full_html=True, include_plotlyjs="cdn")
+
+    import plotly.graph_objects as go
+    figs = [_fig_at(strength * math.sin(math.pi * (i / (frames - 1)))) for i in range(frames)]
+    base = figs[0]
+    base.frames = [go.Frame(data=figs[i].data, name=str(i)) for i in range(frames)]
+    base.update_layout(updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=0.05, buttons=[
+        dict(label="▶ Play", method="animate",
+             args=[None, dict(frame=dict(duration=120, redraw=True), fromcurrent=True, transition=dict(duration=0))])])])
+    return base.to_html(full_html=True, include_plotlyjs="cdn", auto_play=True)
 
 
 def _parse_controls(request: Request):
@@ -75,10 +90,14 @@ def _parse_controls(request: Request):
 @router.post("/mesh")
 async def generate_mesh(request: Request) -> Response:
     expression, strength, aus = _parse_controls(request)
+    try:
+        frames = max(1, min(40, int(request.headers.get("X-Frames", "1"))))
+    except ValueError:
+        frames = 1
     editor = _get_editor(request.app)
     loop = asyncio.get_running_loop()
     async with request.app.state.generate_lock:
-        html = await loop.run_in_executor(_EXECUTOR, _mesh_html, editor, aus, expression, strength)
+        html = await loop.run_in_executor(_EXECUTOR, _mesh_html, editor, aus, expression, strength, frames)
     return Response(content=html, media_type="text/html")
 
 

@@ -50,13 +50,13 @@
   // ---- mesh ----
   let meshHtml = $state<string | null>(null);
   let meshBusy = $state(false);
-  async function renderMesh() {
+  async function renderMesh(frames = 1) {
     meshBusy = true; apiError = null;
     try {
-      meshHtml = await generateApi.meshHtml({
-        expression: ctrlMode === 'preset' ? expression : undefined,
-        strength, aus: activeAus(),
-      });
+      meshHtml = await generateApi.meshHtml(
+        { expression: ctrlMode === 'preset' ? expression : undefined, strength, aus: activeAus() },
+        { frames },
+      );
     } catch (e: any) { apiError = e.message; }
     finally { meshBusy = false; }
   }
@@ -175,10 +175,9 @@
     if (!srcBitmap) return;
     animBusy = true; apiError = null;
     try {
-      const sc = Math.min(1, 720 / Math.max(srcBitmap.width, srcBitmap.height));   // downscale for speed/size
-      const w = Math.max(2, Math.round(srcBitmap.width * sc)), h = Math.max(2, Math.round(srcBitmap.height * sc));
-      const c = document.createElement('canvas'); c.width = w; c.height = h;
-      c.getContext('2d')!.drawImage(srcBitmap, 0, 0, w, h);
+      // full resolution — match the original image (the still edit is full-res too)
+      const c = document.createElement('canvas'); c.width = srcBitmap.width; c.height = srcBitmap.height;
+      c.getContext('2d')!.drawImage(srcBitmap, 0, 0);
       const jpeg: Blob = await new Promise((res, rej) =>
         c.toBlob((b) => (b ? res(b) : rej(new Error('encode failed'))), 'image/jpeg', 0.92));
       const mp4 = await generateApi.animate(jpeg, { expression, strength, mouthMode, aus: activeAus() });
@@ -293,10 +292,11 @@
           <button class={neutralBtn} onclick={revertOriginal}>Revert to original</button>
         {/if}
       {:else}
-        <button class={primaryBtn} disabled={meshBusy} onclick={renderMesh}>
+        <button class={primaryBtn} disabled={meshBusy} onclick={() => renderMesh()}>
           {meshBusy ? 'Rendering…' : 'Render mesh'}
         </button>
-        <div class="text-[11px] text-zinc-500">478-landmark mesh, PLS-driven. Drag to rotate.</div>
+        <button class={neutralBtn} disabled={meshBusy} onclick={() => renderMesh(16)}>Animate mesh</button>
+        <div class="text-[11px] text-zinc-500">478-landmark mesh, PLS-driven. Drag to rotate; animation auto-plays.</div>
       {/if}
 
       {#if apiError}<div class="text-[11px] text-red-400">{apiError}</div>{/if}
