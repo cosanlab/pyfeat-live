@@ -276,8 +276,12 @@
         varying float vDisp; varying vec3 vN;
         void main(){
           vec3 base = uColorByDisp > 0.5 ? texture2D(uColormap, vec2(vDisp, 0.5)).rgb : uColor;
-          float d = abs(dot(normalize(vN), normalize(vec3(0.3, 0.5, 1.0))));   // two-sided
-          gl_FragColor = vec4(base * (0.35 + 0.65 * d), uOpacity); }`,
+          vec3 N = normalize(vN); if (N.z < 0.0) N = -N;            // face the camera (winding + backfaces)
+          float key  = max(dot(N, normalize(vec3(0.35, 0.5, 0.78))), 0.0);
+          float fill = max(dot(N, normalize(vec3(-0.6, -0.3, 0.5))), 0.0) * 0.25;
+          float rim  = pow(1.0 - N.z, 3.0) * 0.5;                   // bright grazing edges -> form
+          vec3 col = base * (0.28 + 0.72 * key + fill) + rim * vec3(0.55, 0.65, 0.85);
+          gl_FragColor = vec4(clamp(col, 0.0, 1.0), uOpacity); }`,
       transparent: true, cullFace: false,
       uniforms: { ...sharedUniforms(), uOpacity: { value: 1 } },
     });
