@@ -404,7 +404,8 @@ export const analyzeApi = {
 export const generateApi = {
   editFrame: async (
     jpeg: Blob,
-    ctrl: { expression: string; strength: number; mouthMode: string; aus?: Record<string, number> | null },
+    ctrl: { expression: string; strength: number; mouthMode: string; aus?: Record<string, number> | null;
+            live?: boolean; liveReset?: boolean },
   ): Promise<Blob> => {
     const headers: Record<string, string> = {
       'Content-Type': 'image/jpeg',
@@ -414,6 +415,7 @@ export const generateApi = {
     };
     // per-AU dict (overrides the preset server-side); only sent when non-empty
     if (ctrl.aus && Object.keys(ctrl.aus).length > 0) headers['X-AUs'] = JSON.stringify(ctrl.aus);
+    if (ctrl.live) { headers['X-Live'] = '1'; if (ctrl.liveReset) headers['X-Live-Reset'] = '1'; }   // stateful mouth-stabilized stream
     const r = await fetch('/api/generate/frame', { method: 'POST', headers, body: jpeg });
     if (!r.ok) throw new ApiError(r.status, `generateFrame: ${r.status} ${r.statusText}`);
     return r.blob();

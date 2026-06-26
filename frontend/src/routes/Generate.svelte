@@ -111,6 +111,7 @@
   async function runLoop(signal: AbortSignal) {
     if (!captureCanvas) captureCanvas = document.createElement('canvas');
     const fpsWin: number[] = [];
+    let firstFrame = true;   // reset the server-side live session at stream start
     while (!signal.aborted && isStreaming && mode === 'live') {
       if (!videoEl || videoEl.readyState < 2) { await new Promise((r) => setTimeout(r, 33)); continue; }
       const sW = videoEl.videoWidth, sH = videoEl.videoHeight;
@@ -124,7 +125,8 @@
       if (!blob) { await new Promise((r) => setTimeout(r, 16)); continue; }
       let editedBlob: Blob;
       try {
-        editedBlob = await generateApi.editFrame(blob, { expression, strength, mouthMode, aus: activeAus() });
+        editedBlob = await generateApi.editFrame(blob, { expression, strength, mouthMode, aus: activeAus(), live: true, liveReset: firstFrame });
+        firstFrame = false;
         apiError = null;
       } catch (e: any) {
         if (signal.aborted) return;
