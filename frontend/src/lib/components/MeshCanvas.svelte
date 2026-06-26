@@ -7,8 +7,9 @@
   import { colormapLut, type ColormapName } from '../overlay/colormaps';
   import type { MeshConfig } from '../mesh/config';
 
-  let { neutral, target, edges, faces, config }: {
-    neutral: number[][]; target: number[][]; edges: number[][]; faces: number[][]; config: MeshConfig;
+  let { neutral, target, edges, faces, config, gaze }: {
+    neutral: number[][]; target: number[][]; edges: number[][]; faces: number[][];
+    config: MeshConfig; gaze: { yaw: number; pitch: number };   // degrees
   } = $props();
 
   let playing = $state(true);
@@ -56,7 +57,21 @@
   let lStart: Float32Array, lStartD: Float32Array, lEnd: Float32Array, lEndD: Float32Array;
   let sNormN: Float32Array, sNormD: Float32Array;   // per-vertex normals at neutral + (target-neutral)
   let surfaceMesh: any, surfaceProg: any;
+  let irisMesh: any, irisProg: any, pupilMesh: any, pupilProg: any;
+  let irisRadius = 0.015;   // mean iris radius in mesh space (sets gaze-shift magnitude)
   const CORNERS = [[-1, 0], [1, 0], [-1, 1], [1, 1]];
+  // iris triangle fans (centre 468/473 + 4 ring verts each) and pupil centres
+  const IRIS_FAN = [468,469,470, 468,470,471, 468,471,472, 468,472,469,
+                    473,474,475, 473,475,476, 473,476,477, 473,477,474];
+  const PUPIL_IDX = [468, 473];
+
+  // gaze (deg) -> pupil shift in local display space (rotates with the face). py-feat's model.
+  $effect(() => {
+    if (!ready) return;
+    const yr = (gaze.yaw * Math.PI) / 180, pr = (gaze.pitch * Math.PI) / 180;
+    const mag = irisRadius * 0.45;
+    pupilProg.uniforms.uGazeShift.value = [s * -Math.sin(yr) * Math.cos(pr) * mag, -s * Math.sin(pr) * mag, 0];
+  });
 
   // area-weighted per-vertex normals (display space) for a getter over the N verts
   function normals(getp: (i: number) => number[], N: number): Float32Array {
@@ -103,6 +118,7 @@
       for (const k of ['position', 'aDelta']) pointsMesh.geometry.attributes[k].needsUpdate = true;
       for (const k of ['position', 'aStartD', 'aEnd', 'aEndD']) linesMesh.geometry.attributes[k].needsUpdate = true;
       for (const k of ['position', 'aDelta', 'aNormalN', 'aNormalD']) surfaceMesh.geometry.attributes[k].needsUpdate = true;
+      for (const m of [irisMesh, pupilMesh]) for (const k of ['position', 'aDelta']) m.geometry.attributes[k].needsUpdate = true;
       for (const p of [pointsProg, linesProg, surfaceProg]) p.uniforms.uMaxDisp.value = maxD;
     } else {
       _maxD = maxD;
@@ -121,9 +137,12 @@
     pointsProg.uniforms.uColorByDisp.value = cd;
     linesProg.uniforms.uColorByDisp.value = cd;
     surfaceProg.uniforms.uColorByDisp.value = cd;
+    irisProg.uniforms.uColor.value = hex2rgb(config.eyes.color);
     pointsMesh.visible = config.points.show;
     linesMesh.visible = config.lines.show;
     surfaceMesh.visible = config.surface.show;
+    irisMesh.visible = config.eyes.show;
+    pupilMesh.visible = config.eyes.show;
     if (curColormap !== config.colormap) {
       curColormap = config.colormap;
       const t = colormapTex(config.colormap);
@@ -256,8 +275,40 @@
     surfaceMesh.frustumCulled = false;
     surfaceMesh.renderOrder = -1;   // draw under the wireframe/points
 
+    // ---- eyes: iris disks (brown, morphing) + gaze-shifted pupils (black) ----
+    { const c = neutral[468], r = [469, 470, 471, 472].map((i) => neutral[i]);
+      irisRadius = r.reduce((a, p) => a + Math.hypot(p[0]-c[0], p[1]-c[1], p[2]-c[2]), 0) / 4; }
+    irisProg = new Program(gl, {
+      vertex: `attribute vec3 position; attribute vec3 aDelta;
+        uniform mat4 modelViewMatrix; uniform mat4 projectionMatrix; uniform float uPhase;
+        void main(){ gl_Position = projectionMatrix*modelViewMatrix*vec4(position + aDelta*uPhase, 1.0); }`,
+      fragment: `precision highp float; uniform vec3 uColor; void main(){ gl_FragColor = vec4(uColor, 1.0); }`,
+      cullFace: false, depthTest: false,
+      uniforms: { uPhase: { value: 0 }, uColor: { value: new Vec3(0.69, 0.53, 0.41) } },
+    });
+    irisMesh = new Mesh(gl, {
+      mode: gl.TRIANGLES, program: irisProg,
+      geometry: new Geometry(gl, { position: { size: 3, data: pPos }, aDelta: { size: 3, data: pDelta }, index: { data: new Uint16Array(IRIS_FAN) } }),
+    });
+    irisMesh.frustumCulled = false; irisMesh.renderOrder = 10;
+    pupilProg = new Program(gl, {
+      vertex: `attribute vec3 position; attribute vec3 aDelta;
+        uniform mat4 modelViewMatrix; uniform mat4 projectionMatrix;
+        uniform float uPhase; uniform vec3 uGazeShift; uniform float uSize;
+        void main(){ gl_Position = projectionMatrix*modelViewMatrix*vec4(position + aDelta*uPhase + uGazeShift, 1.0); gl_PointSize = uSize; }`,
+      fragment: `precision highp float; void main(){ vec2 c = gl_PointCoord - 0.5; if (dot(c,c) > 0.25) discard; gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); }`,
+      depthTest: false,
+      uniforms: { uPhase: { value: 0 }, uGazeShift: { value: [0, 0, 0] }, uSize: { value: 9 * dpr } },
+    });
+    pupilMesh = new Mesh(gl, {
+      mode: gl.POINTS, program: pupilProg,
+      geometry: new Geometry(gl, { position: { size: 3, data: pPos }, aDelta: { size: 3, data: pDelta }, index: { data: new Uint16Array(PUPIL_IDX) } }),
+    });
+    pupilMesh.frustumCulled = false; pupilMesh.renderOrder = 11;
+
     scene = new Transform();
     surfaceMesh.setParent(scene); pointsMesh.setParent(scene); linesMesh.setParent(scene);
+    irisMesh.setParent(scene); pupilMesh.setParent(scene);
 
     ready = true;
     resize();
@@ -273,9 +324,7 @@
         else if (u <= 0) { u = 0; dir = 1; }
       }
       const e = (1 - Math.cos(Math.PI * u)) / 2;
-      pointsProg.uniforms.uPhase.value = e;
-      linesProg.uniforms.uPhase.value = e;
-      surfaceProg.uniforms.uPhase.value = e;
+      for (const p of [pointsProg, linesProg, surfaceProg, irisProg, pupilProg]) p.uniforms.uPhase.value = e;
       controls.update();
       renderer.render({ scene, camera });
     }

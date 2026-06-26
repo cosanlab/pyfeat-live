@@ -12,6 +12,7 @@
   const updPoints = (p: Partial<MeshConfig['points']>) => onChange({ ...config, points: { ...config.points, ...p } });
   const updLines = (p: Partial<MeshConfig['lines']>) => onChange({ ...config, lines: { ...config.lines, ...p } });
   const updSurface = (p: Partial<MeshConfig['surface']>) => onChange({ ...config, surface: { ...config.surface, ...p } });
+  const updEyes = (p: Partial<MeshConfig['eyes']>) => onChange({ ...config, eyes: { ...config.eyes, ...p } });
   const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
 </script>
 
@@ -85,6 +86,22 @@
             <input type="range" min="0.1" max="1" step="0.05" class="accent-green-500 w-20" value={config.surface.opacity}
                    oninput={(e) => updSurface({ opacity: +(e.target as HTMLInputElement).value })} />
             <span class="font-mono text-zinc-300 w-7">{config.surface.opacity.toFixed(2)}</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Eyes -->
+      <div class="px-4 py-3">
+        <label class="flex items-center gap-2 cursor-pointer mb-2">
+          <input type="checkbox" class="accent-green-500 w-3.5 h-3.5" checked={config.eyes.show}
+                 onchange={(e) => updEyes({ show: (e.target as HTMLInputElement).checked })} />
+          <span class="text-[12px] font-medium text-zinc-100">Eyes</span>
+          <span class="text-[10px] text-zinc-500">— iris + gaze-controlled pupils</span>
+        </label>
+        <div class="pl-5.5 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-zinc-400" class:opacity-40={!config.eyes.show}>
+          <label class="flex items-center gap-1.5">iris
+            <input type="color" class="h-5 w-7 rounded bg-transparent" value={config.eyes.color}
+                   oninput={(e) => updEyes({ color: (e.target as HTMLInputElement).value })} />
           </label>
         </div>
       </div>

@@ -59,6 +59,7 @@
   let meshBusy = $state(false);
   let meshConfig = $state<MeshConfig>({ ...DEFAULT_MESH_CONFIG });
   let meshConfigOpen = $state(false);
+  let gaze = $state({ yaw: 0, pitch: 0 });   // degrees; drives the mesh pupils
   function meshCtrl() {
     return { expression: ctrlMode === 'preset' ? expression : undefined, strength, aus: activeAus() };
   }
@@ -297,7 +298,7 @@
       {:else}
         <!-- mesh mode: WebGL 478-mesh viewer (OGL) -->
         {#if meshNeutral && meshTarget && meshEdges && meshFaces}
-          <MeshCanvas neutral={meshNeutral} target={meshTarget} edges={meshEdges} faces={meshFaces} config={meshConfig} />
+          <MeshCanvas neutral={meshNeutral} target={meshTarget} edges={meshEdges} faces={meshFaces} config={meshConfig} {gaze} />
         {:else}
           <div class="text-[12.5px] text-zinc-500">{meshBusy ? 'Loading mesh…' : ''}</div>
         {/if}
@@ -377,6 +378,18 @@
         <div class={fieldLabel}>Strength: {strength.toFixed(2)}</div>
         <input type="range" min="0" max="1" step="0.05" bind:value={strength} class="w-full accent-green-500" />
       </div>
+      {#if mode === 'mesh'}
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class={fieldLabel}>Gaze</span>
+            <button class="text-[10px] text-zinc-500 hover:text-zinc-300" onclick={() => (gaze = { yaw: 0, pitch: 0 })}>reset</button>
+          </div>
+          <div class="flex justify-between text-[10px] text-zinc-400"><span>yaw</span><span>{gaze.yaw}°</span></div>
+          <input type="range" min="-30" max="30" step="1" bind:value={gaze.yaw} class="w-full accent-green-500" />
+          <div class="flex justify-between text-[10px] text-zinc-400 mt-1"><span>pitch</span><span>{gaze.pitch}°</span></div>
+          <input type="range" min="-25" max="25" step="1" bind:value={gaze.pitch} class="w-full accent-green-500" />
+        </div>
+      {/if}
       {#if mode !== 'mesh'}
         <div>
           <div class={fieldLabel}>Teeth</div>
