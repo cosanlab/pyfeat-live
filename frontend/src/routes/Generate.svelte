@@ -378,7 +378,7 @@
         <div class={fieldLabel}>Strength: {strength.toFixed(2)}</div>
         <input type="range" min="0" max="1" step="0.05" bind:value={strength} class="w-full accent-green-500" />
       </div>
-      {#if mode === 'mesh'}
+      {#if mode === 'mesh' && meshConfig.eyes.show}
         <div>
           <div class="flex items-center justify-between mb-1">
             <span class={fieldLabel}>Gaze</span>

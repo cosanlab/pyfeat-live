@@ -60,17 +60,14 @@
   let irisMesh: any, irisProg: any, pupilMesh: any, pupilProg: any;
   let irisRadius = 0.015;   // mean iris radius in mesh space (sets gaze-shift magnitude)
   const CORNERS = [[-1, 0], [1, 0], [-1, 1], [1, 1]];
-  // iris triangle fans (centre 468/473 + 4 ring verts each) and pupil centres
-  const IRIS_FAN = [468,469,470, 468,470,471, 468,471,472, 468,472,469,
-                    473,474,475, 473,475,476, 473,476,477, 473,477,474];
-  const PUPIL_IDX = [468, 473];
+  const EYE_CENTERS = [468, 473];   // iris/pupil drawn as round, perspective-scaled points here
 
   // gaze (deg) -> pupil shift in local display space (rotates with the face). py-feat's model.
   $effect(() => {
     if (!ready) return;
     const yr = (gaze.yaw * Math.PI) / 180, pr = (gaze.pitch * Math.PI) / 180;
     const mag = irisRadius * 0.45;
-    pupilProg.uniforms.uGazeShift.value = [s * -Math.sin(yr) * Math.cos(pr) * mag, -s * Math.sin(pr) * mag, 0];
+    pupilProg.uniforms.uShift.value = [s * -Math.sin(yr) * Math.cos(pr) * mag, -s * Math.sin(pr) * mag, 0];
   });
 
   // area-weighted per-vertex normals (display space) for a getter over the N verts
@@ -183,6 +180,11 @@
       camera.perspective({ aspect: r.width / r.height });
       res[0] = r.width * dpr; res[1] = r.height * dpr;
       if (linesProg) linesProg.uniforms.uResolution.value = res;
+      if (irisProg) {                                   // size eye disks to the iris world radius
+        const k = irisRadius * s * res[1] * 1.6;
+        irisProg.uniforms.uSize.value = k;
+        pupilProg.uniforms.uSize.value = k * 0.5;
+      }
     }
     const ro = new ResizeObserver(resize); ro.observe(wrap);
 
@@ -278,32 +280,28 @@
     // ---- eyes: iris disks (brown, morphing) + gaze-shifted pupils (black) ----
     { const c = neutral[468], r = [469, 470, 471, 472].map((i) => neutral[i]);
       irisRadius = r.reduce((a, p) => a + Math.hypot(p[0]-c[0], p[1]-c[1], p[2]-c[2]), 0) / 4; }
+    // round, perspective-scaled point disks (gl_PointSize ~ uSize/clip.w so they scale like the face)
+    const irisVert = `attribute vec3 position; attribute vec3 aDelta;
+      uniform mat4 modelViewMatrix; uniform mat4 projectionMatrix;
+      uniform float uPhase; uniform float uSize; uniform vec3 uShift;
+      void main(){ gl_Position = projectionMatrix*modelViewMatrix*vec4(position + aDelta*uPhase + uShift, 1.0);
+        gl_PointSize = clamp(uSize / gl_Position.w, 1.0, 400.0); }`;
+    const diskFrag = `precision highp float; uniform vec3 uColor;
+      void main(){ vec2 c = gl_PointCoord - 0.5; if (dot(c,c) > 0.25) discard; gl_FragColor = vec4(uColor, 1.0); }`;
+    const eyeGeo = () => new Geometry(gl, { position: { size: 3, data: pPos }, aDelta: { size: 3, data: pDelta }, index: { data: new Uint16Array(EYE_CENTERS) } });
+
     irisProg = new Program(gl, {
-      vertex: `attribute vec3 position; attribute vec3 aDelta;
-        uniform mat4 modelViewMatrix; uniform mat4 projectionMatrix; uniform float uPhase;
-        void main(){ gl_Position = projectionMatrix*modelViewMatrix*vec4(position + aDelta*uPhase, 1.0); }`,
-      fragment: `precision highp float; uniform vec3 uColor; void main(){ gl_FragColor = vec4(uColor, 1.0); }`,
-      cullFace: false, depthTest: false,
-      uniforms: { uPhase: { value: 0 }, uColor: { value: new Vec3(0.69, 0.53, 0.41) } },
+      vertex: irisVert, fragment: diskFrag, depthTest: false,
+      uniforms: { uPhase: { value: 0 }, uSize: { value: 100 }, uShift: { value: [0, 0, 0] }, uColor: { value: new Vec3(0.69, 0.53, 0.41) } },
     });
-    irisMesh = new Mesh(gl, {
-      mode: gl.TRIANGLES, program: irisProg,
-      geometry: new Geometry(gl, { position: { size: 3, data: pPos }, aDelta: { size: 3, data: pDelta }, index: { data: new Uint16Array(IRIS_FAN) } }),
-    });
+    irisMesh = new Mesh(gl, { mode: gl.POINTS, program: irisProg, geometry: eyeGeo() });
     irisMesh.frustumCulled = false; irisMesh.renderOrder = 10;
+
     pupilProg = new Program(gl, {
-      vertex: `attribute vec3 position; attribute vec3 aDelta;
-        uniform mat4 modelViewMatrix; uniform mat4 projectionMatrix;
-        uniform float uPhase; uniform vec3 uGazeShift; uniform float uSize;
-        void main(){ gl_Position = projectionMatrix*modelViewMatrix*vec4(position + aDelta*uPhase + uGazeShift, 1.0); gl_PointSize = uSize; }`,
-      fragment: `precision highp float; void main(){ vec2 c = gl_PointCoord - 0.5; if (dot(c,c) > 0.25) discard; gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); }`,
-      depthTest: false,
-      uniforms: { uPhase: { value: 0 }, uGazeShift: { value: [0, 0, 0] }, uSize: { value: 9 * dpr } },
+      vertex: irisVert, fragment: diskFrag, depthTest: false,
+      uniforms: { uPhase: { value: 0 }, uSize: { value: 50 }, uShift: { value: [0, 0, 0] }, uColor: { value: new Vec3(0.04) } },
     });
-    pupilMesh = new Mesh(gl, {
-      mode: gl.POINTS, program: pupilProg,
-      geometry: new Geometry(gl, { position: { size: 3, data: pPos }, aDelta: { size: 3, data: pDelta }, index: { data: new Uint16Array(PUPIL_IDX) } }),
-    });
+    pupilMesh = new Mesh(gl, { mode: gl.POINTS, program: pupilProg, geometry: eyeGeo() });
     pupilMesh.frustumCulled = false; pupilMesh.renderOrder = 11;
 
     scene = new Transform();
