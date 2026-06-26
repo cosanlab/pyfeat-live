@@ -38,7 +38,7 @@
   let mouthMode = $state('inpaint_v6');
 
   // per-AU controls (the 8 AUs the generator/PLS actually lands)
-  let ctrlMode = $state<'preset' | 'aus'>('preset');
+  let ctrlMode = $state<'preset' | 'aus' | 'blendshapes'>('preset');
   const AU_LIST: [string, string][] = [
     ['AU01', 'Inner brow'], ['AU02', 'Outer brow'], ['AU04', 'Brow lower'], ['AU06', 'Cheek raise'],
     ['AU09', 'Nose wrinkle'], ['AU12', 'Lip corner'], ['AU25', 'Lips part'], ['AU26', 'Jaw drop'],
@@ -52,6 +52,35 @@
   }
   function resetAus() { for (const [k] of AU_LIST) aus[k] = 0; }
 
+  // ARKit 52 blendshapes (grouped for the UI); sent as a sparse {name: value} dict like AUs
+  const BS_GROUPS: [string, string[]][] = [
+    ['Brow', ['browInnerUp', 'browDownLeft', 'browDownRight', 'browOuterUpLeft', 'browOuterUpRight']],
+    ['Eye', ['eyeBlinkLeft', 'eyeBlinkRight', 'eyeSquintLeft', 'eyeSquintRight', 'eyeWideLeft', 'eyeWideRight',
+             'eyeLookUpLeft', 'eyeLookUpRight', 'eyeLookDownLeft', 'eyeLookDownRight',
+             'eyeLookInLeft', 'eyeLookInRight', 'eyeLookOutLeft', 'eyeLookOutRight']],
+    ['Cheek / Nose', ['cheekPuff', 'cheekSquintLeft', 'cheekSquintRight', 'noseSneerLeft', 'noseSneerRight']],
+    ['Jaw', ['jawOpen', 'jawForward', 'jawLeft', 'jawRight']],
+    ['Mouth', ['mouthClose', 'mouthFunnel', 'mouthPucker', 'mouthLeft', 'mouthRight',
+               'mouthSmileLeft', 'mouthSmileRight', 'mouthFrownLeft', 'mouthFrownRight',
+               'mouthDimpleLeft', 'mouthDimpleRight', 'mouthStretchLeft', 'mouthStretchRight',
+               'mouthRollLower', 'mouthRollUpper', 'mouthShrugLower', 'mouthShrugUpper',
+               'mouthPressLeft', 'mouthPressRight', 'mouthLowerDownLeft', 'mouthLowerDownRight',
+               'mouthUpperUpLeft', 'mouthUpperUpRight']],
+    ['Tongue', ['tongueOut']],
+  ];
+  const BS_ALL = BS_GROUPS.flatMap(([, ns]) => ns);
+  let bs = $state<Record<string, number>>(Object.fromEntries(BS_ALL.map((n) => [n, 0])));
+  function activeBlendshapes(): Record<string, number> | null {
+    if (ctrlMode !== 'blendshapes') return null;
+    const out: Record<string, number> = {};
+    for (const n of BS_ALL) if (bs[n]) out[n] = bs[n];
+    return Object.keys(out).length ? out : null;
+  }
+  function resetBs() { for (const n of BS_ALL) bs[n] = 0; }
+  // short label for a blendshape slider (strip the group prefix; mark L/R)
+  const bsLabel = (n: string) => n.replace(/^(brow|eye|cheek|nose|jaw|mouth|tongue)/, '')
+    .replace(/Left$/, ' L').replace(/Right$/, ' R').replace(/([A-Z])/g, ' $1').trim() || n;
+
   // ---- mesh (WebGL viewer) ----
   let meshNeutral = $state<number[][] | null>(null);   // rig-neutral verts (loop start; constant)
   let meshTarget = $state<number[][] | null>(null);    // current expression verts (updates live)
@@ -62,7 +91,7 @@
   let meshConfigOpen = $state(false);
   let gaze = $state({ yaw: 0, pitch: 0 });   // degrees; drives the mesh pupils
   function meshCtrl() {
-    return { expression: ctrlMode === 'preset' ? expression : undefined, strength, aus: activeAus() };
+    return { expression: ctrlMode === 'preset' ? expression : undefined, strength, aus: activeAus(), blendshapes: activeBlendshapes() };
   }
   async function loadMesh() {
     meshBusy = true; apiError = null;
@@ -130,7 +159,7 @@
       if (signal.aborted) return;
       let editedBlob: Blob;
       try {
-        editedBlob = await generateApi.editFrame(blob, { expression, strength, mouthMode, aus: activeAus(), live: true, liveReset: firstFrame });
+        editedBlob = await generateApi.editFrame(blob, { expression, strength, mouthMode, aus: activeAus(), blendshapes: activeBlendshapes(), live: true, liveReset: firstFrame });
         firstFrame = false;
         apiError = null;
       } catch (e: any) {
@@ -184,7 +213,7 @@
       c.getContext('2d')!.drawImage(srcBitmap, 0, 0);
       const jpeg: Blob = await new Promise((res, rej) =>
         c.toBlob((b) => (b ? res(b) : rej(new Error('encode failed'))), 'image/jpeg', 0.95));
-      const edited = await generateApi.editFrame(jpeg, { expression, strength, mouthMode, aus: activeAus() });
+      const edited = await generateApi.editFrame(jpeg, { expression, strength, mouthMode, aus: activeAus(), blendshapes: activeBlendshapes() });
       if (editedUrl) URL.revokeObjectURL(editedUrl);
       editedUrl = URL.createObjectURL(edited);
     } catch (e: any) {
@@ -203,7 +232,7 @@
       c.getContext('2d')!.drawImage(srcBitmap, 0, 0);
       const jpeg: Blob = await new Promise((res, rej) =>
         c.toBlob((b) => (b ? res(b) : rej(new Error('encode failed'))), 'image/jpeg', 0.92));
-      const mp4 = await generateApi.animate(jpeg, { expression, strength, mouthMode, aus: activeAus() });
+      const mp4 = await generateApi.animate(jpeg, { expression, strength, mouthMode, aus: activeAus(), blendshapes: activeBlendshapes() });
       if (animUrl) URL.revokeObjectURL(animUrl);
       animUrl = URL.createObjectURL(mp4);
     } catch (e: any) { apiError = e.message; }
@@ -221,14 +250,14 @@
   let autoTimer: ReturnType<typeof setTimeout>;
   let lastSig = '';
   $effect(() => {
-    void mode; void ctrlMode; void expression; void strength; void mouthMode; void JSON.stringify(aus);
+    void mode; void ctrlMode; void expression; void strength; void mouthMode; void JSON.stringify(aus); void JSON.stringify(bs);
     clearTimeout(autoTimer);
     autoTimer = setTimeout(autoUpdate, 180);
   });
   async function autoUpdate() {
     if (mode === 'image') {
       if (!srcBitmap) return;
-      const sig = 'img|' + expression + '|' + strength + '|' + mouthMode + '|' + JSON.stringify(activeAus());
+      const sig = 'img|' + expression + '|' + strength + '|' + mouthMode + '|' + JSON.stringify(activeAus()) + '|' + JSON.stringify(activeBlendshapes());
       if (sig === lastSig) return;
       lastSig = sig;
       clearAnim();                       // tweaking controls returns to the live still
@@ -357,6 +386,8 @@
                 onclick={() => (ctrlMode = 'preset')}>Preset</button>
         <button class="flex-1 {segBtn} {ctrlMode === 'aus' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
                 onclick={() => (ctrlMode = 'aus')}>AUs</button>
+        <button class="flex-1 {segBtn} {ctrlMode === 'blendshapes' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
+                onclick={() => (ctrlMode = 'blendshapes')}>Shapes</button>
       </div>
       {#if ctrlMode === 'preset'}
         <div>
@@ -367,7 +398,7 @@
             <option value="surprise">surprise</option>
           </select>
         </div>
-      {:else}
+      {:else if ctrlMode === 'aus'}
         <div>
           <div class="flex items-center justify-between mb-1">
             <span class={fieldLabel}>Action units</span>
@@ -379,6 +410,24 @@
                 <div class="flex justify-between text-[10px] text-zinc-400"><span>{au} · {label}</span><span>{aus[au].toFixed(1)}</span></div>
                 <input type="range" min="0" max="3" step="0.5" bind:value={aus[au]} class="w-full accent-green-500" />
               </div>
+            {/each}
+          </div>
+        </div>
+      {:else}
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class={fieldLabel}>ARKit blendshapes</span>
+            <button class="text-[10px] text-zinc-500 hover:text-zinc-300" onclick={resetBs}>reset</button>
+          </div>
+          <div class="space-y-1.5 max-h-[44vh] overflow-y-auto pr-1">
+            {#each BS_GROUPS as [group, names]}
+              <div class="text-[9px] uppercase tracking-wider text-zinc-600 font-semibold pt-1.5">{group}</div>
+              {#each names as n}
+                <div>
+                  <div class="flex justify-between text-[10px] text-zinc-400"><span>{bsLabel(n)}</span><span>{bs[n].toFixed(1)}</span></div>
+                  <input type="range" min="0" max="1.5" step="0.1" bind:value={bs[n]} class="w-full accent-green-500" />
+                </div>
+              {/each}
             {/each}
           </div>
         </div>

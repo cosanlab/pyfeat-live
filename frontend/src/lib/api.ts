@@ -405,7 +405,7 @@ export const generateApi = {
   editFrame: async (
     jpeg: Blob,
     ctrl: { expression: string; strength: number; mouthMode: string; aus?: Record<string, number> | null;
-            live?: boolean; liveReset?: boolean },
+            blendshapes?: Record<string, number> | null; live?: boolean; liveReset?: boolean },
   ): Promise<Blob> => {
     const headers: Record<string, string> = {
       'Content-Type': 'image/jpeg',
@@ -413,8 +413,9 @@ export const generateApi = {
       'X-Strength': String(ctrl.strength),
       'X-Mouth-Mode': ctrl.mouthMode,
     };
-    // per-AU dict (overrides the preset server-side); only sent when non-empty
+    // per-AU / per-blendshape dict (overrides the preset server-side); only sent when non-empty
     if (ctrl.aus && Object.keys(ctrl.aus).length > 0) headers['X-AUs'] = JSON.stringify(ctrl.aus);
+    if (ctrl.blendshapes && Object.keys(ctrl.blendshapes).length > 0) headers['X-Blendshapes'] = JSON.stringify(ctrl.blendshapes);
     if (ctrl.live) { headers['X-Live'] = '1'; if (ctrl.liveReset) headers['X-Live-Reset'] = '1'; }   // stateful mouth-stabilized stream
     const r = await fetch('/api/generate/frame', { method: 'POST', headers, body: jpeg });
     if (!r.ok) throw new ApiError(r.status, `generateFrame: ${r.status} ${r.statusText}`);
@@ -422,11 +423,13 @@ export const generateApi = {
   },
   // 478x3 mesh vertices for the WebGL viewer (neutral base + live per-control updates)
   meshVertices: async (
-    ctrl: { expression?: string; strength: number; aus?: Record<string, number> | null },
+    ctrl: { expression?: string; strength: number; aus?: Record<string, number> | null;
+            blendshapes?: Record<string, number> | null },
   ): Promise<number[][]> => {
     const headers: Record<string, string> = { 'X-Strength': String(ctrl.strength) };
     if (ctrl.expression) headers['X-Expression'] = ctrl.expression;
     if (ctrl.aus && Object.keys(ctrl.aus).length > 0) headers['X-AUs'] = JSON.stringify(ctrl.aus);
+    if (ctrl.blendshapes && Object.keys(ctrl.blendshapes).length > 0) headers['X-Blendshapes'] = JSON.stringify(ctrl.blendshapes);
     const r = await fetch('/api/generate/mesh-vertices', { method: 'POST', headers });
     if (!r.ok) throw new ApiError(r.status, `meshVertices: ${r.status} ${r.statusText}`);
     return (await r.json()).vertices;
@@ -446,7 +449,8 @@ export const generateApi = {
   // animate a neutral reference image: ramp 0->strength->0 -> mp4
   animate: async (
     jpeg: Blob,
-    ctrl: { expression: string; strength: number; mouthMode: string; aus?: Record<string, number> | null },
+    ctrl: { expression: string; strength: number; mouthMode: string; aus?: Record<string, number> | null;
+            blendshapes?: Record<string, number> | null },
     opts: { frames: number; fps: number } = { frames: 20, fps: 12 },
   ): Promise<Blob> => {
     const headers: Record<string, string> = {
@@ -458,6 +462,7 @@ export const generateApi = {
     };
     if (ctrl.expression) headers['X-Expression'] = ctrl.expression;
     if (ctrl.aus && Object.keys(ctrl.aus).length > 0) headers['X-AUs'] = JSON.stringify(ctrl.aus);
+    if (ctrl.blendshapes && Object.keys(ctrl.blendshapes).length > 0) headers['X-Blendshapes'] = JSON.stringify(ctrl.blendshapes);
     const r = await fetch('/api/generate/animate', { method: 'POST', headers, body: jpeg });
     if (!r.ok) throw new ApiError(r.status, `generateAnimate: ${r.status} ${r.statusText}`);
     return r.blob();

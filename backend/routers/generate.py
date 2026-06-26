@@ -41,17 +41,17 @@ def _encode_jpeg(out) -> bytes:
     return buf.getvalue()
 
 
-def _edit_sync(editor, img: Image.Image, expression, strength: float, mouth_mode: str, aus) -> bytes:
-    # aus (per-AU dict) takes precedence over the expression preset when provided
-    out = editor.edit_frame(np.asarray(img), expression=(None if aus else expression),
-                            aus=aus, strength=strength, mouth_mode=mouth_mode)
+def _edit_sync(editor, img: Image.Image, expression, strength: float, mouth_mode: str, aus, blendshapes=None) -> bytes:
+    # blendshapes > aus > expression preset (blendshapes/aus drive an identity-preserving edit)
+    out = editor.edit_frame(np.asarray(img), expression=(None if (aus or blendshapes) else expression),
+                            aus=aus, strength=strength, mouth_mode=mouth_mode, blendshapes=blendshapes)
     return _encode_jpeg(out)
 
 
-def _live_sync(session, img: Image.Image, expression, strength: float, mouth_mode: str, aus) -> bytes:
+def _live_sync(session, img: Image.Image, expression, strength: float, mouth_mode: str, aus, blendshapes=None) -> bytes:
     # stateful per-stream edit: EMA-smooths the mouth across frames to kill the live mouth jitter
-    out = session.edit(np.asarray(img), expression=(None if aus else expression),
-                       aus=aus, strength=strength, mouth_mode=mouth_mode)
+    out = session.edit(np.asarray(img), expression=(None if (aus or blendshapes) else expression),
+                       aus=aus, strength=strength, mouth_mode=mouth_mode, blendshapes=blendshapes)
     return _encode_jpeg(out)
 
 
@@ -64,9 +64,17 @@ def _get_live_session(app):
     return sess
 
 
-def _mesh_vertices(editor, aus, expression: str | None, strength: float):
+def _mesh_vertices(editor, aus, expression: str | None, strength: float, blendshapes=None):
     """478x3 mesh vertices (geometry-only) for a control state — a tiny payload for the WebGL
     viewer (the frontend owns rendering: orientation, centering, wireframe, morph)."""
+    if blendshapes:                                         # sparse {ARKit name: val} -> dense (52,) for the rig
+        ed = editor._R.ed
+        vec = np.zeros(len(ed.bs_names), np.float32)
+        for n, val in blendshapes.items():
+            j = ed.bs_idx.get(n)
+            if j is not None:
+                vec[j] = val
+        return editor.edit_mesh(blendshapes=vec, strength=strength).astype(float).tolist()
     if not aus and expression and expression in editor._R.EXPRESSIONS:
         aus = dict(editor._R.EXPRESSIONS[expression])      # expand preset -> AU dict
     return editor.edit_mesh(aus=aus, strength=strength).astype(float).tolist()
@@ -78,26 +86,29 @@ def _parse_controls(request: Request):
         strength = float(request.headers.get("X-Strength", "0.6"))
     except ValueError:
         strength = 0.6
-    aus = None
-    aus_hdr = request.headers.get("X-AUs")
-    if aus_hdr:
+
+    def _dict(name):                                        # parse a {name: value} JSON header -> dict or None
+        hdr = request.headers.get(name)
+        if not hdr:
+            return None
         try:
-            parsed = json.loads(aus_hdr)
-            aus = {str(k): float(v) for k, v in parsed.items()} or None
+            parsed = json.loads(hdr)
+            return {str(k): float(v) for k, v in parsed.items()} or None
         except (ValueError, AttributeError) as exc:
-            raise HTTPException(400, f"bad X-AUs header: {exc}") from exc
-    return expression, strength, aus
+            raise HTTPException(400, f"bad {name} header: {exc}") from exc
+
+    return expression, strength, _dict("X-AUs"), _dict("X-Blendshapes")
 
 
 @router.post("/mesh-vertices")
 async def generate_mesh_vertices(request: Request) -> dict:
     """478x3 mesh vertices for the WebGL viewer (tiny ~6 KB payload). Called for the neutral
     base once and for the current control state on each slider change."""
-    expression, strength, aus = _parse_controls(request)
+    expression, strength, aus, blendshapes = _parse_controls(request)
     editor = _get_editor(request.app)
     loop = asyncio.get_running_loop()
     async with request.app.state.generate_lock:
-        verts = await loop.run_in_executor(_EXECUTOR, _mesh_vertices, editor, aus, expression, strength)
+        verts = await loop.run_in_executor(_EXECUTOR, _mesh_vertices, editor, aus, expression, strength, blendshapes)
     return {"vertices": verts}
 
 
@@ -126,7 +137,7 @@ async def generate_frame(request: Request) -> Response:
         img = Image.open(io.BytesIO(body)).convert("RGB")
     except Exception as exc:
         raise HTTPException(400, f"could not decode image: {exc}") from exc
-    expression, strength, aus = _parse_controls(request)
+    expression, strength, aus, blendshapes = _parse_controls(request)
     expression = expression or "smile"                       # /frame defaults to the smile preset
     mouth_mode = request.headers.get("X-Mouth-Mode", "inpaint_v6")
     loop = asyncio.get_running_loop()
@@ -135,13 +146,13 @@ async def generate_frame(request: Request) -> Response:
             session = _get_live_session(request.app)
             if request.headers.get("X-Live-Reset"):
                 session.reset()
-            jpeg = await loop.run_in_executor(_EXECUTOR, _live_sync, session, img, expression, strength, mouth_mode, aus)
+            jpeg = await loop.run_in_executor(_EXECUTOR, _live_sync, session, img, expression, strength, mouth_mode, aus, blendshapes)
         else:                                                # still image -> stateless
-            jpeg = await loop.run_in_executor(_EXECUTOR, _edit_sync, _get_editor(request.app), img, expression, strength, mouth_mode, aus)
+            jpeg = await loop.run_in_executor(_EXECUTOR, _edit_sync, _get_editor(request.app), img, expression, strength, mouth_mode, aus, blendshapes)
     return Response(content=jpeg, media_type="image/jpeg")
 
 
-def _animate_sync(editor, img, expression, aus, strength, mouth_mode, frames, fps) -> bytes:
+def _animate_sync(editor, img, expression, aus, strength, mouth_mode, frames, fps, blendshapes=None) -> bytes:
     """Animate a neutral reference: ramp the edit 0 -> strength -> 0 over `frames`, encode mp4 (PyAV)."""
     import math
     import av
@@ -155,8 +166,8 @@ def _animate_sync(editor, img, expression, aus, strength, mouth_mode, frames, fp
     for i in range(frames):
         t = i / (frames - 1) if frames > 1 else 1.0
         s = strength * math.sin(math.pi * t)                                  # onset + offset (loops seamlessly)
-        f = editor.edit_frame(arr, expression=(None if aus else expression), aus=aus,
-                              strength=float(s), mouth_mode=mouth_mode)
+        f = editor.edit_frame(arr, expression=(None if (aus or blendshapes) else expression), aus=aus,
+                              strength=float(s), mouth_mode=mouth_mode, blendshapes=blendshapes)
         for p in stream.encode(av.VideoFrame.from_ndarray(np.ascontiguousarray(f), format="rgb24")):
             container.mux(p)
     for p in stream.encode():
@@ -174,7 +185,7 @@ async def generate_animate(request: Request) -> Response:
         img = Image.open(io.BytesIO(body)).convert("RGB")
     except Exception as exc:
         raise HTTPException(400, f"could not decode image: {exc}") from exc
-    expression, strength, aus = _parse_controls(request)
+    expression, strength, aus, blendshapes = _parse_controls(request)
     expression = expression or "smile"
     mouth_mode = request.headers.get("X-Mouth-Mode", "inpaint_v6")
     try:
@@ -189,5 +200,5 @@ async def generate_animate(request: Request) -> Response:
     loop = asyncio.get_running_loop()
     async with request.app.state.generate_lock:
         mp4 = await loop.run_in_executor(_EXECUTOR, _animate_sync, editor, img, expression, aus,
-                                         strength, mouth_mode, frames, fps)
+                                         strength, mouth_mode, frames, fps, blendshapes)
     return Response(content=mp4, media_type="video/mp4")
