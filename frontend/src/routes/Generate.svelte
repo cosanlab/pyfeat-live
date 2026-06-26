@@ -1,6 +1,6 @@
 <!-- frontend/src/routes/Generate.svelte -->
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { generateApi } from '../lib/api';
 
   type Mode = 'live' | 'image' | 'mesh';
@@ -50,13 +50,16 @@
   // ---- mesh ----
   let meshHtml = $state<string | null>(null);
   let meshBusy = $state(false);
-  async function renderMesh(frames = 1) {
-    meshBusy = true; apiError = null;
+  let meshFrame: HTMLIFrameElement;        // iframe ref (for live postMessage updates)
+  let meshReady = $state(false);           // true once the live static mesh announces 'meshready'
+  function meshCtrl() {
+    return { expression: ctrlMode === 'preset' ? expression : undefined, strength, aus: activeAus() };
+  }
+  async function renderMesh() {
+    // render the looping mesh iframe ONCE (on mesh entry) with the current controls as the target
+    meshBusy = true; apiError = null; meshReady = false;
     try {
-      meshHtml = await generateApi.meshHtml(
-        { expression: ctrlMode === 'preset' ? expression : undefined, strength, aus: activeAus() },
-        { frames },
-      );
+      meshHtml = await generateApi.meshHtml(meshCtrl());
     } catch (e: any) { apiError = e.message; }
     finally { meshBusy = false; }
   }
@@ -68,7 +71,7 @@
     if (mode === 'live') stop(); // leaving live → release the camera
     apiError = null;
     mode = m;
-    if (m === 'mesh') renderMesh();   // render on entry with current controls
+    if (m === 'mesh') renderMesh();   // render the looping mesh iframe once on entry
   }
 
   // ---- live mode ----
@@ -193,6 +196,42 @@
     loadFile(e.dataTransfer?.files ?? null);
   }
 
+  // the live static mesh iframe posts {type:'meshready'} once Plotly is up
+  onMount(() => {
+    const onMsg = (e: MessageEvent) => { if (e.data?.type === 'meshready') meshReady = true; };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  });
+
+  // Auto-update: sliders drive the output live (no Render/Re-run button). Debounced so a drag
+  // fires once on settle; a signature guard skips redundant work if nothing actually changed.
+  let autoTimer: ReturnType<typeof setTimeout>;
+  let lastSig = '';
+  $effect(() => {
+    void mode; void ctrlMode; void expression; void strength; void mouthMode; void JSON.stringify(aus);
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(autoUpdate, 180);
+  });
+  async function autoUpdate() {
+    if (mode === 'image') {
+      if (!srcBitmap) return;
+      const sig = 'img|' + expression + '|' + strength + '|' + mouthMode + '|' + JSON.stringify(activeAus());
+      if (sig === lastSig) return;
+      lastSig = sig;
+      clearAnim();                       // tweaking controls returns to the live still
+      await renderImage();
+    } else if (mode === 'mesh') {
+      if (!meshReady) return;            // iframe not up yet — the entry render already shows current controls
+      const sig = 'mesh|' + JSON.stringify(meshCtrl());
+      if (sig === lastSig) return;
+      lastSig = sig;
+      try {                              // morph the looping mesh's target live (no reload)
+        const { traces } = await generateApi.meshData(meshCtrl());
+        meshFrame?.contentWindow?.postMessage({ type: 'target', traces }, '*');
+      } catch (e: any) { apiError = e.message; }
+    }
+  }
+
   onDestroy(() => {
     stop();
     if (editedUrl) URL.revokeObjectURL(editedUrl);
@@ -256,7 +295,7 @@
       {:else}
         <!-- mesh mode: interactive Plotly 3D 478-mesh from py-feat -->
         {#if meshHtml}
-          <iframe title="478 mesh" srcdoc={meshHtml} class="w-full h-full border-0 rounded bg-white"></iframe>
+          <iframe bind:this={meshFrame} title="478 mesh" srcdoc={meshHtml} class="w-full h-full border-0 rounded bg-white"></iframe>
         {:else}
           <div class="text-[12.5px] text-zinc-500">{meshBusy ? 'Rendering mesh…' : 'Render the mesh →'}</div>
         {/if}
@@ -278,9 +317,6 @@
           <input type="file" accept="image/*" class="hidden"
                  onchange={(e) => loadFile((e.currentTarget as HTMLInputElement).files)} />
         </label>
-        <button class={neutralBtn} disabled={!srcBitmap || imageBusy} onclick={renderImage}>
-          {imageBusy ? 'Rendering…' : 'Re-run'}
-        </button>
         <button class={neutralBtn} disabled={!srcBitmap || animBusy} onclick={animateImage}>
           {animBusy ? 'Animating…' : 'Animate'}
         </button>
@@ -292,11 +328,10 @@
           <button class={neutralBtn} onclick={revertOriginal}>Revert to original</button>
         {/if}
       {:else}
-        <button class={primaryBtn} disabled={meshBusy} onclick={() => renderMesh()}>
-          {meshBusy ? 'Rendering…' : 'Render mesh'}
-        </button>
-        <button class={neutralBtn} disabled={meshBusy} onclick={() => renderMesh(12)}>Animate mesh</button>
-        <div class="text-[11px] text-zinc-500">478-landmark mesh, PLS-driven. Drag to rotate; animation auto-plays.</div>
+        {#if meshBusy}<div class="text-[11px] text-zinc-500">Rendering mesh…</div>{/if}
+        <div class="text-[11px] text-zinc-500 leading-relaxed">
+          Mesh loops neutral ↔ expression and morphs live as you adjust. Use <b>Pause</b> / <b>Loop</b> in the view; drag to rotate.
+        </div>
       {/if}
 
       {#if apiError}<div class="text-[11px] text-red-400">{apiError}</div>{/if}
