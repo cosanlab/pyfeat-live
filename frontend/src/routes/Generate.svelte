@@ -400,10 +400,14 @@
         <div>
           <div class={fieldLabel}>Teeth</div>
           <select bind:value={mouthMode} class={selectCls}>
+            <option value="real">real (your own teeth)</option>
             <option value="inpaint_v6">inpaint_v6</option>
             <option value="pbr">pbr</option>
             <option value="proc">proc</option>
           </select>
+          {#if mode === 'live' && mouthMode === 'real'}
+            <div class="text-[10px] text-zinc-500 mt-1 leading-snug">Open your mouth wide once to capture your teeth; it's reused for the rest of the stream.</div>
+          {/if}
         </div>
       {/if}
     </aside>
