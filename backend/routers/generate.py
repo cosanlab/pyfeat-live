@@ -55,6 +55,12 @@ def _live_sync(session, img: Image.Image, expression, strength: float, mouth_mod
     return _encode_jpeg(out)
 
 
+def _live_multi_sync(session, img: Image.Image, edits_map, max_faces):
+    # per-identity live edit: IOU-track faces -> apply each slot's own edit -> (jpeg, tracked faces)
+    out, faces = session.edit_multi(np.asarray(img), edits_map, max_faces=max_faces)
+    return _encode_jpeg(out), faces
+
+
 def _get_live_session(app):
     sess = getattr(app.state, "generate_live", None)
     if sess is None:
@@ -142,7 +148,22 @@ async def generate_frame(request: Request) -> Response:
     mouth_mode = request.headers.get("X-Mouth-Mode", "inpaint_v6")
     loop = asyncio.get_running_loop()
     async with request.app.state.generate_lock:
-        if request.headers.get("X-Live"):                    # live webcam frame -> stateful, mouth-stabilized
+        if request.headers.get("X-Live") and request.headers.get("X-Live-Multi"):   # per-identity live (IOU-tracked)
+            session = _get_live_session(request.app)
+            if request.headers.get("X-Live-Reset"):
+                session.reset()
+            try:
+                edits_map = json.loads(request.headers.get("X-Face-Edits-Map", "{}"))
+            except ValueError as exc:
+                raise HTTPException(400, f"bad X-Face-Edits-Map: {exc}") from exc
+            try:
+                max_faces = max(1, min(4, int(request.headers.get("X-Max-Faces", "4"))))
+            except ValueError:
+                max_faces = 4
+            jpeg, faces = await loop.run_in_executor(_EXECUTOR, _live_multi_sync, session, img, edits_map, max_faces)
+            return Response(content=jpeg, media_type="image/jpeg",
+                            headers={"X-Faces": json.dumps(faces), "Access-Control-Expose-Headers": "X-Faces"})
+        if request.headers.get("X-Live"):                    # live webcam frame -> stateful, mouth-stabilized (single)
             session = _get_live_session(request.app)
             if request.headers.get("X-Live-Reset"):
                 session.reset()

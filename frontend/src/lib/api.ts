@@ -421,6 +421,22 @@ export const generateApi = {
     if (!r.ok) throw new ApiError(r.status, `generateFrame: ${r.status} ${r.statusText}`);
     return r.blob();
   },
+  // per-identity LIVE edit: IOU-tracked faces, each with its own edit; returns the edited frame + tracked slots
+  editFrameLiveMulti: async (
+    jpeg: Blob,
+    opts: { editsMap: Record<string, unknown>; maxFaces: number; reset?: boolean },
+  ): Promise<{ blob: Blob; faces: { bbox: number[]; slot: number }[] }> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'image/jpeg', 'X-Live': '1', 'X-Live-Multi': '1',
+      'X-Face-Edits-Map': JSON.stringify(opts.editsMap), 'X-Max-Faces': String(opts.maxFaces),
+    };
+    if (opts.reset) headers['X-Live-Reset'] = '1';
+    const r = await fetch('/api/generate/frame', { method: 'POST', headers, body: jpeg });
+    if (!r.ok) throw new ApiError(r.status, `editFrameLiveMulti: ${r.status} ${r.statusText}`);
+    let faces: { bbox: number[]; slot: number }[] = [];
+    try { faces = JSON.parse(r.headers.get('X-Faces') || '[]'); } catch { faces = []; }
+    return { blob: await r.blob(), faces };
+  },
   // detect every face (bboxes, left-to-right) so the UI can offer a per-face picker
   detectFaces: async (jpeg: Blob): Promise<{ bbox: number[]; score?: number }[]> => {
     const r = await fetch('/api/generate/detect', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: jpeg });

@@ -33,6 +33,13 @@
   let faceBoxes = $state<number[][]>([]);   // detected bboxes [x1,y1,x2,y2] in source-natural coords
   let faceEdits: FaceEdit[] = [];           // parallel per-face edit state (plain; controls mirror the selected one)
   let selFace = $state(0);                  // selected face index
+  let showBoxes = $state(true);             // show the identity boxes overlay (image + live)
+  // ---- live per-identity (IOU-tracked across frames) ----
+  const MAX_LIVE_FACES = 4;
+  let liveSlots = $state<{ bbox: number[]; slot: number }[]>([]);   // tracked faces from the last frame
+  let liveEdits: Record<number, FaceEdit> = {};                      // per-slot edit state (plain)
+  let selSlot = $state<number | null>(null);                         // selected live identity
+  let liveW = $state(0), liveH = $state(0);                          // capture-frame dims (for the live box overlay %)
   let animUrl = $state<string | null>(null);   // object URL of the animation mp4
   let animBusy = $state(false);
 
@@ -165,15 +172,27 @@
       if (signal.aborted) return;
       let editedBlob: Blob;
       try {
-        editedBlob = await generateApi.editFrame(blob, { expression, strength, mouthMode, aus: activeAus(), blendshapes: activeBlendshapes(), live: true, liveReset: firstFrame });
+        // per-identity: persist the selected person's controls, send the per-slot edit map
+        if (selSlot !== null && liveEdits[selSlot]) liveEdits[selSlot] = snapshotControls();
+        const editsMap: Record<string, unknown> = {};
+        for (const s of Object.keys(liveEdits)) editsMap[s] = faceEditPayload(liveEdits[+s], []);
+        const res = await generateApi.editFrameLiveMulti(blob, { editsMap, maxFaces: MAX_LIVE_FACES, reset: firstFrame });
         firstFrame = false;
         apiError = null;
+        editedBlob = res.blob;
+        liveSlots = res.faces;
+        for (const f of res.faces) if (!(f.slot in liveEdits)) liveEdits[f.slot] = snapshotControls();  // new person -> current edit
+        if ((selSlot === null || !res.faces.some((f) => f.slot === selSlot)) && res.faces.length) {
+          selSlot = res.faces[0].slot;                          // (re)select an available identity
+          if (liveEdits[selSlot]) loadFaceEdit(liveEdits[selSlot]);
+        }
       } catch (e: any) {
         if (signal.aborted) return;
         apiError = e.message; await new Promise((r) => setTimeout(r, 250)); continue;
       }
       if (signal.aborted) return;
       const bmp = await createImageBitmap(editedBlob);
+      liveW = bmp.width; liveH = bmp.height;
       if (displayCanvas) {
         if (displayCanvas.width !== bmp.width) displayCanvas.width = bmp.width;
         if (displayCanvas.height !== bmp.height) displayCanvas.height = bmp.height;
@@ -213,6 +232,11 @@
     if (selFace >= i) selFace = Math.max(0, selFace - 1);
     if (faceBoxes.length && faceEdits[selFace]) loadFaceEdit(faceEdits[selFace]);
     renderImage();                                                 // removed face renders unedited (original pixels)
+  }
+  function selectLiveSlot(slot: number) {                           // pick a tracked live identity to edit
+    if (selSlot !== null && liveEdits[selSlot]) liveEdits[selSlot] = snapshotControls();
+    selSlot = slot;
+    if (liveEdits[slot]) loadFaceEdit(liveEdits[slot]);
   }
   // a per-face edit -> the wire payload (only the active control kind is sent)
   function faceEditPayload(fe: FaceEdit, bbox: number[]) {
@@ -377,7 +401,19 @@
     <div class="flex-1 flex items-center justify-center bg-zinc-950 min-h-0 p-4">
       {#if mode === 'live'}
         <video bind:this={videoEl} class="hidden" muted playsinline></video>
-        <canvas bind:this={displayCanvas} class="max-h-full max-w-full rounded"></canvas>
+        <div class="relative inline-block max-h-full max-w-full">
+          <canvas bind:this={displayCanvas} class="block max-h-full max-w-full rounded"></canvas>
+          {#if showBoxes && liveSlots.length > 1 && liveW}
+            {#each liveSlots as f (f.slot)}
+              <div role="button" tabindex="0" title={`Person ${f.slot + 1}`}
+                class="absolute rounded-sm border-2 cursor-pointer {f.slot === selSlot ? 'border-green-400' : 'border-white/50 hover:border-white'}"
+                style="left:{(f.bbox[0] / liveW) * 100}%; top:{(f.bbox[1] / liveH) * 100}%; width:{((f.bbox[2] - f.bbox[0]) / liveW) * 100}%; height:{((f.bbox[3] - f.bbox[1]) / liveH) * 100}%"
+                onclick={() => selectLiveSlot(f.slot)} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectLiveSlot(f.slot)}>
+                <span class="absolute -top-2 -left-2 w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold {f.slot === selSlot ? 'bg-green-400 text-green-950' : 'bg-zinc-800 text-zinc-100'}">{f.slot + 1}</span>
+              </div>
+            {/each}
+          {/if}
+        </div>
       {:else if mode === 'image'}
         <div
           class="w-full h-full flex items-center justify-center rounded-lg border border-dashed transition {dragOver ? 'border-green-400 bg-green-500/5' : 'border-zinc-800 bg-zinc-900/40'}"
@@ -392,7 +428,7 @@
           {:else if editedUrl || srcUrl}
             <div class="relative inline-block max-h-full max-w-full">
               <img src={editedUrl ?? srcUrl} alt={editedUrl ? 'edited result' : 'original'} class="block max-h-full max-w-full rounded" />
-              {#if faceBoxes.length > 1 && srcBitmap}
+              {#if faceBoxes.length > 1 && srcBitmap && showBoxes}
                 {#each faceBoxes as b, i}
                   <div role="button" tabindex="0" title={`Face ${i + 1}`}
                     class="absolute rounded-sm border-2 cursor-pointer {i === selFace ? 'border-green-400' : 'border-white/50 hover:border-white'}"
@@ -431,6 +467,21 @@
         {:else}
           <button class="w-full px-3 py-1.5 rounded-md text-[11.5px] font-medium bg-red-600 text-white border border-red-600 hover:bg-red-500" onclick={stop}>Stop</button>
           <div class="text-[11px] text-zinc-500">{fps} fps</div>
+          {#if liveSlots.length > 1}
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <span class={sectionLabel}>People — editing #{(selSlot ?? 0) + 1}</span>
+                <button class="text-[10px] text-zinc-500 hover:text-zinc-300" onclick={() => (showBoxes = !showBoxes)}>{showBoxes ? 'hide boxes' : 'show boxes'}</button>
+              </div>
+              <div class="flex flex-wrap gap-1">
+                {#each liveSlots as f (f.slot)}
+                  <button class="w-7 h-7 rounded text-[11px] font-medium border {f.slot === selSlot ? 'bg-green-500 text-green-950 border-green-500' : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:bg-zinc-800'}"
+                          onclick={() => selectLiveSlot(f.slot)}>{f.slot + 1}</button>
+                {/each}
+              </div>
+              <div class="text-[10px] text-zinc-500 mt-1 leading-snug">Each tracked person keeps their own edit — click a box or number to edit them.</div>
+            </div>
+          {/if}
         {/if}
       {:else if mode === 'image'}
         <label class="{primaryBtn} block cursor-pointer">
@@ -446,8 +497,8 @@
             <div class="flex items-center justify-between mb-1">
               <span class={sectionLabel}>Faces — editing #{selFace + 1}</span>
               <div class="flex items-center gap-2">
+                <button class="text-[10px] text-zinc-500 hover:text-zinc-300" onclick={() => (showBoxes = !showBoxes)}>{showBoxes ? 'hide boxes' : 'show boxes'}</button>
                 <button class="text-[10px] text-zinc-500 hover:text-zinc-300" onclick={copyEditToAll}>copy to all</button>
-                <button class="text-[10px] text-red-400/80 hover:text-red-400" onclick={() => removeFace(selFace)}>remove #{selFace + 1}</button>
               </div>
             </div>
             <div class="flex flex-wrap gap-1">
