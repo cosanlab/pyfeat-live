@@ -253,6 +253,14 @@
       strength: fe.strength, mouth_mode: fe.mouthMode,
     };
   }
+  // the box the EDIT actually covers: the square the chip crop uses (max side × 1.2, centred) —
+  // matches extract_face_square_pad_torch, so the drawn box reflects what gets edited (not the tight
+  // RetinaFace detection, which only spans eyes/nose).
+  function editRegion(b: number[]): number[] {
+    const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+    const half = (Math.max(b[2] - b[0], b[3] - b[1]) * 1.2) / 2;
+    return [cx - half, cy - half, cx + half, cy + half];
+  }
   function srcJpeg(): Promise<Blob> {                                 // full-res source as a jpeg (quality matters for a still)
     const c = document.createElement('canvas');
     c.width = srcBitmap!.width; c.height = srcBitmap!.height;
@@ -405,9 +413,10 @@
           <canvas bind:this={displayCanvas} class="block max-h-full max-w-full rounded"></canvas>
           {#if showBoxes && liveSlots.length > 1 && liveW}
             {#each liveSlots as f (f.slot)}
+              {@const r = editRegion(f.bbox)}
               <div role="button" tabindex="0" title={`Person ${f.slot + 1}`}
                 class="absolute rounded-sm border-2 cursor-pointer {f.slot === selSlot ? 'border-green-400' : 'border-white/50 hover:border-white'}"
-                style="left:{(f.bbox[0] / liveW) * 100}%; top:{(f.bbox[1] / liveH) * 100}%; width:{((f.bbox[2] - f.bbox[0]) / liveW) * 100}%; height:{((f.bbox[3] - f.bbox[1]) / liveH) * 100}%"
+                style="left:{(r[0] / liveW) * 100}%; top:{(r[1] / liveH) * 100}%; width:{((r[2] - r[0]) / liveW) * 100}%; height:{((r[3] - r[1]) / liveH) * 100}%"
                 onclick={() => selectLiveSlot(f.slot)} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectLiveSlot(f.slot)}>
                 <span class="absolute -top-2 -left-2 w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold {f.slot === selSlot ? 'bg-green-400 text-green-950' : 'bg-zinc-800 text-zinc-100'}">{f.slot + 1}</span>
               </div>
@@ -430,9 +439,10 @@
               <img src={editedUrl ?? srcUrl} alt={editedUrl ? 'edited result' : 'original'} class="block max-h-full max-w-full rounded" />
               {#if faceBoxes.length > 1 && srcBitmap && showBoxes}
                 {#each faceBoxes as b, i}
+                  {@const r = editRegion(b)}
                   <div role="button" tabindex="0" title={`Face ${i + 1}`}
                     class="absolute rounded-sm border-2 cursor-pointer {i === selFace ? 'border-green-400' : 'border-white/50 hover:border-white'}"
-                    style="left:{(b[0] / srcBitmap.width) * 100}%; top:{(b[1] / srcBitmap.height) * 100}%; width:{((b[2] - b[0]) / srcBitmap.width) * 100}%; height:{((b[3] - b[1]) / srcBitmap.height) * 100}%"
+                    style="left:{(r[0] / srcBitmap.width) * 100}%; top:{(r[1] / srcBitmap.height) * 100}%; width:{((r[2] - r[0]) / srcBitmap.width) * 100}%; height:{((r[3] - r[1]) / srcBitmap.height) * 100}%"
                     onclick={() => selectFace(i)} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectFace(i)}>
                     <span class="absolute -top-2 -left-2 w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold {i === selFace ? 'bg-green-400 text-green-950' : 'bg-zinc-800 text-zinc-100'}">{i + 1}</span>
                     <button type="button" title="Remove this face (false detection)"
@@ -487,7 +497,7 @@
         <label class="{primaryBtn} block cursor-pointer">
           Choose image
           <input type="file" accept="image/*" class="hidden"
-                 onchange={(e) => loadFile((e.currentTarget as HTMLInputElement).files)} />
+                 onchange={(e) => { const el = e.currentTarget as HTMLInputElement; loadFile(el.files); el.value = ''; }} />
         </label>
         <button class={neutralBtn} disabled={!srcBitmap || animBusy} onclick={animateImage}>
           {animBusy ? 'Animating…' : 'Animate'}
