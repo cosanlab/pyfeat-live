@@ -29,10 +29,11 @@ use objc2::define_class;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
-use objc2_foundation::NSObjectProtocol;
+use objc2_app_kit::{NSModalResponseOK, NSOpenPanel};
+use objc2_foundation::{NSArray, NSObjectProtocol, NSURL};
 use objc2_web_kit::{
-    WKFrameInfo, WKMediaCaptureType, WKPermissionDecision, WKSecurityOrigin,
-    WKUIDelegate, WKWebView,
+    WKFrameInfo, WKMediaCaptureType, WKOpenPanelParameters, WKPermissionDecision,
+    WKSecurityOrigin, WKUIDelegate, WKWebView,
 };
 
 define_class!(
@@ -62,6 +63,41 @@ define_class!(
             // re-prompting at the WebView layer is the bug we work
             // around.
             decision_handler.call((WKPermissionDecision::Grant,));
+        }
+
+        // File-input open panel. WKWebView routes HTML `<input type=file>`
+        // clicks here; wry normally implements this, but our delegate replaces
+        // wry's, so without this every file picker in the app silently does
+        // nothing. We present a standard NSOpenPanel and hand the chosen URLs
+        // back to WebKit (null on cancel).
+        #[unsafe(method(webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:))]
+        fn _run_open_panel(
+            &self,
+            _web_view: &WKWebView,
+            parameters: &WKOpenPanelParameters,
+            _frame: &WKFrameInfo,
+            completion_handler: &block2::DynBlock<dyn Fn(*mut NSArray<NSURL>)>,
+        ) {
+            // UI-delegate callbacks are delivered on the main thread.
+            let Some(mtm) = MainThreadMarker::new() else {
+                completion_handler.call((std::ptr::null_mut(),));
+                return;
+            };
+            let panel = NSOpenPanel::openPanel(mtm);
+            panel.setCanChooseFiles(true);
+            panel.setCanChooseDirectories(false);
+            // SAFETY: `parameters` is a live WKOpenPanelParameters for this call.
+            let allows_multiple = unsafe { parameters.allowsMultipleSelection() };
+            panel.setAllowsMultipleSelection(allows_multiple);
+
+            if panel.runModal() == NSModalResponseOK {
+                let urls = panel.URLs();
+                // WebKit retains the array for the duration of the call; our
+                // `urls` handle is released when it drops at end of scope.
+                completion_handler.call((Retained::as_ptr(&urls) as *mut NSArray<NSURL>,));
+            } else {
+                completion_handler.call((std::ptr::null_mut(),));
+            }
         }
     }
 );
