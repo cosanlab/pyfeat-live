@@ -29,7 +29,7 @@ def _get_editor(app):
     """Lazy singleton FaceEditor on app.state (self-contained: builds its own detector)."""
     editor = getattr(app.state, "generate_editor", None)
     if editor is None:
-        from au_face_generation import FaceEditor
+        from pyfeat_generator import FaceEditor
         editor = FaceEditor(device=_pick_device(), models_dir=os.environ.get("AU_FACE_MODELS"))
         app.state.generate_editor = editor
     return editor
@@ -64,7 +64,7 @@ def _live_multi_sync(session, img: Image.Image, edits_map, max_faces):
 def _get_live_session(app):
     sess = getattr(app.state, "generate_live", None)
     if sess is None:
-        from au_face_generation import LiveEditSession
+        from pyfeat_generator import LiveEditSession
         sess = LiveEditSession(_get_editor(app))
         app.state.generate_live = sess
     return sess
