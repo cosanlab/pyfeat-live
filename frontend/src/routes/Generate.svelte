@@ -40,6 +40,11 @@
   let liveEdits: Record<number, FaceEdit> = {};                      // per-slot edit state (plain)
   let selSlot = $state<number | null>(null);                         // selected live identity
   let liveW = $state(0), liveH = $state(0);                          // capture-frame dims (for the live box overlay %)
+  // rendered <img> size (px). The image can overflow its wrapper when its aspect binds on width
+  // (a landscape photo in a shorter box), so positioning boxes as % of the wrapper desyncs them.
+  // Measuring the image's own rendered size and placing boxes in px keeps them locked to the face.
+  let imgW = $state(0), imgH = $state(0);
+  let fileInputEl: HTMLInputElement;        // ref'd so a real button can trigger it (label+display:none doesn't open the picker in WebKit/Safari)
   let animUrl = $state<string | null>(null);   // object URL of the animation mp4
   let animBusy = $state(false);
 
@@ -436,13 +441,14 @@
             <video src={animUrl} autoplay loop controls class="max-h-full max-w-full rounded"></video>
           {:else if editedUrl || srcUrl}
             <div class="relative inline-block max-h-full max-w-full">
-              <img src={editedUrl ?? srcUrl} alt={editedUrl ? 'edited result' : 'original'} class="block max-h-full max-w-full rounded" />
-              {#if faceBoxes.length > 1 && srcBitmap && showBoxes}
+              <img src={editedUrl ?? srcUrl} alt={editedUrl ? 'edited result' : 'original'} class="block max-h-full max-w-full rounded"
+                bind:clientWidth={imgW} bind:clientHeight={imgH} />
+              {#if faceBoxes.length > 1 && srcBitmap && showBoxes && imgW}
                 {#each faceBoxes as b, i}
                   {@const r = editRegion(b)}
                   <div role="button" tabindex="0" title={`Face ${i + 1}`}
                     class="absolute rounded-sm border-2 cursor-pointer {i === selFace ? 'border-green-400' : 'border-white/50 hover:border-white'}"
-                    style="left:{(r[0] / srcBitmap.width) * 100}%; top:{(r[1] / srcBitmap.height) * 100}%; width:{((r[2] - r[0]) / srcBitmap.width) * 100}%; height:{((r[3] - r[1]) / srcBitmap.height) * 100}%"
+                    style="left:{(r[0] / srcBitmap.width) * imgW}px; top:{(r[1] / srcBitmap.height) * imgH}px; width:{((r[2] - r[0]) / srcBitmap.width) * imgW}px; height:{((r[3] - r[1]) / srcBitmap.height) * imgH}px"
                     onclick={() => selectFace(i)} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectFace(i)}>
                     <span class="absolute -top-2 -left-2 w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold {i === selFace ? 'bg-green-400 text-green-950' : 'bg-zinc-800 text-zinc-100'}">{i + 1}</span>
                     <button type="button" title="Remove this face (false detection)"
@@ -494,11 +500,13 @@
           {/if}
         {/if}
       {:else if mode === 'image'}
-        <label class="{primaryBtn} block cursor-pointer">
+        <!-- Real button + ref'd input (kept rendered via sr-only, NOT display:none) so the native
+             picker opens in every engine. A <label> wrapping a display:none file input is dead in WebKit. -->
+        <button type="button" class="{primaryBtn} block cursor-pointer" onclick={() => fileInputEl?.click()}>
           Choose image
-          <input type="file" accept="image/*" class="hidden"
-                 onchange={(e) => { const el = e.currentTarget as HTMLInputElement; loadFile(el.files); el.value = ''; }} />
-        </label>
+        </button>
+        <input bind:this={fileInputEl} type="file" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true"
+               onchange={(e) => { const el = e.currentTarget as HTMLInputElement; loadFile(el.files); el.value = ''; }} />
         <button class={neutralBtn} disabled={!srcBitmap || animBusy} onclick={animateImage}>
           {animBusy ? 'Animating…' : 'Animate'}
         </button>
