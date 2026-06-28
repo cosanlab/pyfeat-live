@@ -20,6 +20,7 @@ use std::process::Stdio;
 use std::sync::Mutex;
 
 use serde::Serialize;
+use tauri::menu::{MenuBuilder, MenuItem, SubmenuBuilder};
 use tauri::{
     AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
 };
@@ -104,6 +105,87 @@ pub fn run() {
             {
                 let _ = window;
             }
+
+            // Native application menu. The shell shipped without one, so the
+            // only update prompt was the launch-time banner. This adds an
+            // explicit "Check for Updates…" item to the app menu.
+            //
+            // A custom menu *replaces* Tauri's default, which would otherwise
+            // drop the cut/copy/paste keyboard shortcuts — so we rebuild the
+            // standard Edit/Window submenus too. The macOS-only predefined
+            // items (services/hide/fullscreen) are cfg-gated so non-macOS
+            // builds stay green.
+            //
+            // We deliberately don't run the update check here: the frontend
+            // owns the update lifecycle (it holds the pending Update handle
+            // the install button needs), so the menu just pokes it via
+            // `menu://check-for-updates` and the UpdateBanner re-runs its own
+            // check.
+            let settings = MenuItem::with_id(
+                app,
+                "settings",
+                "Settings…",
+                true,
+                Some("CmdOrCtrl+,"),
+            )?;
+            let check_updates = MenuItem::with_id(
+                app,
+                "check-for-updates",
+                "Check for Updates…",
+                true,
+                None::<&str>,
+            )?;
+            let mut app_menu = SubmenuBuilder::new(app, "Py-feat")
+                .about(None)
+                .separator()
+                .item(&settings)
+                .separator()
+                .item(&check_updates)
+                .separator();
+            #[cfg(target_os = "macos")]
+            {
+                app_menu = app_menu
+                    .services()
+                    .separator()
+                    .hide()
+                    .hide_others()
+                    .show_all()
+                    .separator();
+            }
+            let app_menu = app_menu.quit().build()?;
+
+            let edit_menu = SubmenuBuilder::new(app, "Edit")
+                .undo()
+                .redo()
+                .separator()
+                .cut()
+                .copy()
+                .paste()
+                .select_all()
+                .build()?;
+
+            let mut window_menu = SubmenuBuilder::new(app, "Window").minimize();
+            #[cfg(target_os = "macos")]
+            {
+                window_menu = window_menu.fullscreen();
+            }
+            let window_menu = window_menu.separator().close_window().build()?;
+
+            let menu = MenuBuilder::new(app)
+                .items(&[&app_menu, &edit_menu, &window_menu])
+                .build()?;
+            app.set_menu(menu)?;
+            app.on_menu_event(|app, event| {
+                match event.id().0.as_str() {
+                    "check-for-updates" => {
+                        let _ = app.emit("menu://check-for-updates", ());
+                    }
+                    "settings" => {
+                        let _ = app.emit("menu://settings", ());
+                    }
+                    _ => {}
+                }
+            });
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
