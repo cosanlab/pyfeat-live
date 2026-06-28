@@ -1,15 +1,27 @@
 <!-- frontend/src/routes/Generate.svelte -->
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { generateApi } from '../lib/api';
   import MeshCanvas from '../lib/components/MeshCanvas.svelte';
   import MeshConfigModal from '../lib/components/MeshConfigModal.svelte';
   import GazePad from '../lib/components/GazePad.svelte';
   import { DEFAULT_MESH_CONFIG, type MeshConfig } from '../lib/mesh/config';
   import Settings from '@lucide/svelte/icons/settings';
+  import { experimental } from '../lib/experimental.svelte';
 
   type Mode = 'live' | 'image' | 'mesh';
-  let mode = $state<Mode>('live');
+  let mode = $state<Mode>('mesh');
+
+  onMount(() => {
+    if (mode === 'mesh') loadMesh();   // default tab — setMode() would otherwise be the only loader
+  });
+
+  // If the experimental flag for the active sub-mode is turned off while it's
+  // selected, drop back to Mesh (setMode releases the camera when leaving Live).
+  $effect(() => {
+    if (mode === 'live' && !experimental.generateLive) setMode('mesh');
+    if (mode === 'image' && !experimental.generateImage) setMode('mesh');
+  });
 
   // ---- live ----
   let videoEl: HTMLVideoElement;
@@ -400,12 +412,16 @@
   <!-- mode switcher (matches TopNav/LiveSidebar segmented style) -->
   <div class="flex items-center px-4 py-2 border-b border-zinc-900">
     <div class="flex gap-0.5 bg-zinc-900 rounded-md p-0.5">
-      <button class="{segBtn} {mode === 'live' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
-              onclick={() => setMode('live')}>Live</button>
-      <button class="{segBtn} {mode === 'image' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
-              onclick={() => setMode('image')}>Image</button>
       <button class="{segBtn} {mode === 'mesh' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
               onclick={() => setMode('mesh')}>Mesh</button>
+      {#if experimental.generateLive}
+        <button class="{segBtn} {mode === 'live' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
+                onclick={() => setMode('live')}>Live</button>
+      {/if}
+      {#if experimental.generateImage}
+        <button class="{segBtn} {mode === 'image' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
+                onclick={() => setMode('image')}>Image</button>
+      {/if}
       <button class="{segBtn} text-zinc-700 cursor-not-allowed" disabled title="coming soon">Video</button>
     </div>
   </div>
