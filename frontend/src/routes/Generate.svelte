@@ -423,7 +423,6 @@
         <button class="{segBtn} {mode === 'image' ? 'bg-zinc-800 text-zinc-50 font-medium' : 'text-zinc-500 hover:text-zinc-300'}"
                 onclick={() => setMode('image')}>Image</button>
       {/if}
-      <button class="{segBtn} text-zinc-700 cursor-not-allowed" disabled title="coming soon">Video</button>
     </div>
   </div>
 

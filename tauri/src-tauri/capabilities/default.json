@@ -1,8 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability set for Py-feat Live. The Rust shell drives all subprocess spawning directly via std::process — no JS-callable shell APIs are exposed.",
+  "description": "Default capability set for Py-feat Live. The Rust shell drives all subprocess spawning directly via std::process — no JS-callable shell APIs are exposed. The `remote` URLs grant IPC to the SPA, which is served by the bundled backend at http://127.0.0.1:<port> (the webview is navigated there after the splash); without it Tauri injects no IPC at that remote origin, so the SPA can't receive menu:// events (Settings / Check for Updates) or use the updater. Scoped to loopback only — the app's own backend plus the Vite dev server.",
   "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*", "http://localhost:*"]
+  },
   "permissions": [
     "core:default",
     "updater:default",
