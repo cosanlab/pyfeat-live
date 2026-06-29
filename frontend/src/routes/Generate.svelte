@@ -8,6 +8,7 @@
   import { DEFAULT_MESH_CONFIG, type MeshConfig } from '../lib/mesh/config';
   import Settings from '@lucide/svelte/icons/settings';
   import { experimental } from '../lib/experimental.svelte';
+  import { cameraStore, refreshDevices, startCamera, stopCamera } from '../lib/webrtc/useCamera.svelte';
 
   type Mode = 'live' | 'image' | 'mesh';
   let mode = $state<Mode>('mesh');
@@ -143,12 +144,19 @@
     apiError = null;
     mode = m;
     if (m === 'mesh') loadMesh();      // load edges/neutral/target for the WebGL viewer
+    if (m === 'live') refreshDevices(); // populate the camera-source picker
   }
 
   // ---- live mode ----
   async function start() {
+    if (!cameraStore.selectedDeviceId) await refreshDevices();
+    const deviceId = cameraStore.selectedDeviceId;
+    if (!deviceId) {
+      apiError = cameraStore.error || 'No camera found — grant camera permission and try again.';
+      return;
+    }
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+      stream = await startCamera(deviceId, 1280, 720);  // honours the picked device (exact deviceId)
     } catch (e: any) {
       apiError = `Camera error: ${e.message}`;
       return;
@@ -163,8 +171,22 @@
   function stop() {
     isStreaming = false;
     loopAbort?.abort();
-    stream?.getTracks().forEach((t) => t.stop());
+    stopCamera();
     stream = null;
+  }
+
+  // Switch the camera source. Remembers the choice; if already streaming,
+  // restart the stream on the new device (the loop keeps reading videoEl).
+  async function switchCamera(deviceId: string) {
+    cameraStore.selectedDeviceId = deviceId;
+    if (!isStreaming) return;
+    try {
+      stream = await startCamera(deviceId, 1280, 720);
+      videoEl.srcObject = stream;
+      await videoEl.play();
+    } catch (e: any) {
+      apiError = `Camera error: ${e.message}`;
+    }
   }
 
   async function runLoop(signal: AbortSignal) {
@@ -494,6 +516,14 @@
     <aside class="w-[220px] p-4 bg-zinc-900 border-l border-zinc-900 space-y-4">
       <div class={sectionLabel}>Source</div>
       {#if mode === 'live'}
+        {#if cameraStore.devices.length > 0}
+          <select class={selectCls} value={cameraStore.selectedDeviceId}
+                  onchange={(e) => switchCamera(e.currentTarget.value)}>
+            {#each cameraStore.devices as d (d.deviceId)}
+              <option value={d.deviceId}>{d.label}</option>
+            {/each}
+          </select>
+        {/if}
         {#if !isStreaming}
           <button class={primaryBtn} onclick={start}>Start camera</button>
         {:else}
