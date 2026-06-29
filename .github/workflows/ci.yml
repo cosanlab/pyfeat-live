@@ -1,0 +1,56 @@
+name: CI
+
+# Validates every PR into main before it can merge: the frontend builds and the
+# Tauri crate type-checks. Toolchain pins match release.yml so a green CI run
+# means the same versions the release build uses.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - name: install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: build (vite)
+        run: pnpm build
+      - name: type-check (svelte-check)
+        # Non-blocking for now: svelte-check fails on a pre-existing missing
+        # type declaration for the vendored ../vendor/ogl.js. Surfaced here but
+        # not gating; add the decl, then drop continue-on-error to make it a gate.
+        continue-on-error: true
+        run: pnpm check
+
+  tauri:
+    # macOS runner is required: the crate has macOS-only dependencies
+    # (objc2-app-kit, the WKWebView delegate), so it does not type-check on Linux.
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: tauri/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - name: install rust
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tauri/src-tauri
+      - name: cargo check
+        run: cargo check --locked
