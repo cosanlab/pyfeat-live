@@ -391,6 +391,7 @@
 
   onDestroy(() => {
     stop();
+    clearTimeout(autoTimer);               // don't let a debounced edit fire after unmount
     if (editedUrl) URL.revokeObjectURL(editedUrl);
     if (srcUrl) URL.revokeObjectURL(srcUrl);
     if (animUrl) URL.revokeObjectURL(animUrl);

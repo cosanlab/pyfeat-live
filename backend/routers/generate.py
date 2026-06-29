@@ -70,6 +70,21 @@ def _get_live_session(app):
     return sess
 
 
+async def _editor_async(app):
+    """Get-or-build the FaceEditor OFF the event loop. The first build imports
+    torch and loads the detector/generator models — seconds of work that must
+    not run on the asyncio loop (it would freeze live detection, health, and
+    every other route on first Generate use). The single-worker executor
+    serializes builds, so there's no double-construction."""
+    return await asyncio.get_running_loop().run_in_executor(_EXECUTOR, _get_editor, app)
+
+
+async def _live_session_async(app):
+    """Build the LiveEditSession (and its FaceEditor) off the event loop — same
+    rationale as _editor_async."""
+    return await asyncio.get_running_loop().run_in_executor(_EXECUTOR, _get_live_session, app)
+
+
 def _mesh_vertices(editor, aus, expression: str | None, strength: float, blendshapes=None):
     """478x3 mesh vertices (geometry-only) for a control state — a tiny payload for the WebGL
     viewer (the frontend owns rendering: orientation, centering, wireframe, morph)."""
@@ -111,8 +126,8 @@ async def generate_mesh_vertices(request: Request) -> dict:
     """478x3 mesh vertices for the WebGL viewer (tiny ~6 KB payload). Called for the neutral
     base once and for the current control state on each slider change."""
     expression, strength, aus, blendshapes = _parse_controls(request)
-    editor = _get_editor(request.app)
     loop = asyncio.get_running_loop()
+    editor = await _editor_async(request.app)
     async with request.app.state.generate_lock:
         verts = await loop.run_in_executor(_EXECUTOR, _mesh_vertices, editor, aus, expression, strength, blendshapes)
     return {"vertices": verts}
@@ -149,7 +164,7 @@ async def generate_frame(request: Request) -> Response:
     loop = asyncio.get_running_loop()
     async with request.app.state.generate_lock:
         if request.headers.get("X-Live") and request.headers.get("X-Live-Multi"):   # per-identity live (IOU-tracked)
-            session = _get_live_session(request.app)
+            session = await _live_session_async(request.app)
             if request.headers.get("X-Live-Reset"):
                 session.reset()
             try:
@@ -164,12 +179,13 @@ async def generate_frame(request: Request) -> Response:
             return Response(content=jpeg, media_type="image/jpeg",
                             headers={"X-Faces": json.dumps(faces), "Access-Control-Expose-Headers": "X-Faces"})
         if request.headers.get("X-Live"):                    # live webcam frame -> stateful, mouth-stabilized (single)
-            session = _get_live_session(request.app)
+            session = await _live_session_async(request.app)
             if request.headers.get("X-Live-Reset"):
                 session.reset()
             jpeg = await loop.run_in_executor(_EXECUTOR, _live_sync, session, img, expression, strength, mouth_mode, aus, blendshapes)
         else:                                                # still image -> stateless
-            jpeg = await loop.run_in_executor(_EXECUTOR, _edit_sync, _get_editor(request.app), img, expression, strength, mouth_mode, aus, blendshapes)
+            editor = await _editor_async(request.app)
+            jpeg = await loop.run_in_executor(_EXECUTOR, _edit_sync, editor, img, expression, strength, mouth_mode, aus, blendshapes)
     return Response(content=jpeg, media_type="image/jpeg")
 
 
@@ -191,8 +207,8 @@ async def generate_detect(request: Request) -> dict:
         min_score = float(request.headers.get("X-Min-Score", "0.9"))
     except ValueError:
         min_score = 0.9
-    editor = _get_editor(request.app)
     loop = asyncio.get_running_loop()
+    editor = await _editor_async(request.app)
     async with request.app.state.generate_lock:
         boxes = await loop.run_in_executor(_EXECUTOR, lambda: editor.detect_faces(np.asarray(img), min_score=min_score))
     return {"faces": boxes}
@@ -220,7 +236,8 @@ async def generate_frame_multi(request: Request) -> Response:
         raise HTTPException(400, f"bad X-Face-Edits header: {exc}") from exc
     loop = asyncio.get_running_loop()
     async with request.app.state.generate_lock:
-        jpeg = await loop.run_in_executor(_EXECUTOR, _edit_faces_sync, _get_editor(request.app), img, face_edits)
+        editor = await _editor_async(request.app)
+        jpeg = await loop.run_in_executor(_EXECUTOR, _edit_faces_sync, editor, img, face_edits)
     return Response(content=jpeg, media_type="image/jpeg")
 
 
@@ -268,8 +285,8 @@ async def generate_animate(request: Request) -> Response:
         fps = max(1, min(30, int(request.headers.get("X-FPS", "12"))))
     except ValueError:
         fps = 12
-    editor = _get_editor(request.app)
     loop = asyncio.get_running_loop()
+    editor = await _editor_async(request.app)
     async with request.app.state.generate_lock:
         mp4 = await loop.run_in_executor(_EXECUTOR, _animate_sync, editor, img, expression, aus,
                                          strength, mouth_mode, frames, fps, blendshapes)

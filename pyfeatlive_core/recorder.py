@@ -284,12 +284,18 @@ class SessionRecorder:
                 idx, frame, fex = item
                 # Convert raw PIL/ndarray -> VideoFrame HERE, on the writer
                 # thread, so the live event loop never pays it (see offer_frame).
-                if self.config.record_video:
-                    frame = _to_video_frame(frame)
-                    self._write_video(frame, idx)
-                if self.config.record_fex and fex is not None and len(fex):
-                    self._write_fex(fex, idx, frame)
-                self.frames_written += 1
+                # A single bad frame must NOT kill the writer thread — that would
+                # silently truncate the recording mid-session while the UI still
+                # shows "recording". Log and skip the offending frame instead.
+                try:
+                    if self.config.record_video:
+                        frame = _to_video_frame(frame)
+                        self._write_video(frame, idx)
+                    if self.config.record_fex and fex is not None and len(fex):
+                        self._write_fex(fex, idx, frame)
+                    self.frames_written += 1
+                except Exception as e:
+                    logger.warning("Skipping a bad recorder frame (idx=%s): %s", idx, e)
         except Exception as e:
             logger.exception("Writer thread crashed: %s", e)
         finally:

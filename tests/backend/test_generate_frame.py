@@ -11,7 +11,7 @@ def _jpeg(arr):
     return buf.getvalue()
 
 class _StubEditor:
-    def edit_frame(self, rgb, *, expression, strength, mouth_mode):
+    def edit_frame(self, rgb, *, expression, aus=None, strength, mouth_mode, blendshapes=None):
         # echo a solid frame tinted by strength so the test can assert a real edit ran
         out = np.zeros_like(rgb); out[:] = int(min(255, strength * 255)); return out
 
