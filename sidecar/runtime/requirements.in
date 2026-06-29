@@ -12,7 +12,7 @@
 # (--python-version 3.12 matches the runtime venv so the build is
 # reproducible regardless of the host's default Python.)
 py-feat==2.0.3
-pyfeat-generator==0.1.0
+pyfeat-generator==0.1.1
 torchcodec==0.14.0  # match torch 2.12 (transitive via py-feat resolves to a stale 0.11 otherwise)
 fastapi>=0.115
 uvicorn[standard]>=0.34
