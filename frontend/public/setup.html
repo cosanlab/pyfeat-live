@@ -179,6 +179,20 @@
           div.className = "err";
           div.textContent = String(e.payload);
           document.body.appendChild(div);
+          // One-click retry: relaunch the app, which re-runs the runtime
+          // bootstrap (venv already installed → just respawns the sidecar).
+          if (!document.getElementById("retry-btn")) {
+            const retry = document.createElement("button");
+            retry.id = "retry-btn";
+            retry.className = "apply";
+            retry.textContent = "Restart Py-feat Live";
+            retry.style.marginTop = "10px";
+            retry.onclick = () => {
+              retry.disabled = true;
+              window.__TAURI__.core.invoke("restart_app");
+            };
+            document.body.appendChild(retry);
+          }
         });
 
         // --- Auto-updater banner --------------------------------------

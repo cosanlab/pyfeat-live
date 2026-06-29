@@ -12,6 +12,7 @@
     // the user-facing label changes. Room for a real analysis UI later.
     { id: 'analyze', label: 'Extract' },
     { id: 'viewer', label: 'Viewer' },
+    { id: 'generate', label: 'Generate' },
   ];
 </script>
 

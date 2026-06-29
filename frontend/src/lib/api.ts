@@ -418,6 +418,109 @@ export const analyzeApi = {
   },
 };
 
+// ---------------- generate ----------------
+export const generateApi = {
+  editFrame: async (
+    jpeg: Blob,
+    ctrl: { expression: string; strength: number; mouthMode: string; aus?: Record<string, number> | null;
+            blendshapes?: Record<string, number> | null; live?: boolean; liveReset?: boolean },
+  ): Promise<Blob> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'image/jpeg',
+      'X-Expression': ctrl.expression,
+      'X-Strength': String(ctrl.strength),
+      'X-Mouth-Mode': ctrl.mouthMode,
+    };
+    // per-AU / per-blendshape dict (overrides the preset server-side); only sent when non-empty
+    if (ctrl.aus && Object.keys(ctrl.aus).length > 0) headers['X-AUs'] = JSON.stringify(ctrl.aus);
+    if (ctrl.blendshapes && Object.keys(ctrl.blendshapes).length > 0) headers['X-Blendshapes'] = JSON.stringify(ctrl.blendshapes);
+    if (ctrl.live) { headers['X-Live'] = '1'; if (ctrl.liveReset) headers['X-Live-Reset'] = '1'; }   // stateful mouth-stabilized stream
+    const r = await fetch('/api/generate/frame', { method: 'POST', headers, body: jpeg });
+    if (!r.ok) throw new ApiError(r.status, `generateFrame: ${r.status} ${r.statusText}`);
+    return r.blob();
+  },
+  // per-identity LIVE edit: IOU-tracked faces, each with its own edit; returns the edited frame + tracked slots
+  editFrameLiveMulti: async (
+    jpeg: Blob,
+    opts: { editsMap: Record<string, unknown>; maxFaces: number; reset?: boolean },
+  ): Promise<{ blob: Blob; faces: { bbox: number[]; slot: number }[] }> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'image/jpeg', 'X-Live': '1', 'X-Live-Multi': '1',
+      'X-Face-Edits-Map': JSON.stringify(opts.editsMap), 'X-Max-Faces': String(opts.maxFaces),
+    };
+    if (opts.reset) headers['X-Live-Reset'] = '1';
+    const r = await fetch('/api/generate/frame', { method: 'POST', headers, body: jpeg });
+    if (!r.ok) throw new ApiError(r.status, `editFrameLiveMulti: ${r.status} ${r.statusText}`);
+    let faces: { bbox: number[]; slot: number }[] = [];
+    try { faces = JSON.parse(r.headers.get('X-Faces') || '[]'); } catch { faces = []; }
+    return { blob: await r.blob(), faces };
+  },
+  // detect every face (bboxes, left-to-right) so the UI can offer a per-face picker
+  detectFaces: async (jpeg: Blob): Promise<{ bbox: number[]; score?: number }[]> => {
+    const r = await fetch('/api/generate/detect', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: jpeg });
+    if (!r.ok) throw new ApiError(r.status, `detectFaces: ${r.status} ${r.statusText}`);
+    return (await r.json()).faces;
+  },
+  // edit each face with its OWN params (selective multi-person edit)
+  editFrameMulti: async (
+    jpeg: Blob,
+    faceEdits: Array<{ bbox: number[]; expression?: string; aus?: Record<string, number> | null;
+                       blendshapes?: Record<string, number> | null; strength: number; mouth_mode: string }>,
+  ): Promise<Blob> => {
+    const r = await fetch('/api/generate/frame-multi', {
+      method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'X-Face-Edits': JSON.stringify(faceEdits) }, body: jpeg,
+    });
+    if (!r.ok) throw new ApiError(r.status, `editFrameMulti: ${r.status} ${r.statusText}`);
+    return r.blob();
+  },
+  // 478x3 mesh vertices for the WebGL viewer (neutral base + live per-control updates)
+  meshVertices: async (
+    ctrl: { expression?: string; strength: number; aus?: Record<string, number> | null;
+            blendshapes?: Record<string, number> | null },
+  ): Promise<number[][]> => {
+    const headers: Record<string, string> = { 'X-Strength': String(ctrl.strength) };
+    if (ctrl.expression) headers['X-Expression'] = ctrl.expression;
+    if (ctrl.aus && Object.keys(ctrl.aus).length > 0) headers['X-AUs'] = JSON.stringify(ctrl.aus);
+    if (ctrl.blendshapes && Object.keys(ctrl.blendshapes).length > 0) headers['X-Blendshapes'] = JSON.stringify(ctrl.blendshapes);
+    const r = await fetch('/api/generate/mesh-vertices', { method: 'POST', headers });
+    if (!r.ok) throw new ApiError(r.status, `meshVertices: ${r.status} ${r.statusText}`);
+    return (await r.json()).vertices;
+  },
+  // mesh tessellation edge pairs (constant; fetched once for the wireframe index buffer)
+  meshEdges: async (): Promise<number[][]> => {
+    const r = await fetch('/api/system/overlay-edges');
+    if (!r.ok) throw new ApiError(r.status, `meshEdges: ${r.status} ${r.statusText}`);
+    return (await r.json()).mp_tess;
+  },
+  // mesh triangle topology (constant; fetched once for the filled-surface index buffer)
+  meshFaces: async (): Promise<number[][]> => {
+    const r = await fetch('/api/generate/mesh-faces');
+    if (!r.ok) throw new ApiError(r.status, `meshFaces: ${r.status} ${r.statusText}`);
+    return (await r.json()).triangles;
+  },
+  // animate a neutral reference image: ramp 0->strength->0 -> mp4
+  animate: async (
+    jpeg: Blob,
+    ctrl: { expression: string; strength: number; mouthMode: string; aus?: Record<string, number> | null;
+            blendshapes?: Record<string, number> | null },
+    opts: { frames: number; fps: number } = { frames: 20, fps: 12 },
+  ): Promise<Blob> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'image/jpeg',
+      'X-Strength': String(ctrl.strength),
+      'X-Mouth-Mode': ctrl.mouthMode,
+      'X-Frames': String(opts.frames),
+      'X-FPS': String(opts.fps),
+    };
+    if (ctrl.expression) headers['X-Expression'] = ctrl.expression;
+    if (ctrl.aus && Object.keys(ctrl.aus).length > 0) headers['X-AUs'] = JSON.stringify(ctrl.aus);
+    if (ctrl.blendshapes && Object.keys(ctrl.blendshapes).length > 0) headers['X-Blendshapes'] = JSON.stringify(ctrl.blendshapes);
+    const r = await fetch('/api/generate/animate', { method: 'POST', headers, body: jpeg });
+    if (!r.ok) throw new ApiError(r.status, `generateAnimate: ${r.status} ${r.statusText}`);
+    return r.blob();
+  },
+};
+
 // ---------------- annotations ----------------
 export const annotationsApi = {
   list: (sessionId: string) =>

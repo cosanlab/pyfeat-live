@@ -32,7 +32,9 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
     pendingUpdate = null;
     return { available: false };
   } catch (err: unknown) {
-    pendingUpdate = null;
+    // Preserve any previously-resolved pendingUpdate: a transient check
+    // failure (network blip, dormant endpoint) must not destroy an
+    // already-offered, still-installable update.
     return { available: false, error: err instanceof Error ? err.message : String(err) };
   }
 }

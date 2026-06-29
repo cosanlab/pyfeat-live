@@ -1,6 +1,6 @@
 [package]
 name = "pyfeatlive-tauri"
-version = "0.8.15"
+version = "0.8.16"
 description = "Native desktop wrapper for pyfeatlive"
 authors = ["cosanlab"]
 license = "MIT"
@@ -32,14 +32,26 @@ env_logger = "0.11"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 block2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSURL"] }
 objc2-web-kit = { version = "0.3", features = [
     "WKWebView",
     "WKUIDelegate",
     "WKFrameInfo",
     "WKSecurityOrigin",
+    "WKOpenPanelParameters",
     "block2",
     "objc2-app-kit",
+] }
+# NSOpenPanel for the WKWebView file-input open panel. Our custom WKUIDelegate
+# (above) replaces wry's, which also supplied runOpenPanelWithParameters — so we
+# must re-implement it or every HTML <input type=file> in the app goes dead.
+objc2-app-kit = { version = "0.3", features = [
+    "NSOpenPanel",
+    "NSSavePanel",
+    "NSPanel",
+    "NSWindow",
+    "NSResponder",
+    "NSApplication",
 ] }
 
 [features]

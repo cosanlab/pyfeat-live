@@ -17,9 +17,11 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
+use tauri::menu::{MenuBuilder, MenuItem, SubmenuBuilder};
 use tauri::{
     AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
 };
@@ -58,7 +60,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(SidecarState(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![apply_update])
+        .invoke_handler(tauri::generate_handler![apply_update, restart_app])
         .setup(|app| {
             // Window first so the splash is visible while the install runs.
             // The splash (setup.html) polls the backend and redirects once
@@ -104,6 +106,87 @@ pub fn run() {
             {
                 let _ = window;
             }
+
+            // Native application menu. The shell shipped without one, so the
+            // only update prompt was the launch-time banner. This adds an
+            // explicit "Check for Updates…" item to the app menu.
+            //
+            // A custom menu *replaces* Tauri's default, which would otherwise
+            // drop the cut/copy/paste keyboard shortcuts — so we rebuild the
+            // standard Edit/Window submenus too. The macOS-only predefined
+            // items (services/hide/fullscreen) are cfg-gated so non-macOS
+            // builds stay green.
+            //
+            // We deliberately don't run the update check here: the frontend
+            // owns the update lifecycle (it holds the pending Update handle
+            // the install button needs), so the menu just pokes it via
+            // `menu://check-for-updates` and the UpdateBanner re-runs its own
+            // check.
+            let settings = MenuItem::with_id(
+                app,
+                "settings",
+                "Settings…",
+                true,
+                Some("CmdOrCtrl+,"),
+            )?;
+            let check_updates = MenuItem::with_id(
+                app,
+                "check-for-updates",
+                "Check for Updates…",
+                true,
+                None::<&str>,
+            )?;
+            let mut app_menu = SubmenuBuilder::new(app, "Py-feat")
+                .about(None)
+                .separator()
+                .item(&settings)
+                .separator()
+                .item(&check_updates)
+                .separator();
+            #[cfg(target_os = "macos")]
+            {
+                app_menu = app_menu
+                    .services()
+                    .separator()
+                    .hide()
+                    .hide_others()
+                    .show_all()
+                    .separator();
+            }
+            let app_menu = app_menu.quit().build()?;
+
+            let edit_menu = SubmenuBuilder::new(app, "Edit")
+                .undo()
+                .redo()
+                .separator()
+                .cut()
+                .copy()
+                .paste()
+                .select_all()
+                .build()?;
+
+            let mut window_menu = SubmenuBuilder::new(app, "Window").minimize();
+            #[cfg(target_os = "macos")]
+            {
+                window_menu = window_menu.fullscreen();
+            }
+            let window_menu = window_menu.separator().close_window().build()?;
+
+            let menu = MenuBuilder::new(app)
+                .items(&[&app_menu, &edit_menu, &window_menu])
+                .build()?;
+            app.set_menu(menu)?;
+            app.on_menu_event(|app, event| {
+                match event.id().0.as_str() {
+                    "check-for-updates" => {
+                        let _ = app.emit("menu://check-for-updates", ());
+                    }
+                    "settings" => {
+                        let _ = app.emit("menu://settings", ());
+                    }
+                    _ => {}
+                }
+            });
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -247,12 +330,20 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("failed to spawn sidecar: {e}"))?;
 
-    // Drain stdout/stderr to logs so tracebacks aren't lost.
+    // Drain stdout/stderr to: the app log always, and — only during the startup
+    // window — the splash (so a startup crash is VISIBLE instead of an
+    // indefinite spinner) and a per-launch log file. `startup_logging` flips off
+    // once the backend is healthy, so a busy Live session's app logs don't pay a
+    // splash-emit + file open/append per line.
+    let log_path = sidecar_log_path(app);
+    let _ = std::fs::File::create(&log_path); // truncate: keep only this launch's startup output
+    let startup_logging = Arc::new(AtomicBool::new(true));
+    emit_log(app, "stdout", &format!("sidecar log: {}", log_path.display()));
     if let Some(stdout) = child.stdout.take() {
-        forward_to_log(stdout, "sidecar/stdout");
+        forward_to_log(stdout, "sidecar/stdout", app.clone(), "stdout", log_path.clone(), startup_logging.clone());
     }
     if let Some(stderr) = child.stderr.take() {
-        forward_to_log(stderr, "sidecar/stderr");
+        forward_to_log(stderr, "sidecar/stderr", app.clone(), "stderr", log_path.clone(), startup_logging.clone());
     }
 
     // Stash the handle so RunEvent::ExitRequested can kill it.
@@ -264,44 +355,65 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
     app.emit(EVENT_BOOTSTRAP_DONE, SIDECAR_PORT)
         .map_err(|e| format!("could not emit bootstrap-done: {e}"))?;
 
-    // Primary handoff: poll the backend natively (no webview / CORS
-    // involvement) and navigate the window to it once it serves. This is
-    // the robust path — it doesn't depend on WebKit's cross-origin fetch
-    // behavior the way the splash's own poll does.
+    // Primary handoff: poll the backend natively (no webview / CORS involvement)
+    // and navigate the window to it once it serves — the robust path that
+    // doesn't depend on WebKit's cross-origin fetch behavior. The loop never
+    // stops trying to navigate (a backend that comes up late is still picked
+    // up); it only surfaces an error so the user isn't staring at a bare
+    // spinner — immediately if the sidecar process exits (crash, terminal), or
+    // once after a generous deadline if it's alive but not yet serving.
     let nav_handle = app.clone();
+    let nav_logging = startup_logging.clone();
     tauri::async_runtime::spawn(async move {
-        if wait_for_backend(SIDECAR_PORT, std::time::Duration::from_secs(600)).await {
-            if let Some(window) = nav_handle.get_webview_window("main") {
-                match tauri::Url::parse(&format!("http://127.0.0.1:{SIDECAR_PORT}/")) {
-                    Ok(url) => {
-                        if let Err(e) = window.navigate(url) {
-                            log::error!("navigate to backend failed: {e}");
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(600);
+        let mut deadline_reported = false;
+        loop {
+            if backend_healthy(SIDECAR_PORT).await {
+                nav_logging.store(false, Ordering::Relaxed); // backend up — stop splash/file forwarding
+                if let Some(window) = nav_handle.get_webview_window("main") {
+                    match tauri::Url::parse(&format!("http://127.0.0.1:{SIDECAR_PORT}/")) {
+                        Ok(url) => {
+                            if let Err(e) = window.navigate(url) {
+                                log::error!("navigate to backend failed: {e}");
+                            }
                         }
+                        Err(e) => log::error!("bad backend url: {e}"),
                     }
-                    Err(e) => log::error!("bad backend url: {e}"),
                 }
+                return;
             }
-        } else {
-            log::error!("backend did not become healthy within timeout");
+            // Sidecar exited (crash) before serving — terminal. Surface it now
+            // rather than waiting out the deadline on a dead process.
+            let exited = {
+                let state = nav_handle.state::<SidecarState>();
+                let mut guard = state.0.lock().unwrap();
+                guard.as_mut().and_then(|c| c.try_wait().ok().flatten())
+            };
+            if let Some(status) = exited {
+                log::error!("sidecar exited before serving: {status}");
+                nav_logging.store(false, Ordering::Relaxed);
+                let _ = nav_handle.emit(
+                    EVENT_BOOTSTRAP_ERROR,
+                    format!("The backend process stopped unexpectedly ({status}). See the log below."),
+                );
+                return;
+            }
+            // Alive but not serving yet. After a generous deadline surface an
+            // actionable error ONCE — but keep polling, so a merely-slow backend
+            // is still navigated to when it finally comes up.
+            if !deadline_reported && tokio::time::Instant::now() >= deadline {
+                deadline_reported = true;
+                log::error!("backend not healthy within deadline; still waiting");
+                let _ = nav_handle.emit(
+                    EVENT_BOOTSTRAP_ERROR,
+                    "The backend is taking longer than expected to start. Keep waiting, or restart. See the log below.".to_string(),
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
     });
 
     Ok(())
-}
-
-/// Poll the backend's health endpoint until it responds 200 or `timeout`
-/// elapses. Runs natively in the Rust shell — no webview, no CORS.
-async fn wait_for_backend(port: u16, timeout: std::time::Duration) -> bool {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        if backend_healthy(port).await {
-            return true;
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    }
 }
 
 /// One health probe: open a TCP connection and issue a minimal HTTP/1.0 GET
@@ -468,16 +580,48 @@ fn emit_log(app: &AppHandle, stream: &'static str, msg: &str) {
     );
 }
 
-fn forward_to_log<R>(reader: R, tag: &'static str)
-where
+fn forward_to_log<R>(
+    reader: R,
+    tag: &'static str,
+    app: AppHandle,
+    stream: &'static str,
+    log_path: PathBuf,
+    startup_logging: Arc<AtomicBool>,
+) where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
     tauri::async_runtime::spawn(async move {
         let mut buf = BufReader::new(reader).lines();
         while let Ok(Some(line)) = buf.next_line().await {
             log::info!("{tag}: {line}");
+            // Only during startup: mirror to the splash (so a startup failure is
+            // visible — exactly when it happens) and the per-launch log file.
+            // Flips off once the backend is healthy, so a busy Live session
+            // doesn't pay a splash-emit + file open/append for every line.
+            if startup_logging.load(Ordering::Relaxed) {
+                let _ = app.emit(EVENT_BOOTSTRAP_LOG, LogPayload { stream, line: line.clone() });
+                append_log_line(&log_path, &line);
+            }
         }
     });
+}
+
+/// Append a line to the sidecar log file, best-effort (a logging failure must
+/// never take down startup).
+fn append_log_line(path: &Path, line: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+/// Path to the persistent sidecar log (`~/Library/Logs/<bundle>/sidecar.log` on
+/// macOS). Creates the directory; falls back to the temp dir if it can't be
+/// resolved. Users can be pointed here to retrieve a startup traceback.
+fn sidecar_log_path(app: &AppHandle) -> PathBuf {
+    let dir = app.path().app_log_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("sidecar.log")
 }
 
 fn venv_python(venv_dir: &Path) -> PathBuf {
@@ -573,6 +717,13 @@ async fn check_for_update(app: &AppHandle) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Relaunch the app. Backs the splash "Restart" button when the backend
+/// fails to start, so the user can retry without hunting for the app in Finder.
+#[tauri::command]
+fn restart_app(app: AppHandle) {
+    app.restart();
 }
 
 /// Download, verify, and install the pending update, then relaunch into
