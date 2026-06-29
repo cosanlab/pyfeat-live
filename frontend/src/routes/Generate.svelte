@@ -31,6 +31,11 @@
   let stream: MediaStream | null = null;
   let loopAbort: AbortController | null = null;
   let isStreaming = $state(false);
+  // Temporal smoothing: 0 = off, 1 = max. Blends each edited frame with the
+  // previous displayed one (EMA) to damp the generator's subtle frame-to-frame
+  // flicker. Higher = steadier but ghosts more on motion. Mouth has its own EMA
+  // server-side (a separate slider is planned via pyfeat-generator).
+  let temporalSmoothing = $state(0.3);
   let fps = $state(0);
 
   // ---- image ----
@@ -250,9 +255,16 @@
       const bmp = await createImageBitmap(editedBlob);
       liveW = bmp.width; liveH = bmp.height;
       if (displayCanvas) {
-        if (displayCanvas.width !== bmp.width) displayCanvas.width = bmp.width;
-        if (displayCanvas.height !== bmp.height) displayCanvas.height = bmp.height;
-        displayCanvas.getContext('2d')!.drawImage(bmp, 0, 0);
+        const ctx = displayCanvas.getContext('2d')!;
+        // Resizing the canvas clears it (EMA history lost) -> draw that frame fully.
+        const resized = displayCanvas.width !== bmp.width || displayCanvas.height !== bmp.height;
+        if (resized) { displayCanvas.width = bmp.width; displayCanvas.height = bmp.height; }
+        // Output-blend EMA: drawing the opaque new frame at globalAlpha=a over the
+        // previous one yields a*new + (1-a)*prev. Higher temporalSmoothing -> lower a
+        // -> steadier (damps subtle flicker), but ghosts more on motion.
+        ctx.globalAlpha = resized ? 1 : Math.max(0.15, 1 - temporalSmoothing * 0.85);
+        ctx.drawImage(bmp, 0, 0);
+        ctx.globalAlpha = 1;
       }
       bmp.close?.();
       const now = performance.now();
@@ -542,6 +554,13 @@
             {/each}
           </select>
         {/if}
+        <div>
+          <div class="flex justify-between text-[10px] text-zinc-400">
+            <span>Temporal smoothing</span><span>{Math.round(temporalSmoothing * 100)}%</span>
+          </div>
+          <input type="range" min="0" max="1" step="0.05" bind:value={temporalSmoothing}
+                 class="w-full accent-green-500" title="Damp subtle frame-to-frame flicker (ghosts more on motion)" />
+        </div>
         {#if !isStreaming}
           <button class={primaryBtn} onclick={start}>Start camera</button>
         {:else}
