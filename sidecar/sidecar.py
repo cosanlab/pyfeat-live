@@ -98,24 +98,39 @@ def main() -> None:
     _watch_parent_and_exit()
     args = _parse_args()
 
-    # Lazy import so env vars above land before torch/py-feat are pulled in.
-    import uvicorn
+    try:
+        # Lazy import so env vars above land before torch/py-feat are pulled in.
+        # This is also where the heavy import chain (torch, py-feat, the routers)
+        # runs — uvicorn imports "backend.main:app". A failure here (bad wheel,
+        # ABI mismatch, a model download that errors) is the most common cause of
+        # "installed but never starts", so make it loud: a labelled, flushed
+        # traceback to stderr (which the Rust shell forwards to the splash + log
+        # file) and a non-zero exit so the shell detects the crash instead of
+        # waiting on a dead process.
+        import uvicorn
 
-    uvicorn.run(
-        "backend.main:app",
-        host=args.address,
-        port=args.port,
-        log_level="info",
-        # Per-request access logs off: the Live page POSTs /api/live/frame at
-        # ~100+ req/s, so access logging added a logging record per upload —
-        # event-loop overhead that competed with detection, and it flooded the
-        # in-app log buffer (drowning the useful lines). App-level logs still
-        # flow; only uvicorn's per-request access line is suppressed.
-        access_log=False,
-        # Reload off in prod — the bundle is read-only and reload's
-        # watcher fights the watch_parent thread.
-        reload=False,
-    )
+        uvicorn.run(
+            "backend.main:app",
+            host=args.address,
+            port=args.port,
+            log_level="info",
+            # Per-request access logs off: the Live page POSTs /api/live/frame at
+            # ~100+ req/s, so access logging added a logging record per upload —
+            # event-loop overhead that competed with detection, and it flooded the
+            # in-app log buffer (drowning the useful lines). App-level logs still
+            # flow; only uvicorn's per-request access line is suppressed.
+            access_log=False,
+            # Reload off in prod — the bundle is read-only and reload's
+            # watcher fights the watch_parent thread.
+            reload=False,
+        )
+    except Exception:
+        import traceback
+
+        print("SIDECAR STARTUP FAILED:", file=sys.stderr, flush=True)
+        traceback.print_exc()
+        sys.stderr.flush()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
