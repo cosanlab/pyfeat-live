@@ -64,7 +64,7 @@
   let apiError = $state<string | null>(null);
 
   // ---- shared controls ----
-  let expression = $state('smile');
+  let expression = $state('happiness');
   let strength = $state(0.6);
   let mouthMode = $state('inpaint_v6');
 
@@ -75,7 +75,24 @@
     ['AU09', 'Nose wrinkle'], ['AU12', 'Lip corner'], ['AU25', 'Lips part'], ['AU26', 'Jaw drop'],
   ];
   let aus = $state<Record<string, number>>(Object.fromEntries(AU_LIST.map(([k]) => [k, 0])));
+
+  // Expression presets as AU maps — sent through the AU path, so no backend preset
+  // table (or pyfeat-generator release) is needed. AU codes/intensities follow
+  // EMFACS emotion prototypes; "pain" follows the Prkachin–Solomon Pain Intensity
+  // (PSPI) units (AU4+6+7+9+10+43). Values are on the 0–3 AU-slider scale and are
+  // scaled by Strength server-side. Only AUs the rig supports are used.
+  const EMOTION_PRESETS: Record<string, Record<string, number>> = {
+    neutral:   { AU01: 0 },                                   // zero edit; non-empty so it routes via the AU path
+    happiness: { AU06: 2.5, AU12: 3.0, AU25: 1.5 },           // Duchenne smile
+    sadness:   { AU01: 2.0, AU04: 1.5, AU15: 2.5, AU17: 1.0 },
+    surprise:  { AU01: 2.5, AU02: 2.5, AU05: 2.0, AU26: 2.5 },
+    fear:      { AU01: 2.0, AU02: 2.0, AU04: 1.5, AU05: 2.0, AU07: 1.5, AU20: 2.0, AU26: 1.5 },
+    anger:     { AU04: 2.5, AU05: 2.0, AU07: 2.0, AU17: 1.0, AU23: 2.0 },
+    disgust:   { AU09: 3.0, AU10: 2.5, AU04: 1.5, AU15: 1.5 },
+    pain:      { AU04: 2.0, AU06: 2.0, AU07: 2.0, AU09: 2.0, AU10: 2.0, AU43: 1.5 },
+  };
   function activeAus(): Record<string, number> | null {
+    if (ctrlMode === 'preset') return EMOTION_PRESETS[expression] ?? null;
     if (ctrlMode !== 'aus') return null;
     const out: Record<string, number> = {};
     for (const [k] of AU_LIST) if (aus[k]) out[k] = aus[k];
@@ -286,8 +303,9 @@
     };
     return {
       bbox,
-      expression: fe.ctrlMode === 'preset' ? fe.expression : undefined,
-      aus: fe.ctrlMode === 'aus' ? sparse(fe.aus, AU_LIST.map(([k]) => k)) : null,
+      expression: undefined,                                 // presets are AU maps now (sent via aus)
+      aus: fe.ctrlMode === 'preset' ? (EMOTION_PRESETS[fe.expression] ?? null)
+         : fe.ctrlMode === 'aus' ? sparse(fe.aus, AU_LIST.map(([k]) => k)) : null,
       blendshapes: fe.ctrlMode === 'blendshapes' ? sparse(fe.bs, BS_ALL) : null,
       strength: fe.strength, mouth_mode: fe.mouthMode,
     };
@@ -606,9 +624,9 @@
         <div>
           <div class={fieldLabel}>Expression</div>
           <select bind:value={expression} class={selectCls}>
-            <option value="smile">smile</option>
-            <option value="disgust">disgust</option>
-            <option value="surprise">surprise</option>
+            {#each Object.keys(EMOTION_PRESETS) as name (name)}
+              <option value={name}>{name}</option>
+            {/each}
           </select>
         </div>
       {:else if ctrlMode === 'aus'}
