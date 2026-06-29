@@ -9,26 +9,36 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pyfeatlive_core.au_heatmap import au_cmap_lut  # reuse existing Blues LUT
-
 
 @lru_cache(maxsize=1)
 def au_to_vertices() -> dict:
-    """{AU name -> sorted list[int] of MP-478 vertex indices}."""
-    from feat.utils.muscle_to_landmark import au_to_muscle_vertices
-    raw = au_to_muscle_vertices()
-    return {au: [int(v) for v in verts] for au, verts in raw.items()}
+    """{AU name -> sorted list[int] of MP-478 vertex indices}.
+
+    Now sourced from py-feat's NON-overlapping AU region map
+    (``feat.utils.region_maps``) — each vertex belongs to a single AU — instead
+    of the old overlapping muscle map.
+    """
+    from feat.utils.region_maps import load_au_region_map
+    return {
+        au: [int(v) for v in spec["mp478_vertices"]]
+        for au, spec in load_au_region_map().items()
+    }
 
 
 def build_au_mesh_table() -> dict:
-    """Payload for the frontend mesh-AU heatmap renderer.
+    """Payload for the frontend monochrome mesh-AU heatmap renderer.
 
     Keys:
-      auToVertices – {AU: [vertex_idx, ...]}  (indices into the 478 mesh)
-      lut          – [[r,g,b], ...] × 256     (Blues palette, 0-255 ints)
+      regionToTriangles – {AU: [[a,b,c], ...]}  (mp478 vertex triples to fill)
+      regionToVertices  – {AU: [vertex_idx, ...]}  (dot fallback only)
+      auToVertices      – alias of regionToVertices (back-compat)
+      lut               – [[r,g,b], ...] × 256 monochrome palette (Blues)
     """
-    lut = au_cmap_lut("Blues")
+    from pyfeatlive_core.region_mesh import build_region_mesh_table
+    table = build_region_mesh_table("au")
     return {
-        "auToVertices": au_to_vertices(),
-        "lut": [[int(r), int(g), int(b)] for (r, g, b) in lut],
+        "regionToTriangles": table["regionToTriangles"],
+        "regionToVertices": table["regionToVertices"],
+        "auToVertices": table["regionToVertices"],  # back-compat
+        "lut": table["lut"],
     }

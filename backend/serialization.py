@@ -18,6 +18,12 @@ _EMOTION_COLS = (
 )
 
 
+def _blendshape_region_cols() -> tuple:
+    """Blendshape coefficient names that have a mesh region (cached)."""
+    from pyfeatlive_core.region_mesh import blendshape_region_names
+    return blendshape_region_names()
+
+
 def _clean(v) -> float | None:
     if v is None:
         return None
@@ -61,6 +67,9 @@ def serialize_faces(
     has_va = "valence" in cols and "arousal" in cols
     emotion_cols = [c for c in _EMOTION_COLS if c in cols]
     au_cols = [c for c in fex.columns if c.startswith("AU")]
+    # Detectorv2 emits 52 ARKit blendshapes; serialise only the ones the mesh
+    # overlay can draw (those with a region in py-feat's blendshape map).
+    bs_cols = [c for c in _blendshape_region_cols() if c in cols]
 
     if "face_idx" in cols:
         face_idx_series = fex["face_idx"].tolist()
@@ -97,6 +106,8 @@ def serialize_faces(
             face["emotions"] = {c: _clean(row.get(c)) for c in emotion_cols}
         if au_cols:
             face["aus"] = {c: _clean(row.get(c)) for c in au_cols}
+        if bs_cols:
+            face["blendshapes"] = {c: _clean(row.get(c)) for c in bs_cols}
         if has_va:
             v = _clean(row.get("valence"))
             a = _clean(row.get("arousal"))

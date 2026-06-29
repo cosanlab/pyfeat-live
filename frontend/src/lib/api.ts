@@ -60,10 +60,27 @@ export interface AuTable {
 }
 
 export interface AuMeshTable {
-  /** AU name → list of MP-478 vertex indices it drives */
+  /** AU name → MP-478 triangles [[a,b,c], ...] to fill (per-triangle partition) */
+  regionToTriangles?: Record<string, [number, number, number][]>;
+  /** AU name → MP-478 vertex indices (dot "points" fallback only) */
   auToVertices: Record<string, number[]>;
-  /** 256-entry Blues colormap as [r, g, b] in 0–255 */
+  /** alias of auToVertices (region-map naming) */
+  regionToVertices?: Record<string, number[]>;
+  /** 256-entry monochrome colormap as [r, g, b] in 0–255 */
   lut: [number, number, number][];
+}
+
+export interface BlendshapeMeshTable {
+  /** blendshape → MP-478 triangles [[a,b,c], ...] to fill (Left/Right pre-split) */
+  regionToTriangles?: Record<string, [number, number, number][]>;
+  /** blendshape name → MP-478 vertex indices (dot "points" fallback only) */
+  regionToVertices: Record<string, number[]>;
+  /** 256-entry monochrome colormap as [r, g, b] in 0–255 */
+  lut: [number, number, number][];
+  /** blendshape → "L" | "R" | "C" */
+  regionSide?: Record<string, string>;
+  /** blendshape → driving "AUxx" */
+  regionAu?: Record<string, string>;
 }
 
 /** One category entry from a detector's SUPPORTED_MODELS map. */
@@ -97,6 +114,7 @@ export const systemApi = {
   overlayEdges: () => request<OverlayEdgeSets>('/api/system/overlay-edges'),
   auTable: () => request<AuTable>('/api/system/au-table'),
   auMeshTable: () => request<AuMeshTable>('/api/system/au-mesh-table'),
+  blendshapeMeshTable: () => request<BlendshapeMeshTable>('/api/system/blendshape-mesh-table'),
   blendshapeNames: () => request<string[]>('/api/system/blendshape-names'),
 };
 

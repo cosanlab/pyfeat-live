@@ -8,6 +8,7 @@ export interface Face {
   gaze?: [number | null, number | null];               // pitch,yaw
   emotions?: Record<string, number | null>;
   aus?: Record<string, number | null>;
+  blendshapes?: Record<string, number | null>;
   valence_arousal?: { valence: number; arousal: number };
 }
 
@@ -26,6 +27,7 @@ export interface OverlayToggles {
   poses: boolean;
   gaze: boolean;
   aus: boolean;
+  blendshapes: boolean;
   emotions: boolean;
   valenceArousal: boolean;
 }
@@ -54,6 +56,14 @@ export interface OverlayStyleConfig {
     /** Dot radius for the 'points' AU render mode. Default 2. */
     pointSize?: number;
   };
+  /** ARKit-blendshape 478-mesh overlay (Detectorv2 only); mirrors `aus`. */
+  blendshapes: {
+    colormap: import('./colormaps').ColormapName;
+    opacity: number;
+    mode?: 'heatmap' | 'points';
+    gamma?: number;
+    pointSize?: number;
+  };
   emotions: { color: string; opacity: number; fontSize: number };
 }
 
@@ -64,6 +74,8 @@ export function defaultOverlayStyle(): OverlayStyleConfig {
     pose: { sizeScale: 0.5 },
     gaze: { color: '#22c55e', opacity: 1, lineWidth: 2 },
     aus: { colormap: 'Blues', opacity: 0.55, mode: 'heatmap', gamma: 2.2, pointSize: 2 },
+    // distinct monochrome hue from AUs so the two overlays read apart if both on
+    blendshapes: { colormap: 'Reds', opacity: 0.55, mode: 'heatmap', gamma: 2.2, pointSize: 2 },
     emotions: { color: '#ffffff', opacity: 1, fontSize: 12 },
   };
 }
