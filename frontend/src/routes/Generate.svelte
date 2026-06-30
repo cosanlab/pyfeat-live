@@ -238,7 +238,12 @@
         // per-identity: persist the selected person's controls, send the per-slot edit map
         if (selSlot !== null && liveEdits[selSlot]) liveEdits[selSlot] = snapshotControls();
         const editsMap: Record<string, unknown> = {};
-        for (const s of Object.keys(liveEdits)) editsMap[s] = faceEditPayload(liveEdits[+s], []);
+        for (const s of Object.keys(liveEdits)) {
+          const p = faceEditPayload(liveEdits[+s], []);
+          // Omit no-op edits (e.g. AU/Blendshape mode with all sliders at 0): the
+          // live-multi renderer 500s on an edit with no expression/aus/blendshapes.
+          if (p.aus || p.blendshapes || p.expression) editsMap[s] = p;
+        }
         const res = await generateApi.editFrameLiveMulti(blob, { editsMap, maxFaces: MAX_LIVE_FACES, reset: firstFrame });
         firstFrame = false;
         apiError = null;
