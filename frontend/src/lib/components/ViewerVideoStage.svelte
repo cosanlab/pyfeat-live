@@ -93,7 +93,10 @@
   }
   function timeToFrame(t: number): number {
     const idx = frameTimeIndex;
-    if (!idx) return Math.round(t * fps);
+    // floor, not round: the seek interval is floor-based ([f/fps,(f+1)/fps)), so
+    // rounding picks a frame whose interval can start ahead of the current time
+    // mid-frame, causing a re-seek every frame -> playback stutter (no frame-times).
+    if (!idx) return Math.floor(t * fps);
     // Largest frame whose start time is <= t (binary search).
     let lo = 0, hi = idx.pairs.length - 1, ans = 0;
     while (lo <= hi) {

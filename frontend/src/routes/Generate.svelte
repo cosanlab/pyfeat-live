@@ -56,6 +56,8 @@
   const MAX_LIVE_FACES = 4;
   let liveSlots = $state<{ bbox: number[]; slot: number }[]>([]);   // tracked faces from the last frame
   let liveEdits: Record<number, FaceEdit> = {};                      // per-slot edit state (plain)
+  let slotLastSeen: Record<number, number> = {};                     // slot -> last-seen ms; IOU-tracking grace
+  const TRACK_GRACE_MS = 800;                                        // tolerate brief tracking misses before re-selecting / pruning
   let selSlot = $state<number | null>(null);                         // selected live identity
   let liveW = $state(0), liveH = $state(0);                          // capture-frame dims (for the live box overlay %)
   // rendered <img> size (px). The image can overflow its wrapper when its aspect binds on width
@@ -236,14 +238,35 @@
         // per-identity: persist the selected person's controls, send the per-slot edit map
         if (selSlot !== null && liveEdits[selSlot]) liveEdits[selSlot] = snapshotControls();
         const editsMap: Record<string, unknown> = {};
-        for (const s of Object.keys(liveEdits)) editsMap[s] = faceEditPayload(liveEdits[+s], []);
+        for (const s of Object.keys(liveEdits)) {
+          const p = faceEditPayload(liveEdits[+s], []);
+          // Omit no-op edits (e.g. AU/Blendshape mode with all sliders at 0): the
+          // live-multi renderer 500s on an edit with no expression/aus/blendshapes.
+          if (p.aus || p.blendshapes || p.expression) editsMap[s] = p;
+        }
         const res = await generateApi.editFrameLiveMulti(blob, { editsMap, maxFaces: MAX_LIVE_FACES, reset: firstFrame });
         firstFrame = false;
         apiError = null;
         editedBlob = res.blob;
         liveSlots = res.faces;
-        for (const f of res.faces) if (!(f.slot in liveEdits)) liveEdits[f.slot] = snapshotControls();  // new person -> current edit
-        if ((selSlot === null || !res.faces.some((f) => f.slot === selSlot)) && res.faces.length) {
+        const nowSeen = performance.now();
+        for (const f of res.faces) {
+          if (!(f.slot in liveEdits)) liveEdits[f.slot] = snapshotControls();   // new person -> current edit
+          slotLastSeen[f.slot] = nowSeen;
+        }
+        // Prune edits for slots gone past the grace window. Slot ids are monotonic
+        // server-side, so without this the per-frame X-Face-Edits-Map header grows
+        // unbounded across a long multi-person session (#2).
+        for (const k of Object.keys(liveEdits)) {
+          const s = +k;
+          if (slotLastSeen[s] !== undefined && nowSeen - slotLastSeen[s] > TRACK_GRACE_MS) {
+            delete liveEdits[s]; delete slotLastSeen[s];
+          }
+        }
+        // (Re)select only when the current pick has been gone PAST the grace window —
+        // a one-frame IOU miss must not snap editing onto another person (#1).
+        const selStale = selSlot === null || nowSeen - (slotLastSeen[selSlot] ?? 0) > TRACK_GRACE_MS;
+        if (selStale && res.faces.length) {
           selSlot = res.faces[0].slot;                          // (re)select an available identity
           if (liveEdits[selSlot]) loadFaceEdit(liveEdits[selSlot]);
         }

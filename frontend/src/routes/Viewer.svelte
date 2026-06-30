@@ -302,20 +302,20 @@
     if (fexRows.length > 0 && !('face_idx' in fexRows[0])) {
       fexRows.forEach(r => { r.face_idx = 0; });
     }
-    // Map each fex frame to the video's REAL presentation time. The fex rows are
-    // written lock-step with the video frames (in order), so the k-th unique
-    // frame value aligns to the k-th video timestamp. This drives a by-time
-    // overlay⇄video mapping that, unlike a synthetic fps, stays in sync on
-    // variable-rate live recordings.
+    // Map each fex frame to the video's REAL presentation time (frame N -> the
+    // N-th video packet's timestamp). Drives a by-time overlay⇄video mapping that,
+    // unlike a synthetic fps, stays in sync on variable-rate live recordings.
     frameTimes = [];
     try {
       const { times } = await sessionsApi.frameTimes(id);
       const uniq = [...new Set(fexRows.map(r => Number(r.frame)))]
-        .filter(n => Number.isFinite(n)).sort((a, b) => a - b);
-      const n = Math.min(uniq.length, times.length);
-      if (n > 0) {
+        .filter(n => Number.isFinite(n) && n >= 0).sort((a, b) => a - b);
+      if (uniq.length > 0 && times.length > 0) {
+        // Index by frame NUMBER, not position: a positional zip
+        // (arr[uniq[k]] = times[k]) misaligns the overlay when fex frames aren't
+        // contiguous 0,1,2,… (subsampled / variable-rate recordings).
         const arr: number[] = [];
-        for (let k = 0; k < n; k++) arr[uniq[k]] = times[k];
+        for (const fn of uniq) if (fn < times.length) arr[fn] = times[fn];
         frameTimes = arr;
       }
     } catch (e) {
