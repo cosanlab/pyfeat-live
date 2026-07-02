@@ -427,9 +427,18 @@
     selectedIdentityIds = identities.map(i => i.identity_id);
   }
 
-  // Hotkeys for annotation creation.
+  // Hotkeys: annotations (e/c), play/pause (space), frame scrubbing
+  // (←/→ ±1, Shift+←/→ ±10, Home/End).
   function onKey(e: KeyboardEvent) {
-    if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+    // Never fire while typing (any form control) or while the annotation
+    // popover is open — space/arrows must not scrub behind the dialog.
+    const t = e.target as HTMLElement | null;
+    if (
+      t &&
+      (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
+        t.tagName === 'SELECT' || t.isContentEditable)
+    ) return;
+    if (popover !== null) return;
     if (e.key === 'e' || e.key === 'E') {
       popover = { kind: 'event', startFrame: currentFrame, endFrame: currentFrame, label: '' };
     } else if (e.key === 'c' || e.key === 'C') {
@@ -437,6 +446,19 @@
     } else if (e.key === ' ') {
       e.preventDefault();
       onTogglePlay();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      isPlaying = false; // frame-stepping implies paused
+      const step = (e.shiftKey ? 10 : 1) * (e.key === 'ArrowRight' ? 1 : -1);
+      onSeek(currentFrame + step);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      isPlaying = false;
+      onSeek(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      isPlaying = false;
+      onSeek(totalFrames - 1);
     }
   }
 </script>
