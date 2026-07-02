@@ -65,27 +65,52 @@ def test_explicit_env_offline_is_honored_no_retry(monkeypatch):
     assert constants.HF_HUB_OFFLINE is True
 
 
-def test_concurrent_builds_serialize_and_restore(monkeypatch):
-    """Two overlapping builds must each see a clean offline window and
-    leave the flag restored (regression: global-flag race)."""
+def test_overlapping_build_gets_clean_offline_window(monkeypatch):
+    """Deterministic regression for the global-flag race: while build A's
+    offline window is open, build B must block on the lock and then get a
+    clean offline-first + online-retry sequence ([True, False]) — pre-fix,
+    B misread A's temporary True as a user-set flag and made a single
+    offline attempt ([True] + raise)."""
     import threading as _threading
-    import time
 
-    calls: list[bool] = []
+    a_entered = _threading.Event()
+    a_release = _threading.Event()
+    b_calls: list[bool] = []
 
-    def _slow_construct(config):
-        calls.append(constants.HF_HUB_OFFLINE)
-        time.sleep(0.05)
-        return "detector-sentinel"
+    def _construct(config):
+        if _threading.current_thread().name == "build-a":
+            a_entered.set()
+            assert a_release.wait(timeout=5)
+            return "A"
+        b_calls.append(constants.HF_HUB_OFFLINE)
+        if len(b_calls) == 1:
+            raise LocalEntryNotFoundError("cold cache")
+        return "B"
 
-    monkeypatch.setattr(det_mod, "_construct_detector", _slow_construct)
-    threads = [
-        _threading.Thread(target=lambda: build_detector(DetectorConfig()))
-        for _ in range(2)
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert calls == [True, True]              # each build ran offline-first
-    assert constants.HF_HUB_OFFLINE is False  # baseline restored after both
+    monkeypatch.setattr(det_mod, "_construct_detector", _construct)
+
+    results = {}
+    ta = _threading.Thread(
+        target=lambda: results.setdefault("a", build_detector(DetectorConfig())),
+        name="build-a",
+    )
+    ta.start()
+    assert a_entered.wait(timeout=5)  # A is inside its offline window
+
+    tb = _threading.Thread(
+        target=lambda: results.setdefault("b", build_detector(DetectorConfig())),
+        name="build-b",
+    )
+    tb.start()
+    tb.join(timeout=0.2)
+    assert tb.is_alive()  # post-fix: B blocks on the lock while A holds it
+
+    a_release.set()
+    ta.join(timeout=5)
+    tb.join(timeout=5)
+    assert not ta.is_alive() and not tb.is_alive()
+
+    assert results["a"] == "A"
+    assert results["b"] == "B"
+    assert b_calls == [True, False]  # clean offline-first + online retry
+    assert constants.HF_HUB_OFFLINE is False

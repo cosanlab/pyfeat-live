@@ -115,6 +115,11 @@ def _hf_offline():
 # without this, one build's temporary HF_HUB_OFFLINE=True can be misread
 # by another as a user-set flag (skipping its online retry), or captured
 # as the "prior" value and restored, leaving the process stuck offline.
+# Accepted residual race: while a cold-cache online retry is downloading
+# OUTSIDE the lock, another build's offline window can transiently fail
+# some of its in-flight hub requests — rare (cold cache + concurrent
+# build), transient, and surfaces as a normal retryable build error; not
+# worth holding the lock across multi-minute downloads.
 _OFFLINE_FIRST_LOCK = threading.Lock()
 
 
