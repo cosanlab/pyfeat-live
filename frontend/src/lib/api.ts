@@ -97,7 +97,7 @@ export interface ModelCategory {
 export type DetectorCapabilities = Record<string, Record<string, ModelCategory>>;
 
 export const systemApi = {
-  health: () => request<{ status: string; version: string }>('/api/system/health'),
+  health: () => request<{ status: string; app: string; version: string }>('/api/system/health'),
   compute: () => request<ComputeInfo>('/api/system/compute'),
   detectorCapabilities: () => request<DetectorCapabilities>('/api/system/detector-capabilities'),
   // Plain-text backend log buffer (not JSON) — used by the Logs viewer.

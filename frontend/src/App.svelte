@@ -14,6 +14,10 @@
   let view: View = $state('live');
   let showLogs = $state(false);
   let showSettings = $state(false);
+  // Session the next Viewer mount should preselect (set by Analyze's
+  // "Open in Viewer" and Live's recording-saved toast; cleared on manual
+  // tab navigation so it doesn't go stale).
+  let pendingSession: string | null = $state(null);
 
   onMount(() => {
     // The native "Py-feat → Settings…" menu item (Rust) emits this. Tauri only;
@@ -27,17 +31,17 @@
 
 <div class="h-screen flex flex-col">
   <UpdateBanner />
-  <TopNav {view} onViewChange={(v) => (view = v)} logsOpen={showLogs} onToggleLogs={() => (showLogs = !showLogs)} />
+  <TopNav {view} onViewChange={(v) => { pendingSession = null; view = v; }} logsOpen={showLogs} onToggleLogs={() => (showLogs = !showLogs)} />
   <div class="flex-1 flex min-h-0">
     <main class="flex-1 flex flex-col min-w-0 min-h-0">
       {#if view === 'live'}
-        <Live />
+        <Live onSwitchView={(v, sid) => { pendingSession = sid ?? null; view = v; }} />
       {:else if view === 'generate'}
         <Generate />
       {:else if view === 'analyze'}
-        <Analyze onSwitchView={(v) => view = v} />
+        <Analyze onSwitchView={(v, sid) => { pendingSession = sid ?? null; view = v; }} />
       {:else if view === 'viewer'}
-        <Viewer />
+        <Viewer initialSessionId={pendingSession} />
       {/if}
     </main>
     <!-- Logs drawer lives at the app level (flex sibling of the view) so the

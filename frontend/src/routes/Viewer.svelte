@@ -26,6 +26,9 @@
   type LeftTab = 'sessions' | 'annotations';
   type AnnotationFilter = 'all' | AnnotationKind;
 
+  type Props = { initialSessionId?: string | null };
+  let { initialSessionId = null }: Props = $props();
+
   // Top-level state
   let sessions: SessionSummary[] = $state([]);
   let currentSessionId: string | null = $state(null);
@@ -103,6 +106,11 @@
   // Identity assign dialog
   let assignDialog: { frame: number; faceIdx: number } | null = $state(null);
 
+  // Monotonic token: selectSession(A) then selectSession(B) must never let
+  // A's slower responses overwrite B's data. Each await checks the token.
+  let selectToken = 0;
+  let sessionLoading = $state(false);
+
   // Video dimensions + fps come from the session metadata so the overlay
   // canvas matches the recorded video exactly. Detection coords (FaceRect,
   // landmarks) are in the recorded video's pixel space, so a mismatched
@@ -156,9 +164,20 @@
   const totalFrames = $derived((currentSession as SessionDetail | null)?.frames ?? 0);
 
   // Current frame's fex rows (could be multiple faces per frame).
-  const currentFrameRows = $derived(
-    fexRows.filter(r => Number(r.frame) === currentFrame),
-  );
+  // Index rows by frame ONCE per fexRows change: scrubbing changes
+  // currentFrame at up to 60Hz, and a per-change O(N) filter over ~1,500-key
+  // row objects made seek cost scale with session length.
+  const rowsByFrame = $derived.by(() => {
+    const m = new Map<number, Record<string, number | string | null>[]>();
+    for (const r of fexRows) {
+      const f = Number(r.frame);
+      const bucket = m.get(f);
+      if (bucket) bucket.push(r);
+      else m.set(f, [r]);
+    }
+    return m;
+  });
+  const currentFrameRows = $derived(rowsByFrame.get(currentFrame) ?? []);
 
   // Map fex row → Face shape for the overlay.
   const facesForCurrentFrame = $derived.by((): Face[] => {
@@ -257,81 +276,120 @@
       systemApi.overlayEdges().catch(() => null),
       systemApi.blendshapeNames().catch(() => []),
     ]);
-    if (sessions.length > 0) {
-      await selectSession(sessions[0].name);
+    // Prefer the session another view asked us to open (Analyze's
+    // "Open in Viewer", Live's recording-saved toast); fall back to newest.
+    const requested = initialSessionId && sessions.some(s => s.name === initialSessionId)
+      ? initialSessionId
+      : sessions[0]?.name;
+    if (requested) {
+      await selectSession(requested);
     }
   });
 
   async function selectSession(id: string) {
+    const tok = ++selectToken;
     currentSessionId = id;
     currentFrame = 0;
     isPlaying = false;
     similarity = null;
-    [currentSession, identities, assignments, annotations] = await Promise.all([
-      sessionsApi.get(id),
-      identitiesApi.list(id),
-      identitiesApi.assignments(id),
-      annotationsApi.list(id),
-    ]);
-    // Auto-create one identity per detected face / cluster if none exist
-    // yet. Idempotent on the backend; safe to call every load.
-    if (identities.length === 0) {
-      try {
-        const init = await identitiesApi.autoInit(id);
-        identities = init.identities;
-        if (init.assignments > 0) {
-          assignments = await identitiesApi.assignments(id);
-        }
-      } catch (e) {
-        console.warn('identities auto-init failed', e);
-      }
-    }
-    selectedIdentityIds = identities.map(i => i.identity_id);
-    // Fetch fex CSV and parse. A failed fetch (missing/locked file, backend
-    // blip) leaves fexRows empty so the Viewer shows the video without
-    // overlays rather than rejecting and stranding a half-loaded session.
-    const csvUrl = sessionsApi.fexUrl(id);
-    try {
-      const res = await fetch(csvUrl);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      fexRows = parseFexCsv(await res.text());
-    } catch (e) {
-      console.warn(`failed to load fex CSV for session ${id}:`, e);
-      fexRows = [];
-    }
-    // Recovery for legacy sessions recorded with the pre-fix recorder
-    // that emitted frame=0 for every row and no face_idx column. If
-    // all `frame` values are 0/missing, infer the frame index from
-    // row order (single-face common case). If face_idx is missing,
-    // default to 0 so identity logic works.
-    const frameAllZero = fexRows.length > 1 && fexRows.every(
-      r => !r.frame || Number(r.frame) === 0,
-    );
-    if (frameAllZero) {
-      fexRows.forEach((r, i) => { r.frame = i; });
-    }
-    if (fexRows.length > 0 && !('face_idx' in fexRows[0])) {
-      fexRows.forEach(r => { r.face_idx = 0; });
-    }
-    // Map each fex frame to the video's REAL presentation time (frame N -> the
-    // N-th video packet's timestamp). Drives a by-time overlay⇄video mapping that,
-    // unlike a synthetic fps, stays in sync on variable-rate live recordings.
+    sessionLoading = true;
+    // Clear the previous session's overlay data immediately — its coords
+    // are in the OLD video's pixel space and would render misplaced over
+    // the new session's video until the CSV lands.
+    fexRows = [];
     frameTimes = [];
     try {
-      const { times } = await sessionsApi.frameTimes(id);
-      const uniq = [...new Set(fexRows.map(r => Number(r.frame)))]
-        .filter(n => Number.isFinite(n) && n >= 0).sort((a, b) => a - b);
-      if (uniq.length > 0 && times.length > 0) {
-        // Index by frame NUMBER, not position: a positional zip
-        // (arr[uniq[k]] = times[k]) misaligns the overlay when fex frames aren't
-        // contiguous 0,1,2,… (subsampled / variable-rate recordings).
-        const arr: number[] = [];
-        for (const fn of uniq) if (fn < times.length) arr[fn] = times[fn];
-        frameTimes = arr;
+      // Kick off the big payloads immediately — they depend only on `id`,
+      // and previously waited behind the identities round-trips. An inert
+      // catch keeps a rejection observed even when this run is abandoned
+      // at a token check before ever awaiting these (otherwise a failed
+      // fetch for a superseded session becomes an unhandled rejection);
+      // the awaited paths below re-attach real handlers.
+      const csvPromise = fetch(sessionsApi.fexUrl(id))
+        .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.text(); });
+      csvPromise.catch(() => {});
+      const timesPromise = sessionsApi.frameTimes(id);
+      timesPromise.catch(() => {});
+
+      const [session, idents, assigns, annots] = await Promise.all([
+        sessionsApi.get(id),
+        identitiesApi.list(id),
+        identitiesApi.assignments(id),
+        annotationsApi.list(id),
+      ]);
+      if (tok !== selectToken) return;
+      currentSession = session;
+      identities = idents;
+      assignments = assigns;
+      annotations = annots;
+
+      // Auto-create one identity per detected face / cluster if none exist
+      // yet. Idempotent on the backend; safe to call every load.
+      if (identities.length === 0) {
+        try {
+          const init = await identitiesApi.autoInit(id);
+          if (tok !== selectToken) return;
+          identities = init.identities;
+          if (init.assignments > 0) {
+            const a = await identitiesApi.assignments(id);
+            if (tok !== selectToken) return;
+            assignments = a;
+          }
+        } catch (e) {
+          console.warn('identities auto-init failed', e);
+        }
       }
+      if (tok !== selectToken) return;
+      selectedIdentityIds = identities.map(i => i.identity_id);
+
+      // Fex CSV: a failed fetch leaves fexRows empty so the Viewer shows the
+      // video without overlays rather than stranding a half-loaded session.
+      let rows: Record<string, number | string | null>[] = [];
+      try {
+        rows = parseFexCsv(await csvPromise);
+      } catch (e) {
+        console.warn(`failed to load fex CSV for session ${id}:`, e);
+      }
+      if (tok !== selectToken) return;
+      fexRows = rows;
+
+      // Recovery for legacy sessions recorded with the pre-fix recorder
+      // that emitted frame=0 for every row and no face_idx column.
+      const frameAllZero = fexRows.length > 1 && fexRows.every(
+        r => !r.frame || Number(r.frame) === 0,
+      );
+      if (frameAllZero) {
+        fexRows.forEach((r, i) => { r.frame = i; });
+      }
+      if (fexRows.length > 0 && !('face_idx' in fexRows[0])) {
+        fexRows.forEach(r => { r.face_idx = 0; });
+      }
+
+      // Map each fex frame to the video's REAL presentation time. Drives the
+      // by-time overlay⇄video mapping (variable-rate live recordings).
+      let ft: number[] = [];
+      try {
+        const { times } = await timesPromise;
+        const uniq = [...new Set(fexRows.map(r => Number(r.frame)))]
+          .filter(n => Number.isFinite(n) && n >= 0).sort((a, b) => a - b);
+        if (uniq.length > 0 && times.length > 0) {
+          // Index by frame NUMBER, not position: a positional zip misaligns
+          // the overlay when fex frames aren't contiguous.
+          const arr: number[] = [];
+          for (const fn of uniq) if (fn < times.length) arr[fn] = times[fn];
+          ft = arr;
+        }
+      } catch (e) {
+        console.warn(`frame-times unavailable for ${id}; using fps mapping`, e);
+      }
+      if (tok !== selectToken) return;
+      frameTimes = ft;
     } catch (e) {
-      console.warn(`frame-times unavailable for ${id}; using fps mapping`, e);
-      frameTimes = [];
+      if (tok === selectToken) {
+        console.warn(`failed to load session ${id}:`, e);
+      }
+    } finally {
+      if (tok === selectToken) sessionLoading = false;
     }
   }
 
@@ -353,6 +411,11 @@
   }
 
   function onSeek(f: number) {
+    // A user seek (scrub drag, annotation click, plot click) pauses
+    // playback — otherwise the rVFC frame advance and a 60Hz coalesced
+    // drag-seek fight over currentFrame and the overlay visibly bounces.
+    // Matches the keyboard-stepping behavior.
+    isPlaying = false;
     // totalFrames is a count, so the last valid index is totalFrames - 1.
     // Clamping to totalFrames left the last frame blank (no fex rows match).
     currentFrame = Math.max(0, Math.min(totalFrames - 1, f));
@@ -448,16 +511,13 @@
       if (!e.repeat) onTogglePlay();
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.preventDefault();
-      isPlaying = false; // frame-stepping implies paused
       const step = (e.shiftKey ? 10 : 1) * (e.key === 'ArrowRight' ? 1 : -1);
       onSeek(currentFrame + step);
     } else if (e.key === 'Home') {
       e.preventDefault();
-      isPlaying = false;
       onSeek(0);
     } else if (e.key === 'End') {
       e.preventDefault();
-      isPlaying = false;
       onSeek(totalFrames - 1);
     }
   }
@@ -500,6 +560,11 @@
   {/if}
 
   <div class="flex-1 flex flex-col min-w-0 min-h-0 overflow-y-auto">
+    {#if sessionLoading}
+      <div class="px-3.5 py-1 text-xs text-zinc-400 bg-zinc-950 border-b border-zinc-900">
+        Loading session…
+      </div>
+    {/if}
     <ViewerVideoStage
       videoUrl={currentSessionId && hasVideo ? sessionsApi.videoUrl(currentSessionId) : null}
       width={VIDEO_W}

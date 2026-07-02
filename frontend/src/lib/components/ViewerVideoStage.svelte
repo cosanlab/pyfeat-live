@@ -127,14 +127,39 @@
     }
   });
 
-  // Sync prop `isPlaying` → video.play() / .pause().
+  // Sync prop `isPlaying` → video.play()/.pause(), and while playing drive
+  // frame advance from requestVideoFrameCallback — one callback per frame
+  // the browser actually presents. ontimeupdate alone is throttled to
+  // ~250ms, so the overlay stuttered at ~4Hz while the video played
+  // smoothly. onTimeUpdate stays as the fallback (no-rVFC browsers) and
+  // for paused seeks; the `f !== currentFrame` guard makes them coexist.
   $effect(() => {
     if (!video) return;
-    if (isPlaying) {
-      video.play().catch(() => {});
-    } else {
+    if (!isPlaying) {
       video.pause();
+      return;
     }
+    video.play().catch(() => {});
+    const v = video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: (now: number, meta: { mediaTime: number }) => void) => number;
+      cancelVideoFrameCallback?: (handle: number) => void;
+    };
+    if (!v.requestVideoFrameCallback) return; // fallback: ontimeupdate only
+    let handle = 0;
+    let cancelled = false;
+    const tick = (_now: number, meta: { mediaTime: number }) => {
+      if (cancelled) return;
+      if (!seekingFromProp) {
+        const f = timeToFrame(meta.mediaTime);
+        if (f !== currentFrame) onFrameAdvance(f);
+      }
+      handle = v.requestVideoFrameCallback!(tick);
+    };
+    handle = v.requestVideoFrameCallback(tick);
+    return () => {
+      cancelled = true;
+      v.cancelVideoFrameCallback?.(handle);
+    };
   });
 
   function onTimeUpdate() {
@@ -149,11 +174,22 @@
   }
 
   // Resolve each face's identity badge (color + name) from assignments + identities.
+  // Split the derivation so the per-frame lookup is O(faces): idById and
+  // the frame index rebuild only when identities/assignments change, not
+  // on every currentFrame tick during scrubbing/playback.
+  const idById = $derived(new Map(identities.map(i => [i.identity_id, i])));
+  const assignmentsByFrame = $derived.by(() => {
+    const m = new Map<number, IdentityAssignment[]>();
+    for (const a of assignments) {
+      const bucket = m.get(a.frame);
+      if (bucket) bucket.push(a);
+      else m.set(a.frame, [a]);
+    }
+    return m;
+  });
   const identityByFace = $derived.by(() => {
     const m = new Map<number, Identity>();
-    const idById = new Map(identities.map(i => [i.identity_id, i]));
-    for (const a of assignments) {
-      if (a.frame !== currentFrame) continue;
+    for (const a of assignmentsByFrame.get(currentFrame) ?? []) {
       const ident = idById.get(a.identity_id);
       if (ident) m.set(a.face_idx, ident);
     }
@@ -187,11 +223,14 @@
   }
 
   function handleStageClick(e: MouseEvent) {
-    // Hit-test face rects; emit click for the first hit so the parent
-    // can open the identity assignment dialog.
+    // Hit-test face rects; emit click for the first hit so the parent can
+    // open the identity assignment dialog. Attached to the INNER
+    // aspect-locked box (the exact box the video + overlay fill): using the
+    // outer stage's rect broke the mapping whenever the video was
+    // letterboxed (scale AND offset were wrong).
     if (!faces || faces.length === 0) return;
-    const stage = e.currentTarget as HTMLDivElement;
-    const r = stage.getBoundingClientRect();
+    const box = e.currentTarget as HTMLDivElement;
+    const r = box.getBoundingClientRect();
     const sx = (e.clientX - r.left) * (width / r.width);
     const sy = (e.clientY - r.top) * (height / r.height);
     for (let i = 0; i < faces.length; i++) {
@@ -209,10 +248,8 @@
 
 <div
   bind:this={stageEl}
-  class="relative bg-black flex items-start justify-center overflow-hidden cursor-crosshair min-h-0 {manualHeight === null ? 'flex-1' : 'shrink-0'}"
+  class="relative bg-black flex items-start justify-center overflow-hidden min-h-0 {manualHeight === null ? 'flex-1' : 'shrink-0'}"
   style={manualHeight === null ? 'min-height: 50vh;' : `height: ${manualHeight}px; min-height: 160px;`}
-  onclick={handleStageClick}
-  role="presentation"
 >
   {#if videoUrl}
     <!-- Aspect-locked container so the video AND the overlay canvas
@@ -222,10 +259,12 @@
          space) were drawn onto a differently-sized/positioned canvas
          and appeared offset. Both now fill this aspect-matched box. -->
     <div
-      class="relative h-full"
+      class="relative h-full cursor-crosshair"
       style="aspect-ratio: {width} / {height}; max-width: 100%; max-height: 100%;"
       bind:clientWidth={stageBoxW}
       bind:clientHeight={stageBoxH}
+      onclick={handleStageClick}
+      role="presentation"
     >
       <video
         bind:this={video}
