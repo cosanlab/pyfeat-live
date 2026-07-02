@@ -17,6 +17,7 @@ _LIVE_PROFILE = os.environ.get("PYFEAT_LIVE_PROFILE") == "1"
 
 import av
 import numpy as np
+import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, Response
 from PIL import Image
 from pydantic import BaseModel
@@ -341,23 +342,32 @@ def _scale_fex_coords(fex, sx: float, sy: float):
       * x_N / y_N landmark pairs (N = 0..67 dlib, 0..477 MP)
       * mesh_x_N / mesh_y_N (Detectorv2's 478 Face Mesh; mesh_z_N left
         alone — it's a relative depth, not a source-pixel coord)
+
+    Same drop + numpy-block + concat pattern as overlay_render's
+    _scale_fex_coords_inplace: a wide ``out.loc[:, cols] = ...`` over
+    Detectorv2's ~1100 coord columns cost ~1.4ms/frame on the live hot
+    path; scaling each axis as one numpy block is ~5x faster with
+    bit-identical values. Consumers read columns by NAME (serializer,
+    recorder DictWriter), so the reordering concat introduces is harmless.
     """
-    out = fex.copy()
-    # Collect x- and y-scaled columns once, write each group in a single
-    # vectorized block (Detectorv2 has ~550 mesh_x_/550 mesh_y_ columns; a
-    # per-column loop here was ~34ms/frame). "x_"/"y_" and "mesh_x_"/
-    # "mesh_y_" are disjoint prefixes; mesh_z_ depth is left unscaled.
-    x_cols = [c for c in out.columns
+    x_cols = [c for c in fex.columns
               if c in ("FaceRectX", "FaceRectWidth")
               or c.startswith("x_") or c.startswith("mesh_x_")]
-    y_cols = [c for c in out.columns
+    y_cols = [c for c in fex.columns
               if c in ("FaceRectY", "FaceRectHeight")
               or c.startswith("y_") or c.startswith("mesh_y_")]
+    if not x_cols and not y_cols:
+        return fex.copy()
+    parts = [fex.drop(columns=x_cols + y_cols)]
     if x_cols:
-        out.loc[:, x_cols] = out[x_cols].values * sx
+        parts.append(pd.DataFrame(
+            fex[x_cols].to_numpy() * sx, columns=x_cols, index=fex.index,
+        ))
     if y_cols:
-        out.loc[:, y_cols] = out[y_cols].values * sy
-    return out
+        parts.append(pd.DataFrame(
+            fex[y_cols].to_numpy() * sy, columns=y_cols, index=fex.index,
+        ))
+    return pd.concat(parts, axis=1)
 
 
 class ConfigureRequest(BaseModel):
