@@ -101,3 +101,54 @@ def test_stop_without_start_returns_409(live_client_recording):
     client, _ = live_client_recording
     r = client.post("/api/live/recording/stop")
     assert r.status_code == 409
+
+
+def test_start_waits_for_inflight_stop(live_client_recording):
+    """/recording/start during a draining /recording/stop must not overlap.
+
+    A real recorder's close() can take a while to drain its writer thread;
+    /recording/stop hands that off to the executor and awaits it via
+    ``live._recorder_close_task``. A /recording/start that lands mid-drain
+    must await the same task before creating a new recorder — otherwise the
+    new session's writer thread starts while the old one is still flushing
+    into (what used to be, pre Fix 1) possibly the same directory.
+    """
+    import threading
+
+    client, tmp_path = live_client_recording
+
+    class _SlowRecorder:
+        def __init__(self):
+            self.closed = False
+            self.dir = tmp_path / "fake-slow-session"
+
+        def close(self, timeout=10.0):
+            time.sleep(0.3)
+            self.closed = True
+            return self.dir
+
+    slow = _SlowRecorder()
+    client.app.state.live.recorder = slow
+
+    results = {}
+
+    def _stop():
+        results["stop"] = client.post("/api/live/recording/stop")
+
+    t = threading.Thread(target=_stop)
+    t.start()
+    time.sleep(0.05)  # let /recording/stop start draining in the executor
+
+    start_resp = client.post("/api/live/recording/start", json={
+        "record_video": False, "record_fex": True,
+        "fps": 30, "width": 640, "height": 360,
+    })
+    assert slow.closed, "start returned before the old recorder finished closing"
+    assert start_resp.status_code == 200
+
+    t.join(timeout=5)
+    assert not t.is_alive()
+    assert results["stop"].status_code == 200
+
+    # Clean up the recorder /recording/start created.
+    client.post("/api/live/recording/stop")

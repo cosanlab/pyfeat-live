@@ -17,6 +17,7 @@ _LIVE_PROFILE = os.environ.get("PYFEAT_LIVE_PROFILE") == "1"
 
 import av
 import numpy as np
+import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, Response
 from PIL import Image
 from pydantic import BaseModel
@@ -26,7 +27,6 @@ from pyfeatlive_core.detect import (
     detect_pil_images, detect_pil_images_v2_tracked, display_view,
 )
 from pyfeatlive_core.detector import DetectorConfig, DetectorType, build_detector
-from pyfeatlive_core.jpeg import encode_jpeg
 from pyfeatlive_core.overlay_render import draw_overlays
 from pyfeatlive_core.recorder import (
     RecorderConfig,
@@ -85,7 +85,16 @@ async def upload_frame(request: Request) -> Response:
     # Image.open().convert() on the event loop per upload and starved the
     # detection task. Decoding ~1-in-N frames frees the loop to finish
     # detections sooner, which is what the displayed fps tracks.
-    frame_id = int(request.headers.get("X-Frame-Id", "-1"))
+    raw_frame_id = request.headers.get("X-Frame-Id", "-1")
+    try:
+        frame_id = int(raw_frame_id)
+    except ValueError:
+        # advisory header; malformed value is not an error — but it IS a
+        # client bug worth surfacing, since overlay/frame pairing degrades.
+        logging.getLogger(__name__).warning(
+            "malformed X-Frame-Id header %r — using -1", raw_frame_id,
+        )
+        frame_id = -1
     now = time.perf_counter()
     if not live._detection_in_flight and now >= live._next_detection_at:
         try:
@@ -100,15 +109,13 @@ async def upload_frame(request: Request) -> Response:
     # NOT here per-upload — feeding every uploaded frame saturated the
     # event loop and starved detection to ~1 fps while recording.
 
-    # --- return JSON face coords (serialize_faces returns [] when no detection yet) -
-    mp = bool(getattr(live, "mp_landmarks", True))
-    faces = serialize_faces(live._cached_fex, mp_landmarks=mp)
+    # --- return the cached faces list (serialized once per detection) ----
     dims = live._cached_frame_dims or [640, 360]
     return {
         "id": live._cached_frame_id,
         "generation": live._detection_generation,
         "frame": [int(dims[0]), int(dims[1])],
-        "faces": faces,
+        "faces": live._cached_faces,
     }
 
 
@@ -121,10 +128,10 @@ async def _run_detection(live, img: Image.Image, frame_id: int = -1) -> None:
     overlay always lands at source pixel density, no matter how
     coarse the detector ran.
 
-    Baking (draw_overlays + encode_jpeg) is skipped unless the recorder
-    needs an overlay MP4 — the live response now returns JSON coords
-    instead of a baked image, so baking on the non-recording path was
-    wasted CPU. The fps win is the point.
+    Baking (draw_overlays) is skipped unless the recorder needs an
+    overlay MP4 — the live response now returns JSON coords instead of
+    a baked image, so baking on the non-recording path was wasted CPU.
+    The fps win is the point.
 
     Wrapped in try/finally so a single bad detection doesn't leave
     ``_detection_in_flight`` stuck True.
@@ -135,8 +142,8 @@ async def _run_detection(live, img: Image.Image, frame_id: int = -1) -> None:
         # which also guards against a /configure rebuild mid-detection), then
         # run the detect pipeline (+ optional bake) in the dedicated worker
         # thread. Keeping ALL of it off the loop (not just detect) is the
-        # point: draw_overlays + encode_jpeg are CPU-heavy and previously ran
-        # on the loop, blocking uploads + the recorder feed.
+        # point: draw_overlays is CPU-heavy and previously ran on the
+        # loop, blocking uploads + the recorder feed.
         async with live.detector_lock:
             detector = live.detector
             # Temporal stabilization: Detectorv2 reads bbox_smoothing_alpha in
@@ -167,7 +174,7 @@ async def _run_detection(live, img: Image.Image, frame_id: int = -1) -> None:
             rec = live.recorder
             need_bake = rec is not None and rec.config.video_mode == "overlay"
             t0 = time.perf_counter()
-            png, fex, dims, baked_arr = await loop.run_in_executor(
+            faces, fex, dims, baked_arr = await loop.run_in_executor(
                 _DETECTION_EXECUTOR,
                 _detect_and_bake,
                 detector, img, detection_size,
@@ -181,8 +188,8 @@ async def _run_detection(live, img: Image.Image, frame_id: int = -1) -> None:
                 dims[0], dims[1], dur * 1000, need_bake,
             )
 
-        live._cached_baked_jpeg = png  # None when not baking; kept for compat
-        live._cached_fex = fex
+        live._cached_faces = faces
+        live._cached_fex = fex  # no production reader since faces are pre-serialized; kept for tests/diagnostics
         # dims = the TRUE source resolution — what the overlay coords are in,
         # NOT the detection input size.
         live._cached_frame_dims = dims
@@ -211,9 +218,17 @@ async def _run_detection(live, img: Image.Image, frame_id: int = -1) -> None:
                 # does the cheap h264 encode and has spare headroom — now does
                 # that conversion instead, keeping the loop free.
                 src = baked_arr if rec.config.video_mode == "overlay" else img
-                rec.offer_frame(
-                    src, fex if fex is not None and len(fex) else None,
-                )
+                if src is not None:
+                    rec.offer_frame(
+                        src, fex if fex is not None and len(fex) else None,
+                    )
+                else:
+                    # Overlay recording started mid-detection: this frame was
+                    # detected without baking, so there's nothing to write yet;
+                    # the next detection (which sees the recorder) bakes.
+                    logging.getLogger(__name__).debug(
+                        "recorder offer skipped: overlay recording started mid-detection"
+                    )
             except Exception:
                 logging.getLogger(__name__).exception("recorder offer_frame failed")
     except Exception:
@@ -234,12 +249,13 @@ def _detect_and_bake(
     bake: bool = True,
 ):
     """Per-frame pipeline, run in the detection worker thread:
-    detect → scale coords to source space → (optionally) bake overlay + encode.
+    detect → scale coords to source space → serialize → (optionally) bake overlay.
 
-    When ``bake`` is False, skips draw_overlays and encode_jpeg and returns
-    ``(None, fex, (width, height), None)``. Detection + coord scaling still
-    run so ``fex`` is always valid. The live JSON response reads ``fex``
-    directly, so baking is only needed when the recorder wants an overlay MP4.
+    Returns ``(faces, fex, dims, baked_arr)``. When ``bake`` is False, skips
+    draw_overlays and returns ``(faces, fex, (width, height), None)``.
+    Detection + coord scaling still run so ``fex`` is always valid. The live
+    JSON response reads ``faces`` directly (serialized here, once per
+    detection), so baking is only needed when the recorder wants an overlay MP4.
 
     Pure function over its arguments (no shared ``live`` state), so it's safe
     off the loop; the caller assigns the results back on the loop.
@@ -264,15 +280,19 @@ def _detect_and_bake(
     # Determine source frame dimensions without copying the array.
     h_src, w_src = img.height, img.width
 
+    # Serialize HERE, on the worker thread, once per detection — the route
+    # returns this list verbatim on every poll (~10x the detection rate).
+    faces = serialize_faces(fex, mp_landmarks=mp_landmarks)
+
     if not bake:
-        # Fast path: detect-only (no draw, no encode). The live JSON response
-        # reads fex coords directly; baking is skipped to save CPU.
+        # Fast path: detect-only (no draw). The live JSON response reads
+        # faces directly; baking is skipped to save CPU.
         if _LIVE_PROFILE:
             logging.getLogger(__name__).info(
                 "detect-only %dx%d input=%.1f detect=%.1f total=%.1fms",
                 w_src, h_src, _t_input, _t_detect, (_t() - _t0) * 1000.0,
             )
-        return None, fex, (w_src, h_src), None
+        return faces, fex, (w_src, h_src), None
 
     # Bake overlay onto a copy of the source-resolution frame.
     frame_arr = np.asarray(img).copy()
@@ -284,22 +304,18 @@ def _detect_and_bake(
             landmark_style=landmark_style, gaze_convention=gaze_convention,
             overlay_style=overlay_style,
         )
-    _t_draw = (_t() - _m) * 1000.0; _m = _t()
-    # JPEG q=95 for baked frames destined for the recorder: visually
-    # indistinguishable and ~19ms/frame faster than PNG.
-    jpeg = encode_jpeg(frame_arr, quality=95)
-    _t_encode = (_t() - _m) * 1000.0
+    _t_draw = (_t() - _m) * 1000.0
     # Transport breakdown (captured in the log buffer): where the per-frame
     # time goes OUTSIDE the model. detect is the detect_pil_images* call;
-    # draw=overlay bake, enc=JPEG encode.
+    # draw=overlay bake.
     h, w = frame_arr.shape[0], frame_arr.shape[1]
     if _LIVE_PROFILE:
         logging.getLogger(__name__).info(
-            "bake %dx%d input=%.1f detect=%.1f prep=%.1f draw=%.1f enc=%.1f total=%.1fms",
-            w, h, _t_input, _t_detect, _t_prep, _t_draw, _t_encode,
+            "bake %dx%d input=%.1f detect=%.1f prep=%.1f draw=%.1f total=%.1fms",
+            w, h, _t_input, _t_detect, _t_prep, _t_draw,
             (_t() - _t0) * 1000.0,
         )
-    return jpeg, fex, (w, h), frame_arr
+    return faces, fex, (w, h), frame_arr
 
 
 def _detection_input(
@@ -324,9 +340,12 @@ def _detection_input(
     # box), the mesh comes back compressed. Mirrors Detectorv2's native
     # ImageDataset(preserve_aspect_ratio=True).
     s = min(tw / img.width, th / img.height)
+    # BILINEAR, not LANCZOS: the detector is insensitive to resampling
+    # quality at these scales, and LANCZOS costs ~3x more per frame
+    # (~3-6ms at 1280->640) on the hot path.
     det_img = img.resize(
         (max(1, round(img.width * s)), max(1, round(img.height * s))),
-        Image.LANCZOS,
+        Image.BILINEAR,
     )
     inv = 1.0 / s
     return det_img, inv, inv
@@ -340,23 +359,32 @@ def _scale_fex_coords(fex, sx: float, sy: float):
       * x_N / y_N landmark pairs (N = 0..67 dlib, 0..477 MP)
       * mesh_x_N / mesh_y_N (Detectorv2's 478 Face Mesh; mesh_z_N left
         alone — it's a relative depth, not a source-pixel coord)
+
+    Same drop + numpy-block + concat pattern as overlay_render's
+    _scale_fex_coords_inplace: a wide ``out.loc[:, cols] = ...`` over
+    Detectorv2's ~1100 coord columns cost ~1.4ms/frame on the live hot
+    path; scaling each axis as one numpy block is ~5x faster with
+    bit-identical values. Consumers read columns by NAME (serializer,
+    recorder DictWriter), so the reordering concat introduces is harmless.
     """
-    out = fex.copy()
-    # Collect x- and y-scaled columns once, write each group in a single
-    # vectorized block (Detectorv2 has ~550 mesh_x_/550 mesh_y_ columns; a
-    # per-column loop here was ~34ms/frame). "x_"/"y_" and "mesh_x_"/
-    # "mesh_y_" are disjoint prefixes; mesh_z_ depth is left unscaled.
-    x_cols = [c for c in out.columns
+    x_cols = [c for c in fex.columns
               if c in ("FaceRectX", "FaceRectWidth")
               or c.startswith("x_") or c.startswith("mesh_x_")]
-    y_cols = [c for c in out.columns
+    y_cols = [c for c in fex.columns
               if c in ("FaceRectY", "FaceRectHeight")
               or c.startswith("y_") or c.startswith("mesh_y_")]
+    if not x_cols and not y_cols:
+        return fex.copy()
+    parts = [fex.drop(columns=x_cols + y_cols)]
     if x_cols:
-        out.loc[:, x_cols] = out[x_cols].values * sx
+        parts.append(pd.DataFrame(
+            fex[x_cols].to_numpy() * sx, columns=x_cols, index=fex.index,
+        ))
     if y_cols:
-        out.loc[:, y_cols] = out[y_cols].values * sy
-    return out
+        parts.append(pd.DataFrame(
+            fex[y_cols].to_numpy() * sy, columns=y_cols, index=fex.index,
+        ))
+    return pd.concat(parts, axis=1)
 
 
 class ConfigureRequest(BaseModel):
@@ -508,6 +536,17 @@ async def recording_start(req: StartRecordingRequest, request: Request) -> dict:
     if getattr(live, "recorder", None) is not None:
         raise HTTPException(409, "recording already in progress")
 
+    # A previous recording may still be draining its writer thread; wait
+    # for it so the new session can't interleave with the old one's close.
+    close_task = getattr(live, "_recorder_close_task", None)
+    if close_task is not None:
+        await close_task
+        # The await is a suspension point: a concurrent /recording/start
+        # may have won the race while we drained — re-check so the loser
+        # 409s instead of silently orphaning the winner's recorder.
+        if getattr(live, "recorder", None) is not None:
+            raise HTTPException(409, "recording already in progress")
+
     cfg = RecorderConfig(
         record_video=req.record_video,
         record_fex=req.record_fex,
@@ -530,7 +569,18 @@ async def recording_stop(request: Request) -> dict:
     recorder = getattr(live, "recorder", None)
     if recorder is None:
         raise HTTPException(409, "no recording in progress")
-    session_dir = recorder.dir
-    recorder.close()
+    # Detach FIRST so _run_detection stops offering frames mid-drain.
     live.recorder = None
+    session_dir = recorder.dir
+    # close() blocks on the writer thread's drain (queue.put + join, up to
+    # 10s of h264 backlog) — run it in the default executor so the event
+    # loop keeps serving /frame polls and health checks meanwhile. Stash the
+    # future on ``live`` so a /recording/start that arrives mid-drain can
+    # await it instead of creating a new recorder that overlaps this one.
+    loop = asyncio.get_running_loop()
+    live._recorder_close_task = loop.run_in_executor(None, recorder.close)
+    try:
+        await live._recorder_close_task
+    finally:
+        live._recorder_close_task = None
     return {"session_dir": str(session_dir)}
