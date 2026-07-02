@@ -326,9 +326,12 @@ def _detection_input(
     # box), the mesh comes back compressed. Mirrors Detectorv2's native
     # ImageDataset(preserve_aspect_ratio=True).
     s = min(tw / img.width, th / img.height)
+    # BILINEAR, not LANCZOS: the detector is insensitive to resampling
+    # quality at these scales, and LANCZOS costs ~3x more per frame
+    # (~3-6ms at 1280->640) on the hot path.
     det_img = img.resize(
         (max(1, round(img.width * s)), max(1, round(img.height * s))),
-        Image.LANCZOS,
+        Image.BILINEAR,
     )
     inv = 1.0 / s
     return det_img, inv, inv
