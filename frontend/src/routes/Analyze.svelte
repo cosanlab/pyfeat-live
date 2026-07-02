@@ -238,7 +238,7 @@
           onOpenInViewer={() => {
             if (item.session_dir && onSwitchView) {
               // Pass session ID (folder name) so Viewer can preselect.
-              onSwitchView('viewer', item.session_dir.split('/').pop()!);
+              onSwitchView('viewer', item.session_dir.split(/[\\/]/).pop()!);
             }
           }}
         />

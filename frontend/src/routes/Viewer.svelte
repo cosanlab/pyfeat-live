@@ -293,6 +293,11 @@
     isPlaying = false;
     similarity = null;
     sessionLoading = true;
+    // Clear the previous session's overlay data immediately — its coords
+    // are in the OLD video's pixel space and would render misplaced over
+    // the new session's video until the CSV lands.
+    fexRows = [];
+    frameTimes = [];
     try {
       // Kick off the big payloads immediately — they depend only on `id`,
       // and previously waited behind the identities round-trips. An inert
@@ -379,6 +384,10 @@
       }
       if (tok !== selectToken) return;
       frameTimes = ft;
+    } catch (e) {
+      if (tok === selectToken) {
+        console.warn(`failed to load session ${id}:`, e);
+      }
     } finally {
       if (tok === selectToken) sessionLoading = false;
     }
@@ -402,6 +411,11 @@
   }
 
   function onSeek(f: number) {
+    // A user seek (scrub drag, annotation click, plot click) pauses
+    // playback — otherwise the rVFC frame advance and a 60Hz coalesced
+    // drag-seek fight over currentFrame and the overlay visibly bounces.
+    // Matches the keyboard-stepping behavior.
+    isPlaying = false;
     // totalFrames is a count, so the last valid index is totalFrames - 1.
     // Clamping to totalFrames left the last frame blank (no fex rows match).
     currentFrame = Math.max(0, Math.min(totalFrames - 1, f));
@@ -497,16 +511,13 @@
       if (!e.repeat) onTogglePlay();
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.preventDefault();
-      isPlaying = false; // frame-stepping implies paused
       const step = (e.shiftKey ? 10 : 1) * (e.key === 'ArrowRight' ? 1 : -1);
       onSeek(currentFrame + step);
     } else if (e.key === 'Home') {
       e.preventDefault();
-      isPlaying = false;
       onSeek(0);
     } else if (e.key === 'End') {
       e.preventDefault();
-      isPlaying = false;
       onSeek(totalFrames - 1);
     }
   }

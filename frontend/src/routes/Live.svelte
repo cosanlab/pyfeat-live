@@ -149,7 +149,7 @@
   let savedSessionId: string | null = $state(null);
   let savedToastTimer: ReturnType<typeof setTimeout> | null = null;
   function showSavedToast(sessionDir: string) {
-    savedSessionId = sessionDir.split('/').pop() ?? null;
+    savedSessionId = sessionDir.split(/[\\/]/).pop() ?? null;
     if (savedToastTimer) clearTimeout(savedToastTimer);
     savedToastTimer = setTimeout(() => (savedSessionId = null), 10_000);
   }
