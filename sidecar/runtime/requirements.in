@@ -17,7 +17,5 @@ torchcodec==0.14.0  # match torch 2.12 (transitive via py-feat resolves to a sta
 fastapi>=0.115
 uvicorn[standard]>=0.34
 python-multipart>=0.0.18
-plotly==6.7.0
-watchdog==6.0.0
 av==16.1.0
 pillow==12.2.0
