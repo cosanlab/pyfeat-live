@@ -105,19 +105,21 @@
     <pre id="log"></pre>
 
     <script>
-      // Port comes from the URL fragment the Rust shell appends
-      // (setup.html#<port>). We poll the backend's health endpoint and, on
-      // the first success, navigate the webview to the backend origin —
-      // the FastAPI server serves the built Svelte SPA at "/" and the
-      // "/api" routes, so loading the app from http://127.0.0.1:<port>
-      // (rather than the tauri:// scheme) is what makes the SPA's relative
-      // fetch("/api/...") calls resolve. Without this redirect the SPA runs
-      // under tauri:// and every API call throws "The string did not match
-      // the expected pattern."
-      // The Rust shell always appends the real per-launch port
-      // (setup.html#<port>); there is no meaningful static fallback.
-      const port = parseInt(location.hash.slice(1), 10) || 0;
-      const origin = `http://127.0.0.1:${port}`;
+      // Port comes from the `bootstrap://done` event the Rust shell emits
+      // right before it spawns the sidecar (its payload IS the port). We
+      // poll the backend's health endpoint and, on the first success,
+      // navigate the webview to the backend origin — the FastAPI server
+      // serves the built Svelte SPA at "/" and the "/api" routes, so
+      // loading the app from http://127.0.0.1:<port> (rather than the
+      // tauri:// scheme) is what makes the SPA's relative fetch("/api/...")
+      // calls resolve. Without this redirect the SPA runs under tauri://
+      // and every API call throws "The string did not match the expected
+      // pattern."
+      // 0 is a sentinel meaning "not known yet" — poll() skips the fetch
+      // until the event arrives. (location.hash is read once as a legacy
+      // fallback in case the shell ever appends one again; normally empty.)
+      let port = parseInt(location.hash.slice(1), 10) || 0;
+      const originFor = (p) => `http://127.0.0.1:${p}`;
       // Cache-bust the SPA entry document. WKWebView caches the served
       // index.html, so after an in-app update the stale cached document
       // keeps pinning the PREVIOUS hashed JS/CSS and the new frontend never
@@ -125,7 +127,7 @@
       // forces a fresh index.html each launch; the hash-named assets it
       // references stay cached by URL, so only the ~0.4 KB document
       // re-downloads.
-      const target = `${origin}/?v=${Date.now()}`;
+      const targetFor = (p) => `${originFor(p)}/?v=${Date.now()}`;
       const log = document.getElementById("log");
       const status = document.getElementById("status");
       const hint = document.getElementById("hint");
@@ -150,7 +152,7 @@
         if (backendReady && !updatePending && !applying) {
           status.textContent = "Ready";
           spin.style.display = "none";
-          location.replace(target);
+          location.replace(targetFor(port));
         }
       }
 
@@ -170,7 +172,8 @@
         event.listen("bootstrap://log", (e) => {
           append(e.payload.stream, e.payload.line);
         });
-        event.listen("bootstrap://done", () => {
+        event.listen("bootstrap://done", (e) => {
+          port = Number(e.payload) || port;
           status.textContent = "Starting Py-feat Live…";
           hint.textContent = "Loading models — this takes 10–20s on first launch.";
         });
@@ -257,13 +260,20 @@
       let attempts = 0;
       async function poll() {
         attempts += 1;
+        // Port isn't known until the `bootstrap://done` event delivers it
+        // (or the legacy hash fallback set it). Skip the fetch — a port-0
+        // request would never resolve — and just keep waiting.
+        if (port === 0) {
+          setTimeout(poll, 500);
+          return;
+        }
         try {
           // NOTE: fetch from `origin`, not `target` — target carries the
           // ?v= cache-buster, which used to push the path into the query
           // string (the old poll actually fetched the SPA root). Also
           // verify the identity marker: a bare 200 could be any localhost
           // service on this port.
-          const r = await fetch(`${origin}/api/system/health`, { cache: "no-store" });
+          const r = await fetch(`${originFor(port)}/api/system/health`, { cache: "no-store" });
           const body = r.ok ? await r.json().catch(() => null) : null;
           if (body && body.app === "pyfeatlive") {
             // Backend is up. Redirect now unless we're holding for an
@@ -280,7 +290,7 @@
           // ECONNREFUSED while the backend is still booting — keep polling.
         }
         if (attempts === 60) {
-          append("stderr", `backend not responding at ${target} after 30s`);
+          append("stderr", `backend not responding at ${targetFor(port)} after 30s`);
           hint.textContent = "Still waiting for the runtime — check the log below.";
         }
         setTimeout(poll, 500);

@@ -32,18 +32,35 @@ use tokio::process::{Child, Command};
 #[cfg(target_os = "macos")]
 mod macos_camera;
 
-/// Sidecar (FastAPI/uvicorn) listening port: picked fresh per launch by
-/// binding :0 and taking what the OS hands out. The v1 prototype's fixed
-/// 8501 collided with Streamlit's default — our users run Streamlit.
-/// (Tiny bind→spawn race window is acceptable for a local desktop app.)
+/// Preferred sidecar ports. A DETERMINISTIC range (not an OS-assigned
+/// ephemeral port) so the SPA origin http://127.0.0.1:<port> — and with it
+/// the webview's per-origin localStorage (overlay style, experimental
+/// flags, dismissed update banners) — stays stable across launches. The v1
+/// prototype's fixed 8501 collided with Streamlit's default; this range has
+/// no common squatter, a second app instance simply takes the next port,
+/// and the identity-checked health probe (backend_healthy) refuses to
+/// navigate into anything that isn't our sidecar. If the whole range is
+/// somehow taken we fall back to an ephemeral port (costs stored settings
+/// for that launch — acceptable over failing to start).
+const SIDECAR_PORT_RANGE: std::ops::Range<u16> = 18640..18650;
+
 static SIDECAR_PORT_CELL: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
 
+/// Pick the sidecar port. Called for the FIRST time right before spawning
+/// the sidecar (NOT at window creation) so the probe→bind window is
+/// milliseconds — previously the pick happened before the first-run
+/// runtime install, leaving the port unreserved for minutes.
 fn sidecar_port() -> u16 {
     *SIDECAR_PORT_CELL.get_or_init(|| {
+        for port in SIDECAR_PORT_RANGE {
+            if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+                return port;
+            }
+        }
         std::net::TcpListener::bind(("127.0.0.1", 0))
             .and_then(|l| l.local_addr())
             .map(|a| a.port())
-            .unwrap_or(18641) // fallback: fixed but non-Streamlit
+            .unwrap_or(18650)
     })
 }
 
@@ -75,12 +92,16 @@ pub fn run() {
         .setup(|app| {
             // Window first so the splash is visible while the install runs.
             // The splash (setup.html) polls the backend and redirects once
-            // it's serving (the Rust shell also drives the redirect).
-            let port_arg = format!("setup.html#{}", sidecar_port());
+            // it's serving (the Rust shell also drives the redirect). We do
+            // NOT call sidecar_port() here — that would pick (and reserve)
+            // the port at window-creation time, before the first-run
+            // runtime install, leaving it unbound and stealable for
+            // minutes. The splash instead learns the port from the
+            // `bootstrap://done` event payload, emitted right before spawn.
             let window = WebviewWindowBuilder::new(
                 app,
                 "main",
-                WebviewUrl::App(port_arg.into()),
+                WebviewUrl::App("setup.html".into()),
             )
             .title("Py-feat Live")
             // Conservative default that fits small laptops (a 1280x800 screen
