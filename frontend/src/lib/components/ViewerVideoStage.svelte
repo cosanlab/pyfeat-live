@@ -223,11 +223,14 @@
   }
 
   function handleStageClick(e: MouseEvent) {
-    // Hit-test face rects; emit click for the first hit so the parent
-    // can open the identity assignment dialog.
+    // Hit-test face rects; emit click for the first hit so the parent can
+    // open the identity assignment dialog. Attached to the INNER
+    // aspect-locked box (the exact box the video + overlay fill): using the
+    // outer stage's rect broke the mapping whenever the video was
+    // letterboxed (scale AND offset were wrong).
     if (!faces || faces.length === 0) return;
-    const stage = e.currentTarget as HTMLDivElement;
-    const r = stage.getBoundingClientRect();
+    const box = e.currentTarget as HTMLDivElement;
+    const r = box.getBoundingClientRect();
     const sx = (e.clientX - r.left) * (width / r.width);
     const sy = (e.clientY - r.top) * (height / r.height);
     for (let i = 0; i < faces.length; i++) {
@@ -245,10 +248,8 @@
 
 <div
   bind:this={stageEl}
-  class="relative bg-black flex items-start justify-center overflow-hidden cursor-crosshair min-h-0 {manualHeight === null ? 'flex-1' : 'shrink-0'}"
+  class="relative bg-black flex items-start justify-center overflow-hidden min-h-0 {manualHeight === null ? 'flex-1' : 'shrink-0'}"
   style={manualHeight === null ? 'min-height: 50vh;' : `height: ${manualHeight}px; min-height: 160px;`}
-  onclick={handleStageClick}
-  role="presentation"
 >
   {#if videoUrl}
     <!-- Aspect-locked container so the video AND the overlay canvas
@@ -258,10 +259,12 @@
          space) were drawn onto a differently-sized/positioned canvas
          and appeared offset. Both now fill this aspect-matched box. -->
     <div
-      class="relative h-full"
+      class="relative h-full cursor-crosshair"
       style="aspect-ratio: {width} / {height}; max-width: 100%; max-height: 100%;"
       bind:clientWidth={stageBoxW}
       bind:clientHeight={stageBoxH}
+      onclick={handleStageClick}
+      role="presentation"
     >
       <video
         bind:this={video}
