@@ -183,7 +183,7 @@ async def _run_detection(live, img: Image.Image, frame_id: int = -1) -> None:
             )
 
         live._cached_faces = faces
-        live._cached_fex = fex
+        live._cached_fex = fex  # no production reader since faces are pre-serialized; kept for tests/diagnostics
         # dims = the TRUE source resolution — what the overlay coords are in,
         # NOT the detection input size.
         live._cached_frame_dims = dims

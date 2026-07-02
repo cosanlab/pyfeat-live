@@ -121,9 +121,9 @@ class LiveSession:
 
         Critically: must clear the cached faces list too, otherwise
         a /configure that swaps the detector (e.g., Detectorv1
-        → MPDetector) returns the previous detector's last baked
-        frame on the next /api/live/frame upload until a new
-        detection completes. The display would show stale pixels.
+        → MPDetector) would return the previous detector's cached
+        faces list (stale coordinates) on the next /api/live/frame
+        upload until a new detection completes.
         """
         self._state = {
             "frame_index": -1, "ts": 0.0, "faces": [],
