@@ -2,10 +2,12 @@
   import { onMount, onDestroy } from 'svelte';
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
+  import X from '@lucide/svelte/icons/x';
   import { liveApi, systemApi } from '../lib/api';
   import type { LiveConfigure, ComputeInfo, OverlayEdgeSets, DetectorCapabilities } from '../lib/api';
   import type { OverlayToggles, OverlayStyleConfig } from '../lib/overlay/types';
   import type { Face } from '../lib/overlay/types';
+  import type { View } from '../lib/types';
   import { defaultOverlayStyle } from '../lib/overlay/types';
   import { cameraStore, refreshDevices, startCamera, stopCamera } from '../lib/webrtc/useCamera.svelte';
   import LiveSidebar from '../lib/components/LiveSidebar.svelte';
@@ -17,6 +19,9 @@
   import OverlayCanvas from '../lib/components/OverlayCanvas.svelte';
   import { placeMetaStack } from '../lib/overlay/metaStack';
   import { FrameCache } from '../lib/overlay/frameCache';
+
+  type Props = { onSwitchView?: (v: View, sessionId?: string) => void };
+  let { onSwitchView }: Props = $props();
 
   // Detection upload budget: the longest edge (px) we downscale a captured
   // frame to before sending it for detection. The camera's native ASPECT
@@ -139,6 +144,15 @@
   let isRecording = $state(false);
   let loopAbort: AbortController | null = null;
 
+  // "Recording saved" toast: session id captured from /recording/stop.
+  let savedSessionId: string | null = $state(null);
+  let savedToastTimer: ReturnType<typeof setTimeout> | null = null;
+  function showSavedToast(sessionDir: string) {
+    savedSessionId = sessionDir.split('/').pop() ?? null;
+    if (savedToastTimer) clearTimeout(savedToastTimer);
+    savedToastTimer = setTimeout(() => (savedSessionId = null), 10_000);
+  }
+
   let fps = $state(0);
   const fpsWindow: number[] = [];
   let lastGeneration = -1;
@@ -198,6 +212,7 @@
   onDestroy(() => {
     stopLoop();
     stopCamera();
+    if (savedToastTimer) clearTimeout(savedToastTimer);
   });
 
   async function applyConfig(c: LiveConfigure) {
@@ -429,7 +444,10 @@
 
   async function stopStream() {
     if (isRecording) {
-      try { await liveApi.recordingStop(); } catch {}
+      try {
+        const res = await liveApi.recordingStop();
+        if (res?.session_dir) showSavedToast(res.session_dir);
+      } catch {}
       isRecording = false;
     }
     isStreaming = false;
@@ -483,9 +501,10 @@
 
   async function stop() {
     try {
-      await liveApi.recordingStop();
+      const res = await liveApi.recordingStop();
       isRecording = false;
       apiError = null;
+      if (res?.session_dir) showSavedToast(res.session_dir);
     } catch (e: any) {
       apiError = `Recording stop failed: ${e?.message ?? e}`;
     }
@@ -675,6 +694,17 @@
       onOpenSettings={() => (showOverlayConfig = true)}
     />
   </div>
+
+  {#if savedSessionId}
+    <div class="fixed bottom-4 right-4 z-40 flex items-center gap-3 rounded-md border border-zinc-800 bg-zinc-950/95 px-3.5 py-2.5 text-sm text-zinc-200 shadow-lg">
+      <span>Recording saved</span>
+      <button
+        class="text-emerald-400 hover:text-emerald-300 font-medium"
+        onclick={() => { const id = savedSessionId; savedSessionId = null; if (id) onSwitchView?.('viewer', id); }}
+      >Open in Viewer</button>
+      <button class="text-zinc-500 hover:text-zinc-300" aria-label="Dismiss" onclick={() => (savedSessionId = null)}><X size={14} /></button>
+    </div>
+  {/if}
 </div>
 
 {#if showOverlayConfig}

@@ -26,6 +26,9 @@
   type LeftTab = 'sessions' | 'annotations';
   type AnnotationFilter = 'all' | AnnotationKind;
 
+  type Props = { initialSessionId?: string | null };
+  let { initialSessionId = null }: Props = $props();
+
   // Top-level state
   let sessions: SessionSummary[] = $state([]);
   let currentSessionId: string | null = $state(null);
@@ -273,8 +276,13 @@
       systemApi.overlayEdges().catch(() => null),
       systemApi.blendshapeNames().catch(() => []),
     ]);
-    if (sessions.length > 0) {
-      await selectSession(sessions[0].name);
+    // Prefer the session another view asked us to open (Analyze's
+    // "Open in Viewer", Live's recording-saved toast); fall back to newest.
+    const requested = initialSessionId && sessions.some(s => s.name === initialSessionId)
+      ? initialSessionId
+      : sessions[0]?.name;
+    if (requested) {
+      await selectSession(requested);
     }
   });
 
