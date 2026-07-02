@@ -6,6 +6,8 @@
   import { Renderer, Camera, Orbit, Transform, Geometry, Program, Mesh, Texture, Vec3 } from '../vendor/ogl.js';
   import { colormapLut, type ColormapName } from '../overlay/colormaps';
   import type { MeshConfig } from '../mesh/config';
+  import Play from '@lucide/svelte/icons/play';
+  import Pause from '@lucide/svelte/icons/pause';
 
   let { neutral, target, edges, faces, config, gaze }: {
     neutral: number[][]; target: number[][]; edges: number[][]; faces: number[][];
@@ -402,8 +404,9 @@
 <div bind:this={wrap} class="relative w-full h-full">
   <canvas bind:this={canvas} class="absolute inset-0 block"></canvas>
   <div class="absolute left-3 bottom-3 flex gap-2">
-    <button class="px-2.5 py-1 rounded-md text-[11.5px] font-medium bg-zinc-900/90 border border-zinc-700 text-zinc-200 hover:bg-zinc-800"
-            onclick={() => (playing = !playing)}>{playing ? '⏸ Pause' : '▶ Play'}</button>
+    <button class="px-2.5 py-1 rounded-md text-[11.5px] font-medium bg-zinc-900/90 border border-zinc-700 text-zinc-200 hover:bg-zinc-800 inline-flex items-center gap-1"
+            onclick={() => (playing = !playing)}>
+            {#if playing}<Pause size={12} /> Pause{:else}<Play size={12} /> Play{/if}</button>
     <button class="px-2.5 py-1 rounded-md text-[11.5px] font-medium bg-zinc-900/90 border border-zinc-700 text-zinc-200 hover:bg-zinc-800"
             onclick={() => { loop = !loop; if (loop) playing = true; }}>Loop: {loop ? 'on' : 'off'}</button>
   </div>

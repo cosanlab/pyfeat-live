@@ -27,3 +27,11 @@ def test_same_second_recorders_get_distinct_dirs(tmp_path):
     assert a.dir != b.dir
     a.close(timeout=10)
     b.close(timeout=10)
+
+
+def test_close_with_bare_config_does_not_raise(tmp_path):
+    """A RecorderConfig without detector_info must close cleanly (the
+    metadata write used to KeyError on detector_info['detector_type'])."""
+    rec = SessionRecorder(tmp_path, RecorderConfig(record_video=False, record_fex=True))
+    rec.offer_frame(Image.new("RGB", (32, 32)), None)
+    rec.close(timeout=10)  # must not raise

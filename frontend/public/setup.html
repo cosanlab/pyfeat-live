@@ -291,7 +291,7 @@
         }
         if (attempts === 60) {
           append("stderr", `backend not responding at ${targetFor(port)} after 30s`);
-          hint.textContent = "Still waiting for the runtime — check the log below.";
+          hint.textContent = "Still waiting for the backend — the first start after an install can take a minute while Python warms up.";
         }
         setTimeout(poll, 500);
       }

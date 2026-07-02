@@ -263,9 +263,15 @@ class SessionRecorder:
             "video_mode": self.config.video_mode if self.config.record_video else None,
             "record_fex": self.config.record_fex,
             "detector": self.config.detector_info,
-            "capabilities": capabilities_for(
-                self.config.detector_info["detector_type"]
-            ).to_dict(),
+            # detector_info may be empty (bare RecorderConfig — tests,
+            # future callers): omit capabilities rather than KeyError
+            # mid-close and lose metadata.json entirely. The Viewer
+            # treats capabilities as optional.
+            "capabilities": (
+                capabilities_for(dt).to_dict()
+                if (dt := self.config.detector_info.get("detector_type"))
+                else None
+            ),
         }
         try:
             (self.dir / "metadata.json").write_text(json.dumps(meta, indent=2))

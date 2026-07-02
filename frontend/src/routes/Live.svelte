@@ -95,12 +95,13 @@
   // Frame cache: keeps recently-captured bitmaps keyed by frame id so the
   // display can paint the exact frame a detection ran on (lock-to-detection).
   // Sized to cover slow detectors (MPDetector / Detectorv1 run
-  // ~100-250ms/detection): the in-flight window is detection_latency ÷
-  // capture_interval, so with the ~33ms capture cap below this holds ~8
-  // frames at 250ms latency — well within 40. Too small and the detected
-  // frame is evicted before its result returns, freezing the video while the
-  // overlay (coords only) keeps moving.
-  const frameCache = new FrameCache(40);
+  // ~100-250ms/detection): the in-flight window is
+  // ceil(detection_latency ÷ capture_interval) ≈ 8 frames at 250ms latency
+  // with the ~33ms capture cap below, so 16 keeps 2x headroom while capping
+  // the cache at ~60MB of 720p bitmaps instead of ~150MB. Too small and the
+  // detected frame is evicted before its result returns, freezing the video
+  // while the overlay (coords only) keeps moving.
+  const frameCache = new FrameCache(16);
   let nextFrameId = 0;
   let lastPaintedId = -1;
 
