@@ -131,8 +131,18 @@ class SessionRecorder:
     def __init__(self, root: Path, config: RecorderConfig):
         self.config = config
         ts = time.strftime("%Y-%m-%d_%H-%M-%S")
+        # Second-precision names collide when recordings start <1s apart
+        # (e.g. a rapid stop→start); never reuse a directory another
+        # recorder may still be draining into — suffix instead.
         self.dir: Path = root / ts
-        self.dir.mkdir(parents=True, exist_ok=True)
+        n = 1
+        while True:
+            try:
+                self.dir.mkdir(parents=True, exist_ok=False)
+                break
+            except FileExistsError:
+                n += 1
+                self.dir = root / f"{ts}-{n}"
         (self.dir / "screenshots").mkdir(exist_ok=True)
 
         self._queue: "queue.Queue[Optional[tuple]]" = queue.Queue(

@@ -44,3 +44,20 @@ jobs:
         # then drop continue-on-error to make it a gate.
         continue-on-error: true
         run: pnpm check
+
+  pins:
+    name: shared pins in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: requirements.txt pins match sidecar/runtime/requirements.in
+        run: |
+          set -e
+          for pkg in py-feat pyfeat-generator torchcodec av pillow; do
+            a=$(grep -E "^${pkg}==" requirements.txt | sed 's/#.*//' | tr -d '[:space:]')
+            b=$(grep -E "^${pkg}==" sidecar/runtime/requirements.in | sed 's/#.*//' | tr -d '[:space:]')
+            if [ "$a" != "$b" ]; then
+              echo "::error::pin drift for ${pkg}: requirements.txt has '${a}', runtime has '${b}' (this drift class shipped the v0.8.11 crash)"
+              exit 1
+            fi
+          done

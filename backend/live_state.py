@@ -27,6 +27,12 @@ class LiveSession:
 
     detector: Any = None  # py-feat Detector | MPDetector | None
     recorder: Any = None  # SessionRecorder | None
+    # In-flight recorder close (an asyncio Future from run_in_executor).
+    # /recording/stop sets it for the duration of the drain;
+    # /recording/start awaits it so a new session never overlaps a
+    # still-draining one (close() used to block the event loop, which
+    # serialized this by accident).
+    _recorder_close_task: Any = None
     # Overlay configuration mirrored from /api/live/configure so the
     # bake path can read them on every frame without bouncing through
     # the frontend.
@@ -73,12 +79,16 @@ class LiveSession:
     # display quality are unaffected. None = use source size as-is.
     detection_size: Optional[tuple[int, int]] = None
     # Decoupled-detection state used by /api/live/frame's bake-and-
-    # return loop. The handler reads ``_cached_fex`` to draw overlays
-    # on EVERY uploaded frame, and launches a fresh detection in
-    # ``run_in_executor`` only when both ``_detection_in_flight`` is
-    # False and ``time.perf_counter() >= _next_detection_at`` — that
-    # way detection runs at its own rate (~10 Hz) while display
-    # tracks the upload rate (capped by camera fps + jpeg encode time).
+    # return loop. The handler returns ``_cached_faces`` (serialized once
+    # per detection, in the worker thread) verbatim on EVERY uploaded
+    # frame, and launches a fresh detection in ``run_in_executor`` only
+    # when both ``_detection_in_flight`` is False and
+    # ``time.perf_counter() >= _next_detection_at`` — that way detection
+    # runs at its own rate (~10 Hz) while display tracks the upload rate
+    # (capped by camera fps + jpeg encode time). ``_cached_fex`` is the
+    # raw per-detection DataFrame the worker produced; it has no
+    # production reader anymore (faces are pre-serialized) and is kept
+    # only for tests/diagnostics.
     _cached_fex: object = None
     _next_detection_at: float = 0.0
     _detection_in_flight: bool = False

@@ -85,10 +85,16 @@ async def upload_frame(request: Request) -> Response:
     # Image.open().convert() on the event loop per upload and starved the
     # detection task. Decoding ~1-in-N frames frees the loop to finish
     # detections sooner, which is what the displayed fps tracks.
+    raw_frame_id = request.headers.get("X-Frame-Id", "-1")
     try:
-        frame_id = int(request.headers.get("X-Frame-Id", "-1"))
+        frame_id = int(raw_frame_id)
     except ValueError:
-        frame_id = -1  # advisory header; malformed value is not an error
+        # advisory header; malformed value is not an error — but it IS a
+        # client bug worth surfacing, since overlay/frame pairing degrades.
+        logging.getLogger(__name__).warning(
+            "malformed X-Frame-Id header %r — using -1", raw_frame_id,
+        )
+        frame_id = -1
     now = time.perf_counter()
     if not live._detection_in_flight and now >= live._next_detection_at:
         try:
@@ -212,9 +218,17 @@ async def _run_detection(live, img: Image.Image, frame_id: int = -1) -> None:
                 # does the cheap h264 encode and has spare headroom — now does
                 # that conversion instead, keeping the loop free.
                 src = baked_arr if rec.config.video_mode == "overlay" else img
-                rec.offer_frame(
-                    src, fex if fex is not None and len(fex) else None,
-                )
+                if src is not None:
+                    rec.offer_frame(
+                        src, fex if fex is not None and len(fex) else None,
+                    )
+                else:
+                    # Overlay recording started mid-detection: this frame was
+                    # detected without baking, so there's nothing to write yet;
+                    # the next detection (which sees the recorder) bakes.
+                    logging.getLogger(__name__).debug(
+                        "recorder offer skipped: overlay recording started mid-detection"
+                    )
             except Exception:
                 logging.getLogger(__name__).exception("recorder offer_frame failed")
     except Exception:
@@ -522,6 +536,12 @@ async def recording_start(req: StartRecordingRequest, request: Request) -> dict:
     if getattr(live, "recorder", None) is not None:
         raise HTTPException(409, "recording already in progress")
 
+    # A previous recording may still be draining its writer thread; wait
+    # for it so the new session can't interleave with the old one's close.
+    close_task = getattr(live, "_recorder_close_task", None)
+    if close_task is not None:
+        await close_task
+
     cfg = RecorderConfig(
         record_video=req.record_video,
         record_fex=req.record_fex,
@@ -549,7 +569,13 @@ async def recording_stop(request: Request) -> dict:
     session_dir = recorder.dir
     # close() blocks on the writer thread's drain (queue.put + join, up to
     # 10s of h264 backlog) — run it in the default executor so the event
-    # loop keeps serving /frame polls and health checks meanwhile.
+    # loop keeps serving /frame polls and health checks meanwhile. Stash the
+    # future on ``live`` so a /recording/start that arrives mid-drain can
+    # await it instead of creating a new recorder that overlaps this one.
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, recorder.close)
+    live._recorder_close_task = loop.run_in_executor(None, recorder.close)
+    try:
+        await live._recorder_close_task
+    finally:
+        live._recorder_close_task = None
     return {"session_dir": str(session_dir)}

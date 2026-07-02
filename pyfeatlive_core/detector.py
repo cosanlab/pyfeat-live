@@ -110,16 +110,17 @@ def _hf_offline():
         constants.HF_HUB_OFFLINE = prior
 
 
-# Serializes the offline-first window across threads. Live /configure and
-# the Analyze runner can build concurrently (shared default executor);
-# without this, one build's temporary HF_HUB_OFFLINE=True can be misread
-# by another as a user-set flag (skipping its online retry), or captured
-# as the "prior" value and restored, leaving the process stuck offline.
-# Accepted residual race: while a cold-cache online retry is downloading
-# OUTSIDE the lock, another build's offline window can transiently fail
-# some of its in-flight hub requests — rare (cold cache + concurrent
-# build), transient, and surfaces as a normal retryable build error; not
-# worth holding the lock across multi-minute downloads.
+# Serializes the ENTIRE build — offline attempt AND online retry — across
+# threads. Live /configure and the Analyze runner can build concurrently
+# (shared default executor); without this, one build's temporary
+# HF_HUB_OFFLINE=True can be misread by another as a user-set flag
+# (skipping its online retry), or captured as the "prior" value and
+# restored, leaving the process stuck offline. Holding the lock across the
+# online retry too closes that window completely: no build's offline flag
+# can ever affect another build's downloads. Tradeoff: a cold-cache retry
+# download (first-run only) now serializes other builds behind it —
+# acceptable, since they'd be contending for the same bandwidth anyway and
+# warm-cache builds (the common case after first run) are never blocked.
 _OFFLINE_FIRST_LOCK = threading.Lock()
 
 
@@ -138,10 +139,12 @@ def build_detector(config: DetectorConfig):
     doubled failure path only costs seconds on an already-failing build.
 
     If the user explicitly set HF_HUB_OFFLINE before launch, we honor it:
-    single offline build, no online retry. The offline-first window is
-    serialized across threads (Live configure and the Analyze runner can
-    build concurrently) so one build's temporary flag toggle is never
-    misread by another.
+    single offline build, no online retry. The whole build — offline
+    attempt and online retry alike — is serialized across threads (Live
+    configure and the Analyze runner can build concurrently) so one
+    build's temporary flag toggle is never misread by another, at the
+    cost of a cold-cache retry download blocking other concurrent builds
+    until it finishes.
     """
     from huggingface_hub import constants
 
@@ -157,4 +160,4 @@ def build_detector(config: DetectorConfig):
                 "offline detector build failed (%s: %s) — retrying online",
                 type(exc).__name__, exc,
             )
-    return _construct_detector(config)
+        return _construct_detector(config)
