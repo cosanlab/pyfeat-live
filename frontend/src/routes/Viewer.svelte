@@ -222,6 +222,17 @@
     (currentSession as SessionDetail | null)?.metadata?.capabilities?.landmark_space === 'mp478',
   );
 
+  // Gaze sign convention from the same recorded capabilities. Detectorv2
+  // sessions are 'multitask' (+sin(yaw)·cos(pitch)); everything else is
+  // 'l2cs' (-sin(yaw)). Omitting this drew Detectorv2 gaze arrows pointing
+  // the opposite way left/right (OverlayCanvas defaults to 'l2cs').
+  const gazeConvention = $derived(
+    ((currentSession as SessionDetail | null)?.metadata?.capabilities?.gaze_convention ===
+      'multitask'
+      ? 'multitask'
+      : 'l2cs') as 'l2cs' | 'multitask',
+  );
+
   // Current frame's row for the selected identity (for the inspector bars).
   const currentFrameValues = $derived.by((): Record<string, number | null> | null => {
     if (selectedIdentityIds.length === 0) return null;
@@ -416,16 +427,38 @@
     selectedIdentityIds = identities.map(i => i.identity_id);
   }
 
-  // Hotkeys for annotation creation.
+  // Hotkeys: annotations (e/c), play/pause (space), frame scrubbing
+  // (←/→ ±1, Shift+←/→ ±10, Home/End).
   function onKey(e: KeyboardEvent) {
-    if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+    // Never fire while typing (any form control), with a modifier held
+    // (Cmd/Ctrl+C must copy, not open the annotation popover), or while
+    // any dialog is open — space/arrows must not scrub behind it.
+    const t = e.target as HTMLElement | null;
+    if (t && (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (popover !== null || showOverlayConfig || assignDialog !== null) return;
     if (e.key === 'e' || e.key === 'E') {
       popover = { kind: 'event', startFrame: currentFrame, endFrame: currentFrame, label: '' };
     } else if (e.key === 'c' || e.key === 'C') {
       popover = { kind: 'custom', startFrame: currentFrame, endFrame: currentFrame, label: '' };
     } else if (e.key === ' ') {
       e.preventDefault();
-      onTogglePlay();
+      // Ignore OS key-repeat: holding space would otherwise flicker
+      // play/pause. (Arrows deliberately honor repeat — hold-to-scrub.)
+      if (!e.repeat) onTogglePlay();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      isPlaying = false; // frame-stepping implies paused
+      const step = (e.shiftKey ? 10 : 1) * (e.key === 'ArrowRight' ? 1 : -1);
+      onSeek(currentFrame + step);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      isPlaying = false;
+      onSeek(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      isPlaying = false;
+      onSeek(totalFrames - 1);
     }
   }
 </script>
@@ -478,6 +511,7 @@
       faces={facesForCurrentFrame}
       {toggles}
       {mpLandmarks}
+      {gazeConvention}
       edges={overlayEdges}
       {auTable}
       mpToDlib68={auTable?.mpToDlib68 ?? null}

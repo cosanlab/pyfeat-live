@@ -117,10 +117,13 @@ export function drawGaze(
   ctx.save();
   ctx.globalAlpha = opts?.opacity ?? 1;
   // gaze_pitch / gaze_yaw are in RADIANS. Port of overlay_render.py:_draw_gaze
-  // (the validated baked mapping). Both are drawn in source coords then the
-  // stage is selfie-mirrored, so the signs are tuned for the mirrored view.
-  // Detectorv2's multitask gaze head needs +sin(yaw)·cos(pitch); L2CS (classic
-  // Detector / MPDetector) uses -sin(yaw). Pitch is -sin() either way.
+  // (the validated baked mapping). The signs are the UNMIRRORED source-frame
+  // mapping, identical to the backend's: correct as-is in the Viewer
+  // (unmirrored recordings), and correct in Live because its CSS scaleX(-1)
+  // flips the arrow together with the face, like a real mirror. Callers MUST
+  // pass the session/detector's convention: Detectorv2's multitask gaze head
+  // needs +sin(yaw)·cos(pitch); L2CS (classic Detector / MPDetector) uses
+  // -sin(yaw). Pitch is -sin() either way.
   let length = Math.max(canvasW, canvasH) / 12;
   if (face.rect) {
     const [, , w, h] = face.rect;

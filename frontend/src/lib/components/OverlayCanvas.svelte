@@ -21,14 +21,18 @@
     // user-configured style from its overlay-settings modal.
     style?: OverlayStyleConfig | null;
     // Gaze direction convention: Detectorv2's multitask gaze head needs a
-    // different yaw mapping than L2CS (Detectorv1 / MPDetector).
-    gazeConvention?: 'l2cs' | 'multitask';
+    // different yaw mapping than L2CS (Detectorv1 / MPDetector). REQUIRED
+    // (no default) so a new call site can't silently render Detectorv2
+    // arrows mirrored — the exact bug a silent 'l2cs' default caused in
+    // the Viewer. Live derives it from the active detector type; Viewer
+    // from the session's recorded capabilities.
+    gazeConvention: 'l2cs' | 'multitask';
   };
   let {
     faces, mpLandmarks, width, height, toggles,
     landmarkStyle = 'mesh', edges,
     auTable = null, mpToDlib68 = null, style = null,
-    gazeConvention = 'l2cs',
+    gazeConvention,
   }: Props = $props();
 
   // Style takes precedence over the landmarkStyle prop when provided.
