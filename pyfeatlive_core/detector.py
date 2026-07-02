@@ -8,6 +8,8 @@ state and rebuilds it on config change).
 
 from __future__ import annotations
 
+import logging
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Literal, Optional
 
@@ -48,11 +50,13 @@ class DetectorConfig:
     device: Device = "cpu"
 
 
-def build_detector(config: DetectorConfig):
-    """Return a fresh py-feat detector instance for the given config.
+def _construct_detector(config: DetectorConfig):
+    """Instantiate the py-feat detector for ``config`` (may hit the network).
 
-    Always builds anew — no caching. The caller is expected to keep a
-    reference for as long as the config doesn't change.
+    Model weights resolve through huggingface_hub, so construction
+    triggers hub HEAD/download requests unless offline mode is active.
+    Callers should go through ``build_detector`` for the offline-first
+    behavior.
     """
     if config.detector_type == "Detectorv2":
         # Detectorv2 is a standalone multitask model: it does not take
@@ -82,3 +86,56 @@ def build_detector(config: DetectorConfig):
     if config.face_model == "retinaface" and config.facepose_model in ("pose_mlp", "pnp_dlt"):
         detector.facepose_method = config.facepose_model
     return detector
+
+
+@contextmanager
+def _hf_offline():
+    """Force huggingface_hub into offline mode for the duration.
+
+    The hub's HTTP layer checks ``constants.is_offline_mode()`` at request
+    time (utils/_http.py), so toggling the module constant gates ALL hub
+    traffic (py-feat, timm, arcface) without env-var/import-order games.
+    The toggle is process-global for the duration — acceptable because
+    detector builds are effectively the only hub consumers at runtime and
+    the window is a few seconds.
+    """
+    from huggingface_hub import constants
+
+    prior = constants.HF_HUB_OFFLINE
+    constants.HF_HUB_OFFLINE = True
+    try:
+        yield
+    finally:
+        constants.HF_HUB_OFFLINE = prior
+
+
+def build_detector(config: DetectorConfig):
+    """Return a fresh py-feat detector instance for the given config.
+
+    Always builds anew — no caching. The caller is expected to keep a
+    reference for as long as the config doesn't change.
+
+    Offline-first: the first attempt runs with huggingface_hub in offline
+    mode, so a warm model cache builds with ZERO network calls (fast
+    configure, works offline / on captive networks). If that attempt
+    fails — typically LocalEntryNotFoundError on a cold cache — we retry
+    once online, downloading whatever is missing. Retrying on ANY
+    exception is deliberate: a missed retry breaks configure, while a
+    doubled failure path only costs seconds on an already-failing build.
+
+    If the user explicitly set HF_HUB_OFFLINE before launch, we honor it:
+    single offline build, no online retry.
+    """
+    from huggingface_hub import constants
+
+    if constants.HF_HUB_OFFLINE:
+        return _construct_detector(config)
+    try:
+        with _hf_offline():
+            return _construct_detector(config)
+    except Exception as exc:
+        logging.getLogger(__name__).info(
+            "offline detector build failed (%s: %s) — retrying online",
+            type(exc).__name__, exc,
+        )
+        return _construct_detector(config)
