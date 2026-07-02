@@ -139,6 +139,7 @@ class SessionRecorder:
             maxsize=config.queue_size
         )
         self._stop = threading.Event()
+        self._closed = False
         self.dropped_frames = 0
         self.frame_index = 0          # frames offered by recv()
         self.frames_written = 0       # frames the writer actually persisted
@@ -173,6 +174,9 @@ class SessionRecorder:
         ``frame`` may be an av.VideoFrame, a PIL image, or an HxWx3 RGB ndarray;
         the (potentially costly) conversion to a VideoFrame is deferred to the
         writer thread so the caller's event loop stays free."""
+        if self._closed:
+            return  # close() has begun draining; late offers would land
+                    # in a dead queue and skew frames_offered metadata
         idx = self.frame_index
         self.frame_index += 1
         try:
@@ -200,6 +204,7 @@ class SessionRecorder:
         screenshots captured), or None if the session was empty — in
         which case the directory is removed to avoid littering
         ~/Documents with empty timestamped folders."""
+        self._closed = True
         self._queue.put(None)         # poison pill
         self._writer_thread.join(timeout=timeout)
         if self._writer_thread.is_alive():

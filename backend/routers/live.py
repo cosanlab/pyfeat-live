@@ -531,7 +531,12 @@ async def recording_stop(request: Request) -> dict:
     recorder = getattr(live, "recorder", None)
     if recorder is None:
         raise HTTPException(409, "no recording in progress")
-    session_dir = recorder.dir
-    recorder.close()
+    # Detach FIRST so _run_detection stops offering frames mid-drain.
     live.recorder = None
+    session_dir = recorder.dir
+    # close() blocks on the writer thread's drain (queue.put + join, up to
+    # 10s of h264 backlog) — run it in the default executor so the event
+    # loop keeps serving /frame polls and health checks meanwhile.
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, recorder.close)
     return {"session_dir": str(session_dir)}
