@@ -430,22 +430,22 @@
   // Hotkeys: annotations (e/c), play/pause (space), frame scrubbing
   // (←/→ ±1, Shift+←/→ ±10, Home/End).
   function onKey(e: KeyboardEvent) {
-    // Never fire while typing (any form control) or while the annotation
-    // popover is open — space/arrows must not scrub behind the dialog.
+    // Never fire while typing (any form control), with a modifier held
+    // (Cmd/Ctrl+C must copy, not open the annotation popover), or while
+    // any dialog is open — space/arrows must not scrub behind it.
     const t = e.target as HTMLElement | null;
-    if (
-      t &&
-      (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
-        t.tagName === 'SELECT' || t.isContentEditable)
-    ) return;
-    if (popover !== null) return;
+    if (t && (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (popover !== null || showOverlayConfig || assignDialog !== null) return;
     if (e.key === 'e' || e.key === 'E') {
       popover = { kind: 'event', startFrame: currentFrame, endFrame: currentFrame, label: '' };
     } else if (e.key === 'c' || e.key === 'C') {
       popover = { kind: 'custom', startFrame: currentFrame, endFrame: currentFrame, label: '' };
     } else if (e.key === ' ') {
       e.preventDefault();
-      onTogglePlay();
+      // Ignore OS key-repeat: holding space would otherwise flicker
+      // play/pause. (Arrows deliberately honor repeat — hold-to-scrub.)
+      if (!e.repeat) onTogglePlay();
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.preventDefault();
       isPlaying = false; // frame-stepping implies paused
