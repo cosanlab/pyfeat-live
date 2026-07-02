@@ -287,10 +287,16 @@
     sessionLoading = true;
     try {
       // Kick off the big payloads immediately — they depend only on `id`,
-      // and previously waited behind the identities round-trips.
+      // and previously waited behind the identities round-trips. An inert
+      // catch keeps a rejection observed even when this run is abandoned
+      // at a token check before ever awaiting these (otherwise a failed
+      // fetch for a superseded session becomes an unhandled rejection);
+      // the awaited paths below re-attach real handlers.
       const csvPromise = fetch(sessionsApi.fexUrl(id))
         .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.text(); });
+      csvPromise.catch(() => {});
       const timesPromise = sessionsApi.frameTimes(id);
+      timesPromise.catch(() => {});
 
       const [session, idents, assigns, annots] = await Promise.all([
         sessionsApi.get(id),
