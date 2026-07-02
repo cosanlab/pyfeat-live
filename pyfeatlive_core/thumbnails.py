@@ -12,6 +12,16 @@ import numpy as np
 from PIL import Image
 
 
+def _seek_offset(target_time: float, tb) -> int:
+    """Seconds -> ``container.seek`` offset in stream time_base ticks.
+
+    ticks = seconds / time_base. Dividing by the Fraction honors
+    non-integer numerators (NTSC 1001/30000); the old
+    ``seconds * tb.denominator`` shortcut was ~1000x off for those.
+    """
+    return int(target_time / tb)
+
+
 def extract_face_crop(
     video_path: Path,
     frame_idx: int,
@@ -37,7 +47,7 @@ def extract_face_crop(
         tb = stream.time_base
         if tb is not None:
             try:
-                container.seek(int(target_time * tb.denominator), stream=stream)
+                container.seek(_seek_offset(target_time, tb), stream=stream)
             except Exception:
                 pass
         rgb: Optional[np.ndarray] = None
