@@ -63,3 +63,29 @@ def test_explicit_env_offline_is_honored_no_retry(monkeypatch):
         build_detector(DetectorConfig())
     assert rec.calls == [True]          # exactly one attempt, still offline
     assert constants.HF_HUB_OFFLINE is True
+
+
+def test_concurrent_builds_serialize_and_restore(monkeypatch):
+    """Two overlapping builds must each see a clean offline window and
+    leave the flag restored (regression: global-flag race)."""
+    import threading as _threading
+    import time
+
+    calls: list[bool] = []
+
+    def _slow_construct(config):
+        calls.append(constants.HF_HUB_OFFLINE)
+        time.sleep(0.05)
+        return "detector-sentinel"
+
+    monkeypatch.setattr(det_mod, "_construct_detector", _slow_construct)
+    threads = [
+        _threading.Thread(target=lambda: build_detector(DetectorConfig()))
+        for _ in range(2)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert calls == [True, True]              # each build ran offline-first
+    assert constants.HF_HUB_OFFLINE is False  # baseline restored after both

@@ -9,6 +9,7 @@ state and rebuilds it on config change).
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Literal, Optional
@@ -109,6 +110,14 @@ def _hf_offline():
         constants.HF_HUB_OFFLINE = prior
 
 
+# Serializes the offline-first window across threads. Live /configure and
+# the Analyze runner can build concurrently (shared default executor);
+# without this, one build's temporary HF_HUB_OFFLINE=True can be misread
+# by another as a user-set flag (skipping its online retry), or captured
+# as the "prior" value and restored, leaving the process stuck offline.
+_OFFLINE_FIRST_LOCK = threading.Lock()
+
+
 def build_detector(config: DetectorConfig):
     """Return a fresh py-feat detector instance for the given config.
 
@@ -124,18 +133,23 @@ def build_detector(config: DetectorConfig):
     doubled failure path only costs seconds on an already-failing build.
 
     If the user explicitly set HF_HUB_OFFLINE before launch, we honor it:
-    single offline build, no online retry.
+    single offline build, no online retry. The offline-first window is
+    serialized across threads (Live configure and the Analyze runner can
+    build concurrently) so one build's temporary flag toggle is never
+    misread by another.
     """
     from huggingface_hub import constants
 
-    if constants.HF_HUB_OFFLINE:
-        return _construct_detector(config)
-    try:
-        with _hf_offline():
+    with _OFFLINE_FIRST_LOCK:
+        if constants.HF_HUB_OFFLINE:
+            # User explicitly set HF_HUB_OFFLINE — honor it, no online retry.
             return _construct_detector(config)
-    except Exception as exc:
-        logging.getLogger(__name__).info(
-            "offline detector build failed (%s: %s) — retrying online",
-            type(exc).__name__, exc,
-        )
-        return _construct_detector(config)
+        try:
+            with _hf_offline():
+                return _construct_detector(config)
+        except Exception as exc:
+            logging.getLogger(__name__).info(
+                "offline detector build failed (%s: %s) — retrying online",
+                type(exc).__name__, exc,
+            )
+    return _construct_detector(config)
