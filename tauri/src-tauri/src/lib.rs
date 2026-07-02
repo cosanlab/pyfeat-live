@@ -431,25 +431,32 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
 /// Requires BOTH a 200 and our own identity marker in the body — a bare
 /// 200 check would accept any localhost service squatting on the port
 /// and navigate the webview (with its IPC grants) into a foreign page.
+/// The whole probe is bounded by a short timeout so a squatting service
+/// that accepts but never closes the connection can't hang the startup
+/// loop (read_to_end only returns on peer close).
 async fn backend_healthy(port: u16) -> bool {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let Ok(mut stream) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await else {
-        return false;
-    };
-    let req = format!(
-        "GET /api/system/health HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
-    );
-    if stream.write_all(req.as_bytes()).await.is_err() {
-        return false;
-    }
-    let mut resp = Vec::with_capacity(512);
-    if stream.read_to_end(&mut resp).await.is_err() {
-        return false;
-    }
-    let text = String::from_utf8_lossy(&resp);
-    text.starts_with("HTTP/1.")
-        && text.contains(" 200 ")
-        && text.contains("\"app\":\"pyfeatlive\"")
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let Ok(mut stream) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await else {
+            return false;
+        };
+        let req = format!(
+            "GET /api/system/health HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        );
+        if stream.write_all(req.as_bytes()).await.is_err() {
+            return false;
+        }
+        let mut resp = Vec::with_capacity(512);
+        if stream.read_to_end(&mut resp).await.is_err() {
+            return false;
+        }
+        let text = String::from_utf8_lossy(&resp);
+        text.starts_with("HTTP/1.")
+            && text.contains(" 200 ")
+            && text.contains("\"app\":\"pyfeatlive\"")
+    })
+    .await
+    .unwrap_or(false)
 }
 
 /// Path of the stamp file recording the requirements.txt we last installed.
