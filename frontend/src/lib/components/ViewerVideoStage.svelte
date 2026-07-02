@@ -127,14 +127,39 @@
     }
   });
 
-  // Sync prop `isPlaying` → video.play() / .pause().
+  // Sync prop `isPlaying` → video.play()/.pause(), and while playing drive
+  // frame advance from requestVideoFrameCallback — one callback per frame
+  // the browser actually presents. ontimeupdate alone is throttled to
+  // ~250ms, so the overlay stuttered at ~4Hz while the video played
+  // smoothly. onTimeUpdate stays as the fallback (no-rVFC browsers) and
+  // for paused seeks; the `f !== currentFrame` guard makes them coexist.
   $effect(() => {
     if (!video) return;
-    if (isPlaying) {
-      video.play().catch(() => {});
-    } else {
+    if (!isPlaying) {
       video.pause();
+      return;
     }
+    video.play().catch(() => {});
+    const v = video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: (now: number, meta: { mediaTime: number }) => void) => number;
+      cancelVideoFrameCallback?: (handle: number) => void;
+    };
+    if (!v.requestVideoFrameCallback) return; // fallback: ontimeupdate only
+    let handle = 0;
+    let cancelled = false;
+    const tick = (_now: number, meta: { mediaTime: number }) => {
+      if (cancelled) return;
+      if (!seekingFromProp) {
+        const f = timeToFrame(meta.mediaTime);
+        if (f !== currentFrame) onFrameAdvance(f);
+      }
+      handle = v.requestVideoFrameCallback!(tick);
+    };
+    handle = v.requestVideoFrameCallback(tick);
+    return () => {
+      cancelled = true;
+      v.cancelVideoFrameCallback?.(handle);
+    };
   });
 
   function onTimeUpdate() {
