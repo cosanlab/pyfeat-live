@@ -20,8 +20,14 @@ router = APIRouter(prefix="/api/system", tags=["system"])
 
 @router.get("/health")
 def health() -> dict:
-    """Tauri polls this to know when the sidecar is ready."""
-    return {"status": "ok", "version": pyfeatlive_core.__version__}
+    """Tauri polls this to know when the sidecar is ready. The ``app``
+    marker is REQUIRED by the shell's health check — it proves this is
+    our sidecar and not another localhost service on the same port."""
+    return {
+        "status": "ok",
+        "app": "pyfeatlive",
+        "version": pyfeatlive_core.__version__,
+    }
 
 
 @router.get("/logs", response_class=PlainTextResponse)

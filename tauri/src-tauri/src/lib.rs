@@ -32,9 +32,20 @@ use tokio::process::{Child, Command};
 #[cfg(target_os = "macos")]
 mod macos_camera;
 
-/// Sidecar (FastAPI/uvicorn) listening port. Fixed for now; we'll need a
-/// free-port scan if multiple installs need to coexist.
-const SIDECAR_PORT: u16 = 8501;
+/// Sidecar (FastAPI/uvicorn) listening port: picked fresh per launch by
+/// binding :0 and taking what the OS hands out. The v1 prototype's fixed
+/// 8501 collided with Streamlit's default — our users run Streamlit.
+/// (Tiny bind→spawn race window is acceptable for a local desktop app.)
+static SIDECAR_PORT_CELL: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+
+fn sidecar_port() -> u16 {
+    *SIDECAR_PORT_CELL.get_or_init(|| {
+        std::net::TcpListener::bind(("127.0.0.1", 0))
+            .and_then(|l| l.local_addr())
+            .map(|a| a.port())
+            .unwrap_or(18641) // fallback: fixed but non-Streamlit
+    })
+}
 
 /// Frontend event names. Keep in sync with tauri/dist/setup.html.
 const EVENT_BOOTSTRAP_LOG: &str = "bootstrap://log";
@@ -65,7 +76,7 @@ pub fn run() {
             // Window first so the splash is visible while the install runs.
             // The splash (setup.html) polls the backend and redirects once
             // it's serving (the Rust shell also drives the redirect).
-            let port_arg = format!("setup.html#{SIDECAR_PORT}");
+            let port_arg = format!("setup.html#{}", sidecar_port());
             let window = WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -315,7 +326,7 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
     let mut cmd = Command::new(&python);
     cmd.arg(&sidecar_script)
         .arg("--port")
-        .arg(SIDECAR_PORT.to_string())
+        .arg(sidecar_port().to_string())
         .arg("--address")
         .arg("127.0.0.1")
         .env("OMP_NUM_THREADS", "1")
@@ -352,7 +363,7 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
     // Tell the splash the runtime install finished. setup.html streams the
     // bootstrap logs and, as a *fallback*, polls /api/system/health to
     // redirect itself.
-    app.emit(EVENT_BOOTSTRAP_DONE, SIDECAR_PORT)
+    app.emit(EVENT_BOOTSTRAP_DONE, sidecar_port())
         .map_err(|e| format!("could not emit bootstrap-done: {e}"))?;
 
     // Primary handoff: poll the backend natively (no webview / CORS involvement)
@@ -368,10 +379,10 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(600);
         let mut deadline_reported = false;
         loop {
-            if backend_healthy(SIDECAR_PORT).await {
+            if backend_healthy(sidecar_port()).await {
                 nav_logging.store(false, Ordering::Relaxed); // backend up — stop splash/file forwarding
                 if let Some(window) = nav_handle.get_webview_window("main") {
-                    match tauri::Url::parse(&format!("http://127.0.0.1:{SIDECAR_PORT}/")) {
+                    match tauri::Url::parse(&format!("http://127.0.0.1:{}/", sidecar_port())) {
                         Ok(url) => {
                             if let Err(e) = window.navigate(url) {
                                 log::error!("navigate to backend failed: {e}");
@@ -416,9 +427,10 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// One health probe: open a TCP connection and issue a minimal HTTP/1.0 GET
-/// against /api/system/health, returning true on a "200" status line. Kept
-/// dependency-free (no HTTP client crate) since the check is trivial.
+/// One health probe: minimal HTTP/1.0 GET against /api/system/health.
+/// Requires BOTH a 200 and our own identity marker in the body — a bare
+/// 200 check would accept any localhost service squatting on the port
+/// and navigate the webview (with its IPC grants) into a foreign page.
 async fn backend_healthy(port: u16) -> bool {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let Ok(mut stream) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await else {
@@ -430,14 +442,14 @@ async fn backend_healthy(port: u16) -> bool {
     if stream.write_all(req.as_bytes()).await.is_err() {
         return false;
     }
-    let mut buf = [0u8; 128];
-    match stream.read(&mut buf).await {
-        Ok(n) if n > 0 => {
-            let head = String::from_utf8_lossy(&buf[..n]);
-            head.starts_with("HTTP/1.") && head.contains(" 200 ")
-        }
-        _ => false,
+    let mut resp = Vec::with_capacity(512);
+    if stream.read_to_end(&mut resp).await.is_err() {
+        return false;
     }
+    let text = String::from_utf8_lossy(&resp);
+    text.starts_with("HTTP/1.")
+        && text.contains(" 200 ")
+        && text.contains("\"app\":\"pyfeatlive\"")
 }
 
 /// Path of the stamp file recording the requirements.txt we last installed.
