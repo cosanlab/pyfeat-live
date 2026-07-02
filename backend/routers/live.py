@@ -85,7 +85,10 @@ async def upload_frame(request: Request) -> Response:
     # Image.open().convert() on the event loop per upload and starved the
     # detection task. Decoding ~1-in-N frames frees the loop to finish
     # detections sooner, which is what the displayed fps tracks.
-    frame_id = int(request.headers.get("X-Frame-Id", "-1"))
+    try:
+        frame_id = int(request.headers.get("X-Frame-Id", "-1"))
+    except ValueError:
+        frame_id = -1  # advisory header; malformed value is not an error
     now = time.perf_counter()
     if not live._detection_in_flight and now >= live._next_detection_at:
         try:
