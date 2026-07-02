@@ -541,6 +541,11 @@ async def recording_start(req: StartRecordingRequest, request: Request) -> dict:
     close_task = getattr(live, "_recorder_close_task", None)
     if close_task is not None:
         await close_task
+        # The await is a suspension point: a concurrent /recording/start
+        # may have won the race while we drained — re-check so the loser
+        # 409s instead of silently orphaning the winner's recorder.
+        if getattr(live, "recorder", None) is not None:
+            raise HTTPException(409, "recording already in progress")
 
     cfg = RecorderConfig(
         record_video=req.record_video,
