@@ -22,6 +22,11 @@
     faces: Face[];
     toggles: OverlayToggles;
     mpLandmarks: boolean;
+    // Gaze sign convention of the detector that produced this session
+    // (metadata.capabilities.gaze_convention). Without it OverlayCanvas
+    // falls back to 'l2cs', which draws Detectorv2 ('multitask') gaze
+    // arrows pointing the opposite way left/right.
+    gazeConvention?: 'l2cs' | 'multitask';
     edges?: number[][];
     auTable?: AuTable | null;
     mpToDlib68?: number[] | null;
@@ -39,7 +44,7 @@
   };
   let {
     videoUrl, width, height, currentFrame, fps, frameTimes = [], isPlaying,
-    faces, toggles, mpLandmarks,
+    faces, toggles, mpLandmarks, gazeConvention = 'l2cs',
     edges, auTable = null, mpToDlib68 = null, style = null, showVideo = true,
     smooth = true, smoothStrength = 0.3,
     identities, assignments,
@@ -234,7 +239,7 @@
       ></video>
       <!-- emotions/poses are drawn as HTML panels below (like Live), so keep
            them OFF on the canvas to avoid double-rendering. -->
-      <OverlayCanvas {faces} {mpLandmarks} {width} {height}
+      <OverlayCanvas {faces} {mpLandmarks} {gazeConvention} {width} {height}
         toggles={{ ...toggles, emotions: false, poses: false }}
         {edges} {auTable} {mpToDlib68} {style} />
 

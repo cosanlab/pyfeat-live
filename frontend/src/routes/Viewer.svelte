@@ -222,6 +222,17 @@
     (currentSession as SessionDetail | null)?.metadata?.capabilities?.landmark_space === 'mp478',
   );
 
+  // Gaze sign convention from the same recorded capabilities. Detectorv2
+  // sessions are 'multitask' (+sin(yaw)·cos(pitch)); everything else is
+  // 'l2cs' (-sin(yaw)). Omitting this drew Detectorv2 gaze arrows pointing
+  // the opposite way left/right (OverlayCanvas defaults to 'l2cs').
+  const gazeConvention = $derived(
+    ((currentSession as SessionDetail | null)?.metadata?.capabilities?.gaze_convention ===
+      'multitask'
+      ? 'multitask'
+      : 'l2cs') as 'l2cs' | 'multitask',
+  );
+
   // Current frame's row for the selected identity (for the inspector bars).
   const currentFrameValues = $derived.by((): Record<string, number | null> | null => {
     if (selectedIdentityIds.length === 0) return null;
@@ -478,6 +489,7 @@
       faces={facesForCurrentFrame}
       {toggles}
       {mpLandmarks}
+      {gazeConvention}
       edges={overlayEdges}
       {auTable}
       mpToDlib68={auTable?.mpToDlib68 ?? null}

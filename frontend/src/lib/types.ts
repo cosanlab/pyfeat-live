@@ -23,6 +23,9 @@ export interface DetectorCapabilities {
   has_mesh478: boolean;
   overlay_kind: 'dlib68_polygons' | 'mesh478_muscle';
   has_valence_arousal: boolean;
+  // Gaze arrow sign convention: 'multitask' (Detectorv2) or 'l2cs'
+  // (Detectorv1 / MPDetector). See pyfeatlive_core/capabilities.py.
+  gaze_convention?: 'l2cs' | 'multitask';
   au_set?: string[];
   emotion_columns?: string[];
 }
