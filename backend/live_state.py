@@ -82,9 +82,12 @@ class LiveSession:
     _cached_fex: object = None
     _next_detection_at: float = 0.0
     _detection_in_flight: bool = False
-    # Pre-baked + JPEG-encoded display frame. Kept for the recorder
-    # overlay path; the live response no longer uses it.
-    _cached_baked_jpeg: bytes | None = None
+    # Per-face JSON dicts serialized from _cached_fex ONCE per completed
+    # detection (in the worker thread). /api/live/frame returns this list
+    # verbatim on every poll — polls are ~10x more frequent than
+    # detections, so serializing per poll burned event-loop time
+    # reproducing an identical result.
+    _cached_faces: list = field(default_factory=list)
     # (width, height) of the frame the overlay was actually baked onto
     # — i.e. the source upload resolution, which is NOT the detection
     # input size when detection_size downscaling is active.
@@ -116,7 +119,7 @@ class LiveSession:
     def reset(self) -> None:
         """Clear per-session detection state; called by /configure.
 
-        Critically: must clear the cached baked frame too, otherwise
+        Critically: must clear the cached faces list too, otherwise
         a /configure that swaps the detector (e.g., Detectorv1
         → MPDetector) returns the previous detector's last baked
         frame on the next /api/live/frame upload until a new
@@ -127,7 +130,7 @@ class LiveSession:
             "mp_landmarks": False, "video_width": 0, "video_height": 0,
         }
         self._cached_fex = None
-        self._cached_baked_jpeg = None
+        self._cached_faces = []
         self._cached_frame_dims = None
         self._cached_frame_id = None
         self._next_detection_at = 0.0
