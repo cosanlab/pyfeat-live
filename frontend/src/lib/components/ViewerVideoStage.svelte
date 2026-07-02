@@ -174,11 +174,22 @@
   }
 
   // Resolve each face's identity badge (color + name) from assignments + identities.
+  // Split the derivation so the per-frame lookup is O(faces): idById and
+  // the frame index rebuild only when identities/assignments change, not
+  // on every currentFrame tick during scrubbing/playback.
+  const idById = $derived(new Map(identities.map(i => [i.identity_id, i])));
+  const assignmentsByFrame = $derived.by(() => {
+    const m = new Map<number, IdentityAssignment[]>();
+    for (const a of assignments) {
+      const bucket = m.get(a.frame);
+      if (bucket) bucket.push(a);
+      else m.set(a.frame, [a]);
+    }
+    return m;
+  });
   const identityByFace = $derived.by(() => {
     const m = new Map<number, Identity>();
-    const idById = new Map(identities.map(i => [i.identity_id, i]));
-    for (const a of assignments) {
-      if (a.frame !== currentFrame) continue;
+    for (const a of assignmentsByFrame.get(currentFrame) ?? []) {
       const ident = idById.get(a.identity_id);
       if (ident) m.set(a.face_idx, ident);
     }

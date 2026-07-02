@@ -156,9 +156,20 @@
   const totalFrames = $derived((currentSession as SessionDetail | null)?.frames ?? 0);
 
   // Current frame's fex rows (could be multiple faces per frame).
-  const currentFrameRows = $derived(
-    fexRows.filter(r => Number(r.frame) === currentFrame),
-  );
+  // Index rows by frame ONCE per fexRows change: scrubbing changes
+  // currentFrame at up to 60Hz, and a per-change O(N) filter over ~1,500-key
+  // row objects made seek cost scale with session length.
+  const rowsByFrame = $derived.by(() => {
+    const m = new Map<number, Record<string, number | string | null>[]>();
+    for (const r of fexRows) {
+      const f = Number(r.frame);
+      const bucket = m.get(f);
+      if (bucket) bucket.push(r);
+      else m.set(f, [r]);
+    }
+    return m;
+  });
+  const currentFrameRows = $derived(rowsByFrame.get(currentFrame) ?? []);
 
   // Map fex row → Face shape for the overlay.
   const facesForCurrentFrame = $derived.by((): Face[] => {

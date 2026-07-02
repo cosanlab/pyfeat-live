@@ -229,10 +229,24 @@
     }
   }
 
+  // Coalesce drag-seeks to one per animation frame: pointermove fires at
+  // 90+Hz on trackpads and every onSeek triggers a video seek + full
+  // overlay/panel recompute upstream.
+  let seekRaf = 0;
+  let pendingSeek: number | null = null;
+  function queueSeek(f: number) {
+    pendingSeek = f;
+    if (seekRaf) return;
+    seekRaf = requestAnimationFrame(() => {
+      seekRaf = 0;
+      if (pendingSeek !== null) { onSeek(pendingSeek); pendingSeek = null; }
+    });
+  }
+
   function handlePointerMove(e: PointerEvent) {
     const svg = e.currentTarget as SVGSVGElement;
     if (seekDragging) {
-      onSeek(frameAt(svg, e.clientX));
+      queueSeek(frameAt(svg, e.clientX));
       return;
     }
     if (dragStartFrame === null) return;
