@@ -1036,9 +1036,9 @@ prettytable==3.18.0 \
     --hash=sha256:439217116152244369caf3d9f1caf2f9fe29b03bd79e88d2928c8e718c95d680 \
     --hash=sha256:b3346e0e6f79180833aebaac088ae926340586cf6d7d991b9eb125b65f72313a
     # via skops
-py-feat==2.1.1 \
-    --hash=sha256:572cc4d9eb1f2baf94ea8ce466b08e27f118f742cf0585eb9c40cad2c919f790 \
-    --hash=sha256:ce254003fe6c8deeebc48b8d535dd0d060e1c21a870a590c553fc394f4ade558
+py-feat==2.1.2 \
+    --hash=sha256:9b6c57fdb745d7a73ba8fa506600bbf62e3bbb2619cf40b8ba59c2d745571fff \
+    --hash=sha256:e5dfce2a7896d161bce2ccc6612511ca914e77340efc6ff290846a4d7a9f3635
     # via
     #   -r sidecar/runtime/requirements.in
     #   pyfeat-generator
