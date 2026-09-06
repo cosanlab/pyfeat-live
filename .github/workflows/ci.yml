@@ -61,3 +61,62 @@ jobs:
               exit 1
             fi
           done
+
+      # A yanked release is one the publisher withdrew, usually for a bug bad
+      # enough to warrant it. The runtime lock is installed verbatim into every
+      # user's venv on first launch, so a yanked pin ships the bug to everyone
+      # and pip will not warn them. pandas==3.0.4 (segfaults in datetime code)
+      # sat in the lock through several releases before anyone noticed.
+      - name: runtime lock has no yanked pins
+        run: |
+          python3 - <<'PY'
+          import json, re, sys, urllib.request
+          from concurrent.futures import ThreadPoolExecutor
+
+          lock = "sidecar/runtime/requirements.txt"
+          pins = re.findall(r"^([A-Za-z0-9_.\-]+)==([^\s\\]+)", open(lock).read(), re.M)
+
+          def check(pv):
+              name, ver = pv
+              url = f"https://pypi.org/pypi/{name}/json"
+              try:
+                  data = json.load(urllib.request.urlopen(url, timeout=30))
+              except Exception as exc:            # network flake must not gate CI
+                  print(f"::warning::could not check {name}=={ver}: {exc}")
+                  return None
+              files = data["releases"].get(ver) or []
+              if not any(f.get("yanked") for f in files):
+                  return None
+              reason = next((f.get("yanked_reason") for f in files if f.get("yanked")), "no reason given")
+              return name, ver, reason, data["info"]["version"]
+
+          with ThreadPoolExecutor(max_workers=16) as pool:
+              yanked = [r for r in pool.map(check, pins) if r]
+
+          for name, ver, reason, latest in yanked:
+              print(f"::error::{name}=={ver} is YANKED on PyPI ({reason}). "
+                    f"Latest is {latest}. Recompile with --upgrade-package {name}.")
+          print(f"checked {len(pins)} pins, {len(yanked)} yanked")
+          sys.exit(1 if yanked else 0)
+          PY
+
+  tauri-versions:
+    name: tauri versions in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # RELEASING.md requires these three to match, but nothing enforced it:
+      # tauri.conf.json reached 0.8.26 while Cargo.toml and Cargo.lock sat at
+      # 0.8.22, so releases 0.8.23-0.8.26 shipped a Cargo version that did not
+      # match their tag.
+      - name: Cargo.toml, tauri.conf.json and Cargo.lock agree
+        run: |
+          set -e
+          cargo_toml=$(grep -m1 -E '^version *= *"' tauri/src-tauri/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          conf=$(grep -m1 -E '"version" *:' tauri/src-tauri/tauri.conf.json | sed -E 's/.*"([0-9][^"]*)".*/\1/')
+          lock=$(grep -A1 'name = "pyfeatlive-tauri"' tauri/src-tauri/Cargo.lock | grep -m1 -E '^version *= *"' | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "Cargo.toml=$cargo_toml  tauri.conf.json=$conf  Cargo.lock=$lock"
+          if [ "$cargo_toml" != "$conf" ] || [ "$cargo_toml" != "$lock" ]; then
+            echo "::error::tauri version drift — Cargo.toml=$cargo_toml, tauri.conf.json=$conf, Cargo.lock=$lock (RELEASING.md step 1 requires all three)"
+            exit 1
+          fi
