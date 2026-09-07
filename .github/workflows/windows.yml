@@ -1,0 +1,50 @@
+name: Windows build
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: tauri/package-lock.json
+      - name: vendor uv
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest 'https://github.com/astral-sh/uv/releases/download/0.10.11/uv-x86_64-pc-windows-msvc.zip' -OutFile "$env:RUNNER_TEMP/uv.zip"
+          Expand-Archive "$env:RUNNER_TEMP/uv.zip" "$env:RUNNER_TEMP/uv"
+          New-Item -ItemType Directory -Force vendor/uv | Out-Null
+          Copy-Item "$env:RUNNER_TEMP/uv/uv.exe" vendor/uv/uv-x86_64-pc-windows-msvc.exe
+      - name: install npm deps
+        working-directory: tauri
+        run: npm ci
+      # Full bundling catches Windows compiler, resources, WiX, and NSIS
+      # failures without giving pull requests any signing credentials.
+      - name: build Windows installers
+        working-directory: tauri
+        run: |
+          '{"bundle":{"createUpdaterArtifacts":false}}' | Set-Content "$env:RUNNER_TEMP/tauri-ci.json"
+          npm run tauri:build -- --bundles nsis,msi --config "$env:RUNNER_TEMP/tauri-ci.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers-unsigned
+          path: |
+            tauri/src-tauri/target/release/bundle/nsis/*-setup.exe
+            tauri/src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+          retention-days: 7

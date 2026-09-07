@@ -51,20 +51,54 @@ jobs:
           # (an explicit --target nests them under target/<triple>/ and
           # the signature lookup misses them → "Signature not found").
           - platform: macos-14
+            environment: macos-release
             target: aarch64-apple-darwin
             uv_asset: uv-aarch64-apple-darwin.tar.gz
-          # Windows x86_64 — TODO: enable once macOS pipeline is green.
-          # - platform: windows-2022
-          #   target: x86_64-pc-windows-msvc
-          #   uv_asset: uv-x86_64-pc-windows-msvc.zip
-          # Linux x86_64 — TODO: same.
+          # Authenticode is enabled with WINDOWS_SIGNING_ENABLED=true.
+          # Until identity validation is complete, builds remain unsigned.
+          # The Tauri updater key is independent of Authenticode signing.
+          - platform: windows-2022
+            environment: windows-signing
+            target: x86_64-pc-windows-msvc
+            uv_asset: uv-x86_64-pc-windows-msvc.zip
+          # Linux x86_64 — TODO: enable once Windows pipeline is green.
           # - platform: ubuntu-22.04
           #   target: x86_64-unknown-linux-gnu
           #   uv_asset: uv-x86_64-unknown-linux-gnu.tar.gz
 
     runs-on: ${{ matrix.platform }}
+    environment: ${{ matrix.environment }}
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: validate Windows signing settings
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_ENABLED: ${{ vars.WINDOWS_SIGNING_ENABLED }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
+          TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
+          TRUSTED_SIGNING_PROFILE: ${{ vars.TRUSTED_SIGNING_PROFILE }}
+        run: |
+          if ([string]$env:WINDOWS_SIGNING_ENABLED -notin @('', 'false', 'true')) {
+            throw 'WINDOWS_SIGNING_ENABLED must be true, false, or unset.'
+          }
+          if ($env:WINDOWS_SIGNING_ENABLED -ne 'true') {
+            Write-Output '::warning::Windows installers will be unsigned. See docs/windows-code-signing.md.'
+            exit 0
+          }
+          foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'TRUSTED_SIGNING_ENDPOINT', 'TRUSTED_SIGNING_ACCOUNT', 'TRUSTED_SIGNING_PROFILE')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Windows signing is enabled but $name is missing. See docs/windows-code-signing.md."
+            }
+          }
 
       - name: install rust
         uses: dtolnay/rust-toolchain@stable
@@ -132,6 +166,29 @@ jobs:
       - name: install npm deps
         working-directory: tauri
         run: npm ci
+
+      - name: install signing runtime (Windows)
+        if: runner.os == 'Windows' && vars.WINDOWS_SIGNING_ENABLED == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Azure login (Windows signing)
+        if: runner.os == 'Windows' && vars.WINDOWS_SIGNING_ENABLED == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: configure Windows Authenticode signing
+        if: runner.os == 'Windows' && vars.WINDOWS_SIGNING_ENABLED == 'true'
+        shell: pwsh
+        env:
+          TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
+          TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
+          TRUSTED_SIGNING_PROFILE: ${{ vars.TRUSTED_SIGNING_PROFILE }}
+        run: ./scripts/setup-windows-signing.ps1
 
       # Pre-sign the bundled uv with the same Developer ID + hardened
       # runtime + entitlements that the .app will use. Tauri's bundler
@@ -254,6 +311,26 @@ jobs:
           # We assemble it ourselves in the publish job below.
           includeUpdaterJson: false
 
+      - name: verify Windows Authenticode signatures
+        if: runner.os == 'Windows' && vars.WINDOWS_SIGNING_ENABLED == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = 'tauri/src-tauri/target/release'
+          $files = @(
+            Get-Item "$release/pyfeatlive-tauri.exe"
+            Get-Item "$release/uv.exe"
+            Get-Item "$release/bundle/nsis/*-setup.exe"
+            Get-Item "$release/bundle/msi/*.msi"
+          )
+          foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+            if ($signature.Status -ne 'Valid' -or !$signature.TimeStamperCertificate) {
+              throw "Missing valid, timestamped Authenticode signature: $($file.Name) ($($signature.Status))"
+            }
+            Write-Output "$($file.Name): Valid; publisher=$($signature.SignerCertificate.Subject)"
+          }
+
       # Upload the per-platform .sig produced by tauri-action to the same
       # draft release, and save the same metadata as a workflow artifact
       # so the fan-in publish job can build latest.json from all targets.
@@ -306,6 +383,64 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         if: startsWith(matrix.platform, 'macos') && env.TAURI_SIGNING_PRIVATE_KEY != ''
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          name: platform-sig-${{ matrix.target }}
+          path: platform-sig/
+          retention-days: 7
+
+      # Windows analog of the macOS sig-collection step. On Windows the
+      # updater re-uses the NSIS `*-setup.exe`; its `.sig` content is what
+      # goes into latest.json. We read the installer's real name + download
+      # URL straight from the release assets that tauri-action already
+      # uploaded, so we never hard-code tauri-action's Windows naming.
+      - name: collect updater .sig (Windows)
+        if: startsWith(matrix.platform, 'windows') && env.TAURI_SIGNING_PRIVATE_KEY != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          repo="${{ github.repository }}"
+          # Native host build → bundle at the untripled path.
+          src_sig="$(find tauri/src-tauri/target/release/bundle/nsis \
+                       -name '*-setup.exe.sig' -type f | head -n1)"
+          if [ -z "$src_sig" ]; then
+            echo "no NSIS .sig produced — TAURI_SIGNING_PRIVATE_KEY may be unset" >&2
+            exit 1
+          fi
+          # tauri-action already uploaded the installer; read its real name
+          # and browser download URL from the release metadata rather than
+          # reconstructing the (spaces? dots? version?) asset name ourselves.
+          assets="$(gh release view "$tag" --repo "$repo" --json assets)"
+          exe_name="$(echo "$assets" | jq -r \
+            '.assets[] | select(.name | endswith("-setup.exe")) | .name' | head -n1)"
+          exe_url="$(echo "$assets" | jq -r \
+            '.assets[] | select(.name | endswith("-setup.exe")) | .url' | head -n1)"
+          if [ -z "$exe_name" ] || [ -z "$exe_url" ] || [ "$exe_url" = "null" ]; then
+            echo "NSIS -setup.exe not found among release assets:" >&2
+            echo "$assets" | jq -r '.assets[].name' >&2
+            exit 1
+          fi
+          # Upload the .sig next to the installer for manual verification.
+          sig_name="${exe_name}.sig"
+          cp "$src_sig" "$sig_name"
+          gh release upload "$tag" "$sig_name" --repo "$repo" --clobber
+          # Stash platform metadata for the fan-in publish job. The .sig
+          # CONTENTS (not a path) are inlined into latest.json.
+          mkdir -p platform-sig
+          jq -n \
+            --arg key "windows-x86_64" \
+            --arg sig "$(cat "$src_sig")" \
+            --arg url "$exe_url" \
+            '{key: $key, signature: $sig, url: $url}' \
+            > "platform-sig/windows-x86_64.json"
+
+      - uses: actions/upload-artifact@v4
+        if: startsWith(matrix.platform, 'windows') && env.TAURI_SIGNING_PRIVATE_KEY != ''
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
