@@ -16,7 +16,7 @@
 # Linux, pulled cuda-bindings, which has no macOS wheels, and every updated
 # app failed first-run setup. MACOSX_DEPLOYMENT_TARGET=14.0 is needed because
 # torchcodec ships macosx_14_0 wheels and uv's cross-target default is 13.0.)
-py-feat==2.1.2
+py-feat==2.1.3
 pyfeat-generator==0.1.1
 torchcodec==0.14.0  # match torch 2.12 (transitive via py-feat resolves to a stale 0.11 otherwise)
 fastapi>=0.115
