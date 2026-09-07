@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows:
     runs-on: windows-2022
@@ -33,6 +37,24 @@ jobs:
       - name: install npm deps
         working-directory: tauri
         run: npm ci
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: check signing tool setup without Azure credentials
+        env:
+          TRUSTED_SIGNING_ENDPOINT: https://eus.codesigning.azure.net/
+          TRUSTED_SIGNING_ACCOUNT: ci-configuration-check
+          TRUSTED_SIGNING_PROFILE: ci-configuration-check
+        run: |
+          $config = 'tauri/src-tauri/tauri.conf.json'
+          $original = Get-Content -LiteralPath $config -Raw
+          try {
+            ./scripts/setup-windows-signing.ps1
+          } finally {
+            # This only exercises SDK/dlib setup and config generation.
+            # Restore before bundling: PRs never authenticate or sign.
+            Set-Content -LiteralPath $config -Value $original -Encoding utf8
+          }
       # Full bundling catches Windows compiler, resources, WiX, and NSIS
       # failures without giving pull requests any signing credentials.
       - name: build Windows installers

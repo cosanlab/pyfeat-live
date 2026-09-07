@@ -86,8 +86,10 @@ command uses SHA-256 and Microsoft's RFC 3161 timestamp service. The Tauri
 updater `.sig` is created after Authenticode signing; never modify or re-sign
 the installer after that without regenerating its updater signature.
 
-The release job verifies the app, bundled uv, NSIS installer, and MSI have valid,
-timestamped signatures before the updater manifest job can run. Assets uploaded
+The release job verifies the vendor uv binary, NSIS installer, and MSI have valid,
+timestamped signatures before the updater manifest job can run. The raw app EXE
+in `target/release` is not checked: Tauri restores it after packaging, so it is
+not the signed copy inside the installer. Assets uploaded
 by tauri-action stay in a draft release; review the run before publishing.
 
 With `WINDOWS_SIGNING_ENABLED=true`, missing configuration or signing failure
