@@ -1,8 +1,10 @@
 # Releasing pyfeat-live
 
 Releases are **tag-driven**: pushing a `vX.Y.Z` tag triggers
-`.github/workflows/release.yml`, which builds and code-signs the macOS `.dmg`,
-publishes it to a GitHub Release, and emits the auto-updater `latest.json`.
+`.github/workflows/release.yml`, which builds the signed macOS `.dmg` and Windows
+x86_64 NSIS/MSI installers, uploads them to a draft GitHub Release, and emits the
+auto-updater `latest.json`. Windows Authenticode signing is enabled separately
+after Azure identity validation; see [Windows code signing](docs/windows-code-signing.md).
 `notify-pyfeat.yml` then runs on publish.
 
 ## Branch & review flow
@@ -12,7 +14,7 @@ publishes it to a GitHub Release, and emits the auto-updater `latest.json`.
 
 1. Branch from `main`: `feat/...`, `fix/...`, etc.
 2. Open a PR into `main`.
-3. CI runs (`frontend`: `pnpm build` + `pnpm check`; `tauri`: `cargo check` on macOS).
+3. CI runs the frontend checks and a full unsigned Windows NSIS/MSI build.
 4. Merge once CI is green.
 
 ## Cutting a release
@@ -29,10 +31,11 @@ publishes it to a GitHub Release, and emits the auto-updater `latest.json`.
    git tag vX.Y.Z
    git push origin vX.Y.Z
    ```
-   `release.yml` builds the signed `.dmg` and publishes the GitHub Release.
+   `release.yml` uploads installers to a draft GitHub Release.
    You can also re-run a build for an existing tag via the workflow's
-   `workflow_dispatch` input.
-5. **Verify**: download the `.dmg`, install, and smoke-test — CI does not run
+   `workflow_dispatch` input. Select that tag as the workflow ref as well when
+   the `windows-signing` environment is restricted to release tags.
+5. **Verify**: download the `.dmg` and Windows installer, install, and smoke-test — CI does not run
    the app. On first launch the runtime venv installs (torch / py-feat /
    pyfeat-generator from PyPI; model weights from the public `py-feat`
    HuggingFace org).
