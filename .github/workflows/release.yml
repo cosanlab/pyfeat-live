@@ -393,9 +393,10 @@ jobs:
 
       # Windows analog of the macOS sig-collection step. On Windows the
       # updater re-uses the NSIS `*-setup.exe`; its `.sig` content is what
-      # goes into latest.json. We read the installer's real name + download
-      # URL straight from the release assets that tauri-action already
-      # uploaded, so we never hard-code tauri-action's Windows naming.
+      # goes into latest.json. We read the installer's real asset name
+      # from the release assets that tauri-action already uploaded,
+      # so we never hard-code tauri-action's Windows naming. Construct the
+      # URL with the final tag: draft assets have temporary untagged URLs.
       - name: collect updater .sig (Windows)
         if: startsWith(matrix.platform, 'windows') && env.TAURI_SIGNING_PRIVATE_KEY != ''
         env:
@@ -414,18 +415,20 @@ jobs:
             exit 1
           fi
           # tauri-action already uploaded the installer; read its real name
-          # and browser download URL from the release metadata rather than
-          # reconstructing the (spaces? dots? version?) asset name ourselves.
+          # from the release metadata rather than reconstructing the
+          # (spaces? dots? version?) asset name ourselves.
           assets="$(gh release view "$tag" --repo "$repo" --json assets)"
           exe_name="$(echo "$assets" | jq -r \
             '.assets[] | select(.name | endswith("-setup.exe")) | .name' | head -n1)"
-          exe_url="$(echo "$assets" | jq -r \
-            '.assets[] | select(.name | endswith("-setup.exe")) | .url' | head -n1)"
-          if [ -z "$exe_name" ] || [ -z "$exe_url" ] || [ "$exe_url" = "null" ]; then
+          if [ -z "$exe_name" ]; then
             echo "NSIS -setup.exe not found among release assets:" >&2
             echo "$assets" | jq -r '.assets[].name' >&2
             exit 1
           fi
+          # GitHub reports /download/untagged-<id>/ URLs while the release
+          # is a draft. Those URLs must not be baked into latest.json.
+          exe_url="$(jq -nr --arg repo "$repo" --arg tag "$tag" --arg name "$exe_name" \
+            '"https://github.com/" + $repo + "/releases/download/" + ($tag | @uri) + "/" + ($name | @uri)')"
           # Upload the .sig next to the installer for manual verification.
           sig_name="${exe_name}.sig"
           cp "$src_sig" "$sig_name"
