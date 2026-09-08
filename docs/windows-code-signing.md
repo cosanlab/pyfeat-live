@@ -9,7 +9,9 @@ publisher identity: Windows uses a separate Authenticode signature.
 ## Azure prerequisites
 
 The Azure account is **pyfeatlivesigning**, in **East US**, with endpoint
-`https://eus.codesigning.azure.net/`. It uses Azure **Artifact Signing**
+`https://eus.codesigning.azure.net/`. The Public Trust certificate profile is
+**pyfeat-live**, and the CI app registration is **pyfeat-live-github-signing**.
+It uses Azure **Artifact Signing**
 (previously Trusted Signing), not an Apple Developer certificate or a Microsoft
 Store submission certificate.
 
@@ -47,6 +49,10 @@ status alone does not prove the cause was an expired link.
    - Issuer: `https://token.actions.githubusercontent.com`
    - Subject: `repo:cosanlab/pyfeat-live:environment:windows-signing`
    - Audience: `api://AzureADTokenExchange`
+   Check the repository's OIDC subject configuration before saving. Azure may
+   generate a subject containing organization/repository IDs, but this
+   repository currently uses the name-based subject above. Use **Edit** beside
+   the generated subject to match GitHub's actual token.
 4. Grant that app **Artifact Signing Certificate Profile Signer** at the
    certificate profile scope (the portal may retain the old Trusted Signing
    role name). Subscription Contributor/Owner is not the signing permission.
@@ -61,7 +67,7 @@ status alone does not prove the cause was an expired link.
    | Secret | `AZURE_TENANT_ID` | Directory tenant ID |
    | Variable | `TRUSTED_SIGNING_ENDPOINT` | `https://eus.codesigning.azure.net/` |
    | Variable | `TRUSTED_SIGNING_ACCOUNT` | `pyfeatlivesigning` |
-   | Variable | `TRUSTED_SIGNING_PROFILE` | Actual Public Trust profile name |
+   | Variable | `TRUSTED_SIGNING_PROFILE` | `pyfeat-live` |
    | Variable | `WINDOWS_SIGNING_ENABLED` | `true` |
 
 No client secret or downloadable PFX is needed. The release job requests an
