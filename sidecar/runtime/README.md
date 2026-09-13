@@ -12,18 +12,35 @@ loudly if anything is missing a hash.
 2. Regenerate the lock:
 
    ```sh
-   # from the repo root. --python-platform is REQUIRED: this lock is installed
-   # on the user's Mac (the .app's bundled runtime), so it must resolve for
-   # macOS — NOT for whatever host runs the compile. Omitting it on a Linux/CUDA
-   # box resolves torch's CUDA variant (nvidia-* / cuda-bindings), which has no
-   # macOS wheels and makes the first-run `uv pip install` unsatisfiable.
+   # from the repo root. --universal is REQUIRED: this lock is installed on the
+   # user's machine (macOS AND Windows), so it must carry environment markers
+   # rather than resolve for one platform. A single-platform compile (the old
+   # --python-platform aarch64-apple-darwin) emits no markers at all, so it
+   # pinned uvloop unconditionally — which refuses to build on Windows and
+   # killed first launch there (0.8.30). --universal gives uvloop its
+   # `sys_platform != 'win32'` marker, adds colorama/tzdata for Windows, and
+   # gates torch's CUDA deps (nvidia-* / cuda-bindings / triton) behind
+   # `sys_platform == 'linux'` so they never install on macOS or Windows.
+   #
+   # Existing pins in requirements.txt are kept as-is (uv prefers the current
+   # lock's versions unless you pass --upgrade / --upgrade-package), so this is
+   # safe to re-run without silently bumping torch et al.
    uv pip compile \
      --quiet \
      --generate-hashes \
      --python-version 3.12 \
-     --python-platform aarch64-apple-darwin \
+     --universal \
      --output-file sidecar/runtime/requirements.txt \
      sidecar/runtime/requirements.in
+   ```
+
+   Sanity-check the result resolves for both shipped platforms before
+   committing (CI does this too, in `verify-runtime-lock.yml`):
+
+   ```sh
+   uv pip install --dry-run --python-platform x86_64-pc-windows-msvc \
+     --python-version 3.12 -r sidecar/runtime/requirements.txt
+   uv pip install --dry-run -r sidecar/runtime/requirements.txt   # on a Mac
    ```
 
 3. Commit both files together. The diff in `requirements.txt` makes

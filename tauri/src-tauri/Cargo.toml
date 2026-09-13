@@ -29,6 +29,18 @@ env_logger = "0.11"
 # getUserMedia permission inside the WebView. Works around
 # Tauri #11951 / wry #1195. Versions match what Tauri 2.11
 # pulls transitively, so cargo deduplicates.
+# Windows-only: kill-on-close Job Object so the sidecar (and a mid-install
+# uv.exe) die with the shell even on force-quit — Windows never reparents
+# orphans, so the sidecar's getppid() watchdog can't see the parent go.
+# 0.60 matches a version Tauri already pulls transitively (see Cargo.lock).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 block2 = "0.6"

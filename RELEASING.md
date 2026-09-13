@@ -35,10 +35,16 @@ after Azure identity validation; see [Windows code signing](docs/windows-code-si
    You can also re-run a build for an existing tag via the workflow's
    `workflow_dispatch` input. Select that tag as the workflow ref as well when
    the `windows-signing` environment is restricted to release tags.
-5. **Verify**: download the `.dmg` and Windows installer, install, and smoke-test — CI does not run
-   the app. On first launch the runtime venv installs (torch / py-feat /
-   pyfeat-generator from PyPI; model weights from the public `py-feat`
-   HuggingFace org).
+5. **Wait for `smoke-test-release`** (Actions tab). It starts automatically
+   when `release.yml` finishes, installs the draft's `.dmg` and `-setup.exe`
+   on macOS and Windows runners, launches the app, and drives a real first
+   run: runtime venv install, `import torch`, model download, one face
+   detection (`scripts/smoke_test_release.py`). ~15–30 min per OS. If a leg
+   fails, the job's `smoke-logs-*` artifact has the sidecar log. You can
+   re-run it for any tag via its `workflow_dispatch` input.
+6. **Publish the draft** once both legs are green. Then still open the
+   `.dmg` yourself once before announcing — the smoke test proves the
+   backend, not the UI.
 
 ## Patch / hotfix
 

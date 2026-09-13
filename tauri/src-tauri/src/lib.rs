@@ -357,10 +357,12 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
         .env("PYTHONPATH", &pyfeatlive_root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    hide_console_window(&mut cmd);
 
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("failed to spawn sidecar: {e}"))?;
+    tie_lifetime_to_shell(&child, "sidecar");
 
     // Drain stdout/stderr to: the app log always, and — only during the startup
     // window — the splash (so a startup crash is VISIBLE instead of an
@@ -568,13 +570,16 @@ async fn run_uv(
     cwd: &Path,
     args: &[&str],
 ) -> Result<(), String> {
-    let mut child = Command::new(uv_path)
-        .args(args)
+    let mut cmd = Command::new(uv_path);
+    cmd.args(args)
         .current_dir(cwd)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console_window(&mut cmd);
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("failed to spawn uv {args:?}: {e}"))?;
+    tie_lifetime_to_shell(&child, "uv");
 
     // Stream both pipes concurrently to the splash UI.
     let stdout = child.stdout.take().expect("stdout piped");
@@ -662,6 +667,125 @@ fn sidecar_log_path(app: &AppHandle) -> PathBuf {
     let dir = app.path().app_log_dir().unwrap_or_else(|_| std::env::temp_dir());
     let _ = std::fs::create_dir_all(&dir);
     dir.join("sidecar.log")
+}
+
+/// On Windows, a GUI-subsystem process (see `windows_subsystem` in main.rs)
+/// that spawns a console-subsystem child (uv.exe, python.exe) gets a brand-new
+/// console window allocated for that child — a black terminal popping up over
+/// the splash for the whole 5–10 min install, and again for the sidecar on
+/// every launch. CREATE_NO_WINDOW suppresses it; stdout/stderr are piped so
+/// nothing is lost. No-op elsewhere.
+fn hide_console_window(cmd: &mut Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = cmd;
+    }
+}
+
+/// Make `child` die when THIS process dies, however it dies.
+///
+/// `RunEvent::ExitRequested` kills the sidecar on a graceful quit, and on
+/// macOS/Linux the sidecar's own watchdog exits when it is reparented to
+/// PID 1 after a force-quit. Windows has neither: no reparenting, so
+/// `getppid()` never changes, and TerminateProcess / Task Manager give us no
+/// exit event. A Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE is the
+/// kernel's answer — when the last handle to the job closes (which happens
+/// automatically when this process is torn down), every process in the job
+/// is terminated. One job is created per app lifetime and never closed; both
+/// the uv installer (so a quit mid-install doesn't leave a 1.5 GB download
+/// running) and the sidecar are assigned to it. Grandchildren inherit
+/// membership. Best-effort: on failure we log and fall back to the sidecar's
+/// own SYNCHRONIZE-handle watchdog (sidecar.py). No-op off Windows.
+fn tie_lifetime_to_shell(child: &Child, what: &str) {
+    #[cfg(windows)]
+    {
+        use std::sync::OnceLock;
+        static JOB: OnceLock<Option<win_job::KillOnCloseJob>> = OnceLock::new();
+        let job = JOB.get_or_init(|| match win_job::KillOnCloseJob::create() {
+            Ok(j) => Some(j),
+            Err(e) => {
+                log::warn!("could not create kill-on-close job object: {e}");
+                None
+            }
+        });
+        match (job.as_ref(), child.raw_handle()) {
+            (Some(job), Some(handle)) => {
+                if let Err(e) = job.assign(handle) {
+                    log::warn!("could not assign {what} to job object: {e}");
+                } else {
+                    log::debug!("{what} assigned to kill-on-close job object");
+                }
+            }
+            (None, _) => log::warn!("{what} not tied to shell lifetime (no job object)"),
+            (_, None) => log::warn!("{what} not tied to shell lifetime (child already reaped)"),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (child, what);
+    }
+}
+
+#[cfg(windows)]
+mod win_job {
+    use std::os::windows::io::RawHandle;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    /// Owns the job handle. Dropping it would kill every member, so the
+    /// single instance lives in a `static` and is never dropped.
+    pub struct KillOnCloseJob(HANDLE);
+
+    // HANDLE is a raw pointer, so the auto-traits are opted out; a job
+    // handle is a kernel object reference and is safe to share.
+    unsafe impl Send for KillOnCloseJob {}
+    unsafe impl Sync for KillOnCloseJob {}
+
+    impl KillOnCloseJob {
+        pub fn create() -> std::io::Result<Self> {
+            // SAFETY: plain Win32 calls with valid arguments; the struct is
+            // zero-initialised and fully owned for the call's duration.
+            unsafe {
+                let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+                if job.is_null() {
+                    return Err(std::io::Error::last_os_error());
+                }
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                let ok = SetInformationJobObject(
+                    job,
+                    JobObjectExtendedLimitInformation,
+                    &info as *const _ as *const core::ffi::c_void,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                );
+                if ok == 0 {
+                    let err = std::io::Error::last_os_error();
+                    CloseHandle(job);
+                    return Err(err);
+                }
+                Ok(Self(job))
+            }
+        }
+
+        pub fn assign(&self, process: RawHandle) -> std::io::Result<()> {
+            // SAFETY: both handles are live kernel handles owned by us.
+            let ok = unsafe { AssignProcessToJobObject(self.0, process as HANDLE) };
+            if ok == 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        }
+    }
 }
 
 fn venv_python(venv_dir: &Path) -> PathBuf {

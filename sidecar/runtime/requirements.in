@@ -7,15 +7,21 @@
 #   - pins exact versions for first-run determinism
 #
 # Bumping a pin: edit the version, then recompile the lock:
-#   MACOSX_DEPLOYMENT_TARGET=14.0 uv pip compile sidecar/runtime/requirements.in \
+#   uv pip compile sidecar/runtime/requirements.in \
 #     -o sidecar/runtime/requirements.txt --generate-hashes --python-version 3.12 \
-#     --python-platform aarch64-apple-darwin
-# (--python-version 3.12 matches the runtime venv. The platform flag +
-# deployment target are MANDATORY when compiling from a non-Mac host: without
-# them the lock resolves host-platform deps — the v0.8.23 lock, compiled on
-# Linux, pulled cuda-bindings, which has no macOS wheels, and every updated
-# app failed first-run setup. MACOSX_DEPLOYMENT_TARGET=14.0 is needed because
-# torchcodec ships macosx_14_0 wheels and uv's cross-target default is 13.0.)
+#     --universal
+# (--python-version 3.12 matches the runtime venv. --universal is MANDATORY:
+# the lock ships to macOS AND Windows, so it must carry per-platform markers.
+# Two prior failures, one per direction:
+#   - v0.8.23: compiled on Linux with no platform flag → host-platform deps
+#     (cuda-bindings, no macOS wheels) → every updated Mac failed first-run.
+#   - v0.8.30: compiled with --python-platform aarch64-apple-darwin → no
+#     markers at all → uvloop pinned unconditionally → Windows first-run died
+#     building it ("uvloop does not support Windows").
+# --universal fixes both: CUDA deps get `sys_platform == 'linux'`, uvloop gets
+# `sys_platform != 'win32'`. It resolves by markers, not wheel tags, so no
+# MACOSX_DEPLOYMENT_TARGET is needed; CI dry-run-installs the result on macOS
+# and Windows runners (verify-runtime-lock.yml). See README.md here.)
 py-feat==2.1.3
 pyfeat-generator==0.1.1
 torchcodec==0.14.0  # match torch 2.12 (transitive via py-feat resolves to a stale 0.11 otherwise)
