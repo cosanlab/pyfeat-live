@@ -65,14 +65,58 @@ def _watch_parent_and_exit() -> None:
 
     Tauri's ``RunEvent::ExitRequested`` cleanup only fires on graceful
     shutdown. Force-quit (kill -9 on the Tauri shell, or a Tauri
-    crash) leaves us reparented to PID 1 (launchd / init) and we'd
-    keep uvicorn running with an orphaned port bound. Poll getppid();
-    the moment it changes, exit.
+    crash) would leave uvicorn running with an orphaned port bound.
+
+    macOS / Linux: the kernel reparents an orphan to PID 1 (launchd /
+    init), so ``getppid()`` changes — poll it and exit the moment it does.
+
+    Windows: there is NO reparenting; ``getppid()`` keeps returning the
+    dead parent's PID forever (and the PID may be recycled), so the poll
+    never fires. Instead, open a SYNCHRONIZE handle on the parent NOW —
+    while it is certainly alive, so the handle can't refer to a recycled
+    PID — and block on it; ``WaitForSingleObject`` returns when the
+    parent terminates by any means, including TerminateProcess / Task
+    Manager "End task". (The Tauri shell additionally puts us in a
+    kill-on-close Job Object, which covers the case where this thread
+    can't run; the two are independent belts.)
     """
     import threading
     import time
 
     initial = os.getppid()
+
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        SYNCHRONIZE = 0x0010_0000
+        INFINITE = 0xFFFF_FFFF
+        WAIT_OBJECT_0 = 0x0000_0000
+
+        handle = kernel32.OpenProcess(SYNCHRONIZE, False, initial)
+        if handle:
+            def _watch_windows() -> None:
+                # Loop guards against WAIT_FAILED / spurious returns: only a
+                # signalled handle (parent exited) may take us down.
+                while kernel32.WaitForSingleObject(handle, INFINITE) != WAIT_OBJECT_0:
+                    time.sleep(2)
+                os._exit(0)
+
+            threading.Thread(target=_watch_windows, daemon=True).start()
+            return
+        # OpenProcess can fail across integrity levels; fall through to the
+        # (ineffective on Windows) poll rather than crash — the shell's Job
+        # Object still reaps us.
+        print(
+            f"warning: could not open parent process {initial} for watchdog "
+            f"(winerror {ctypes.get_last_error()}); relying on the shell's Job Object",
+            file=sys.stderr, flush=True,
+        )
 
     def _watch() -> None:
         while True:

@@ -224,8 +224,9 @@ jobs:
         shell: pwsh
         run: |
           if ($env:APP_PID) { Stop-Process -Id $env:APP_PID -Force -ErrorAction SilentlyContinue }
-          # The sidecar's parent-death watchdog polls getppid(), which never
-          # changes on Windows, so kill the venv's python explicitly.
+          # Belt and braces: the shell's kill-on-close Job Object and the
+          # sidecar's parent-handle watchdog should reap python themselves;
+          # kill it explicitly anyway so a regression can't hang the runner.
           Get-Process python -ErrorAction SilentlyContinue |
             Where-Object { $_.Path -like '*com.cosanlab.pyfeatlive*' } |
             Stop-Process -Force -ErrorAction SilentlyContinue
