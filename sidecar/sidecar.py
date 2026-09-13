@@ -131,6 +131,68 @@ def _ensure_macos_openmp_runtime() -> None:
         )
 
 
+def _install_torchcodec_stub(reason: str) -> str:
+    """Register a stand-in ``torchcodec`` so ``import feat`` can succeed.
+
+    py-feat >= 2.1 imports ``torchcodec.decoders.VideoDecoder`` at module
+    top level (feat/data.py, feat/utils/io.py). torchcodec's macOS and
+    Windows wheels link FFmpeg from a *system* install only — Homebrew's
+    /opt/homebrew/opt/ffmpeg on macOS, whatever is on PATH on Windows —
+    so on a clean machine ``import torchcodec`` raises and takes
+    ``import feat`` (and this sidecar) down with it. The post-release
+    smoke test hit exactly this on a clean macos-14 runner (v0.8.32).
+
+    Py-feat Live never uses that path: every frame the detector sees is
+    decoded by PyAV (pyfeatlive_core.analyze_runner / recorder / the
+    Live upload route) and handed to ``detect_faces`` + ``forward``
+    directly. So when — and only when — the real torchcodec cannot load,
+    substitute a stub whose ``VideoDecoder`` raises a clear error at
+    construction. Nothing is hidden: the warning is printed at startup
+    and any accidental use fails loudly with the original reason.
+
+    The proper fix is upstream (lazy-import torchcodec in py-feat); this
+    keeps the app launching until that ships. Returns the message used.
+    """
+    import types
+
+    msg = (
+        "torchcodec is unavailable in this runtime (its FFmpeg shared libraries "
+        f"could not be loaded: {reason}). Py-feat Live decodes video with PyAV "
+        "and does not use it; py-feat's own video reader "
+        "(VideoDataset / decode_video) is disabled."
+    )
+
+    class VideoDecoder:  # noqa: D401 — mirrors torchcodec's public name
+        """Stand-in that fails loudly on use."""
+
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError(msg)
+
+    pkg = types.ModuleType("torchcodec")
+    pkg.__path__ = []  # mark as a package so submodule imports resolve
+    decoders = types.ModuleType("torchcodec.decoders")
+    decoders.VideoDecoder = VideoDecoder
+    pkg.decoders = decoders
+    pkg.__pyfeatlive_stub__ = decoders.__pyfeatlive_stub__ = reason
+    for name in [n for n in sys.modules if n == "torchcodec" or n.startswith("torchcodec.")]:
+        del sys.modules[name]  # partial modules left by the failed import
+    sys.modules["torchcodec"] = pkg
+    sys.modules["torchcodec.decoders"] = decoders
+    return msg
+
+
+def _shim_torchcodec_if_unloadable() -> None:
+    """Try the real torchcodec; fall back to :func:`_install_torchcodec_stub`."""
+    try:
+        import torchcodec.decoders  # noqa: F401
+        return
+    except Exception as exc:  # noqa: BLE001 — ImportError or the loader's RuntimeError
+        first_line = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
+        reason = f"{type(exc).__name__}: {first_line[:200]}"
+    msg = _install_torchcodec_stub(reason)
+    print(f"warning: {msg}", file=sys.stderr, flush=True)
+
+
 def _watch_parent_and_exit() -> None:
     """Self-terminate when our parent process dies.
 
@@ -213,6 +275,9 @@ def main() -> None:
     _set_runtime_env()
     _watch_parent_and_exit()
     args = _parse_args()
+    # Before uvicorn imports backend.main → feat: make sure a torchcodec that
+    # can't find FFmpeg doesn't take the whole sidecar down (see docstring).
+    _shim_torchcodec_if_unloadable()
 
     try:
         # Lazy import so env vars above land before torch/py-feat are pulled in.

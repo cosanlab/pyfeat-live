@@ -194,7 +194,8 @@ jobs:
             $key = "${hive}:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$product"
             if (Test-Path $key) {
               $props = Get-ItemProperty $key
-              $instDir = @($props.'(default)', $props.InstallLocation) | Where-Object { $_ } | Select-Object -First 1
+              # NSIS stores $INSTDIR with literal surrounding quotes ("C:\...\Py-feat Live").
+              $instDir = @($props.'(default)', $props.InstallLocation) | Where-Object { $_ } | ForEach-Object { $_.Trim('"') } | Select-Object -First 1
               Write-Host "uninstall key $key -> '$instDir'"
               if ($instDir) { break }
             }
