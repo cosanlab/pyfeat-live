@@ -5,12 +5,20 @@
 # wheels — making the app's first-run `uv pip install --require-hashes`
 # unsatisfiable on Apple Silicon.
 #
-# This job dry-run-installs the committed lock on a macOS runner — exactly the
-# first-run resolution the app does, minus the download — so a lock that can't
-# install on macOS fails the PR instead of shipping. (Don't replace this with a
-# regenerate-and-diff check: the lock is a point-in-time pin, so a fresh compile
-# would drift whenever any dependency publishes a new release.)
-name: Verify runtime lock (macOS)
+# The same class of failure shipped for Windows in 0.8.30: the lock was compiled
+# with --python-platform aarch64-apple-darwin, so it had NO environment markers
+# and pinned uvloop unconditionally — a package that refuses to build on Windows
+# ("uvloop does not support Windows at the moment"), killing first launch. The
+# lock is now compiled with --universal (markers per platform, see
+# sidecar/runtime/README.md).
+#
+# This job dry-run-installs the committed lock on every runner we ship to —
+# exactly the first-run resolution the app does, minus the download — so a lock
+# that can't install on one of them fails the PR instead of shipping. (Don't
+# replace this with a regenerate-and-diff check: the lock is a point-in-time
+# pin, so a fresh compile would drift whenever any dependency publishes a new
+# release.)
+name: Verify runtime lock
 
 on:
   pull_request:
@@ -27,18 +35,27 @@ on:
 
 jobs:
   verify:
-    name: dry-run install on macOS arm64
-    runs-on: macos-14  # Apple Silicon, matching the release target
+    name: dry-run install (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-14      # Apple Silicon, matching the release target
+          - windows-2022  # x86_64, matching the release target
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
       - name: Dry-run install the bundled runtime lock
+        shell: bash
         run: |
           uv venv --python 3.12
-          # Resolves + checks a macOS wheel exists for every hash-pinned dep,
-          # exactly as the .app's bootstrap does on first launch (no download).
-          # Fails loudly if the lock pins anything without a macOS wheel.
+          # Resolves + checks a wheel exists for this platform for every
+          # hash-pinned dep, exactly as the app's bootstrap does on first
+          # launch (no download). Fails loudly if the lock pins anything
+          # without a wheel here — or, as with uvloop, anything whose sdist
+          # refuses to build on this OS.
           uv pip install --dry-run --require-hashes \
             -r sidecar/runtime/requirements.txt

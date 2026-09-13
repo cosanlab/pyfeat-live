@@ -357,6 +357,7 @@ async fn bootstrap_and_launch(app: &AppHandle) -> Result<(), String> {
         .env("PYTHONPATH", &pyfeatlive_root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    hide_console_window(&mut cmd);
 
     let mut child = cmd
         .spawn()
@@ -568,11 +569,13 @@ async fn run_uv(
     cwd: &Path,
     args: &[&str],
 ) -> Result<(), String> {
-    let mut child = Command::new(uv_path)
-        .args(args)
+    let mut cmd = Command::new(uv_path);
+    cmd.args(args)
         .current_dir(cwd)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console_window(&mut cmd);
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("failed to spawn uv {args:?}: {e}"))?;
 
@@ -662,6 +665,24 @@ fn sidecar_log_path(app: &AppHandle) -> PathBuf {
     let dir = app.path().app_log_dir().unwrap_or_else(|_| std::env::temp_dir());
     let _ = std::fs::create_dir_all(&dir);
     dir.join("sidecar.log")
+}
+
+/// On Windows, a GUI-subsystem process (see `windows_subsystem` in main.rs)
+/// that spawns a console-subsystem child (uv.exe, python.exe) gets a brand-new
+/// console window allocated for that child — a black terminal popping up over
+/// the splash for the whole 5–10 min install, and again for the sidecar on
+/// every launch. CREATE_NO_WINDOW suppresses it; stdout/stderr are piped so
+/// nothing is lost. No-op elsewhere.
+fn hide_console_window(cmd: &mut Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = cmd;
+    }
 }
 
 fn venv_python(venv_dir: &Path) -> PathBuf {
