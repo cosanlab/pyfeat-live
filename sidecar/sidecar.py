@@ -60,6 +60,77 @@ def _set_runtime_env() -> None:
     sys.path.insert(0, str(_resource_dir()))
 
 
+# Marker env var: set on the re-exec'd process so we never exec twice.
+_OPENMP_REEXEC_MARKER = "PYFEATLIVE_OPENMP_REEXEC"
+
+
+def _macos_openmp_fallback_path(purelib: Path, existing: str | None) -> str | None:
+    """Build a DYLD_FALLBACK_LIBRARY_PATH that lets xgboost find libomp.
+
+    xgboost's macOS wheel links ``@rpath/libomp.dylib`` with a single
+    rpath: ``/opt/homebrew/opt/libomp/lib``. On any Mac without
+    ``brew install libomp`` the dlopen fails and ``import feat`` (which
+    imports xgboost) crashes the sidecar at startup — first launch dies
+    with "XGBoost Library (libxgboost.dylib) could not be loaded". The
+    post-release smoke test caught this on a clean macos-14 runner.
+
+    torch's wheel ships its own ``torch/lib/libomp.dylib`` in the same
+    venv. dyld consults DYLD_FALLBACK_LIBRARY_PATH (by leaf name) only
+    after every rpath candidate fails, so pointing it at torch/lib makes
+    a Homebrew-less Mac use torch's runtime while a Mac that has Homebrew
+    libomp keeps resolving through the rpath exactly as before. (Verified
+    empirically: pre-loading torch's libomp via ctypes does NOT satisfy
+    the reference; patching the rpath needs install_name_tool, which end
+    users don't have.)
+
+    Returns None when torch's libomp isn't there (nothing to do) or the
+    directory is already on the path. Setting the var REPLACES dyld's
+    defaults, so they are appended back.
+    """
+    torch_lib = purelib / "torch" / "lib"
+    if not (torch_lib / "libomp.dylib").is_file():
+        return None
+    parts = [p for p in (existing or "").split(":") if p]
+    if str(torch_lib) in parts:
+        return None
+    if not parts:
+        # dyld's documented defaults when the variable is unset.
+        parts = [str(Path.home() / "lib"), "/usr/local/lib", "/usr/lib"]
+    return ":".join([str(torch_lib), *parts])
+
+
+def _ensure_macos_openmp_runtime() -> None:
+    """On macOS, re-exec once with DYLD_FALLBACK_LIBRARY_PATH set (see
+    :func:`_macos_openmp_fallback_path`). dyld reads the variable at
+    process start, so ``os.environ`` alone is too late — exec keeps our
+    PID (the Rust shell's Child handle stays valid) and re-runs main().
+    Any failure falls through to a normal start rather than blocking."""
+    if sys.platform != "darwin" or os.environ.get(_OPENMP_REEXEC_MARKER):
+        return
+    try:
+        import sysconfig
+
+        purelib = Path(sysconfig.get_paths()["purelib"])
+        value = _macos_openmp_fallback_path(
+            purelib, os.environ.get("DYLD_FALLBACK_LIBRARY_PATH")
+        )
+        if value is None:
+            return
+        env = dict(os.environ)
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = value
+        env[_OPENMP_REEXEC_MARKER] = "1"
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.execve(sys.executable, [sys.executable, *sys.argv], env)
+    except Exception as exc:  # noqa: BLE001 — never let the guard block startup
+        print(
+            f"warning: could not re-exec with OpenMP fallback path ({exc}); "
+            "continuing without it",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
 def _watch_parent_and_exit() -> None:
     """Self-terminate when our parent process dies.
 
@@ -138,6 +209,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    _ensure_macos_openmp_runtime()  # may exec; must be first
     _set_runtime_env()
     _watch_parent_and_exit()
     args = _parse_args()
