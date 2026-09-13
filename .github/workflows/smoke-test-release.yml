@@ -178,22 +178,42 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $setup = Get-ChildItem dist -Filter '*-setup.exe' | Select-Object -First 1
           Unblock-File $setup.FullName   # drop Mark-of-the-Web if the download set it
-          # Tauri's NSIS installer honours /S (silent). Default installMode is
-          # currentUser → %LOCALAPPDATA%\Programs; search Program Files too in
-          # case that ever changes.
+          # Tauri's NSIS installer honours /S (silent).
           $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "installer exited with $($p.ExitCode)" }
-          # Tauri does NOT rename the binary to productName: the installed exe
-          # is the Cargo package name (pyfeatlive-tauri.exe, next to uv.exe),
-          # inside a "Py-feat Live" folder. Verified with `7z l` on the
-          # v0.8.30 -setup.exe; the first smoke run looked for
-          # "Py-feat Live.exe" and found nothing.
-          $roots = @("$env:LOCALAPPDATA\Programs", $env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
-          $exe = $roots | ForEach-Object { Get-ChildItem -Path $_ -Filter 'pyfeatlive-tauri.exe' -Recurse -Depth 2 -ErrorAction SilentlyContinue } | Select-Object -First 1
+          # Where did it go? Tauri's installer.nsi: currentUser mode (our
+          # default) → "$LOCALAPPDATA\<productName>" (NO "Programs" segment —
+          # the first two smoke runs searched %LOCALAPPDATA%\Programs and
+          # found nothing); perMachine → "$PROGRAMFILES64\<productName>". It
+          # records $INSTDIR as the default value of its Uninstall registry
+          # key, so read that first and only fall back to a directory search.
+          # The binary keeps the Cargo package name: pyfeatlive-tauri.exe.
+          $product = 'Py-feat Live'
+          $instDir = $null
+          foreach ($hive in 'HKCU', 'HKLM') {
+            $key = "${hive}:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$product"
+            if (Test-Path $key) {
+              $props = Get-ItemProperty $key
+              $instDir = @($props.'(default)', $props.InstallLocation) | Where-Object { $_ } | Select-Object -First 1
+              Write-Host "uninstall key $key -> '$instDir'"
+              if ($instDir) { break }
+            }
+          }
+          $candidates = @()
+          if ($instDir) { $candidates += (Join-Path $instDir 'pyfeatlive-tauri.exe') }
+          $candidates += @(
+            "$env:LOCALAPPDATA\$product\pyfeatlive-tauri.exe",
+            "$env:ProgramFiles\$product\pyfeatlive-tauri.exe",
+            "${env:ProgramFiles(x86)}\$product\pyfeatlive-tauri.exe"
+          )
+          $exe = $candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1 | Get-Item
           if (-not $exe) {
-            Write-Host "pyfeatlive-tauri.exe not found; 'Py-feat Live' folders seen:"
-            $roots | ForEach-Object { Get-ChildItem -Path $_ -Directory -Filter 'Py-feat Live' -ErrorAction SilentlyContinue } | ForEach-Object { Get-ChildItem $_.FullName -Recurse -Depth 1 | Select-Object FullName | Format-Table -HideTableHeaders }
-            throw "pyfeatlive-tauri.exe not found under: $($roots -join ', ')"
+            Write-Host "pyfeatlive-tauri.exe not at any expected path:"; $candidates | ForEach-Object { Write-Host "  $_" }
+            Write-Host "'$product' folders anywhere under the profile / Program Files:"
+            @($env:LOCALAPPDATA, $env:APPDATA, $env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ } |
+              ForEach-Object { Get-ChildItem -Path $_ -Directory -Filter $product -Recurse -Depth 2 -ErrorAction SilentlyContinue } |
+              ForEach-Object { Write-Host "  $($_.FullName)"; Get-ChildItem $_.FullName | ForEach-Object { Write-Host "    $($_.Name)" } }
+            throw "pyfeatlive-tauri.exe not found after silent install"
           }
           "APP_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "installed: $($exe.FullName)"
