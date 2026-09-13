@@ -1,0 +1,240 @@
+# Post-release smoke test: install the REAL release artifacts on a macOS and a
+# Windows runner, launch the app, and drive it through a first run — runtime
+# venv install, torch import, model download, one face detection.
+#
+# Why this exists: the build workflows only prove the Tauri shell compiles and
+# bundles. The Python runtime is installed on the END USER's machine at first
+# launch, so a lock that resolves but can't install (0.8.30: uvloop has no
+# Windows build), a native lib that doesn't load, or a model that won't
+# download is invisible to build CI. This job is the first run, on CI.
+#
+# Triggers:
+#   - after `release` finishes (assets are on the DRAFT release — you get a
+#     verdict BEFORE you publish);
+#   - when a release is published (belt and braces for manual publishes);
+#   - by hand for any existing tag (workflow_dispatch → tag).
+#
+# It takes ~15–30 min per OS (dependency download + model weights), so it is
+# deliberately NOT a PR check; see verify-runtime-lock.yml for the fast
+# resolve-only guard that runs on PRs.
+name: smoke-test-release
+
+on:
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to test (e.g. v0.8.31; may be a draft)"
+        required: true
+
+# `contents: write` is what lets GITHUB_TOKEN *see* draft releases (drafts are
+# only listed for users with push access). Nothing here writes to the repo or
+# the release.
+permissions:
+  contents: write
+
+concurrency:
+  group: smoke-${{ github.event.inputs.tag || github.event.release.tag_name || github.event.workflow_run.head_branch || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: resolve release tag
+    # Skip when the upstream release build failed — nothing to test.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RUN_HEAD: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            workflow_dispatch) tag="$INPUT_TAG" ;;
+            release)           tag="$RELEASE_TAG" ;;
+            workflow_run)
+              # A tag-push run of release.yml reports the tag as head_branch.
+              # A workflow_dispatch run of release.yml reports its branch, so
+              # fall back to the newest release (drafts included).
+              if [[ "$RUN_HEAD" == v* ]]; then
+                tag="$RUN_HEAD"
+              else
+                tag="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName')"
+              fi ;;
+            *) echo "unexpected event $EVENT" >&2; exit 1 ;;
+          esac
+          [ -n "$tag" ] || { echo "could not determine a release tag" >&2; exit 1; }
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets \
+            --jq '"tag \(.tagName) draft=\(.isDraft)\n" + ([.assets[].name] | join("\n"))'
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  macos:
+    name: first run on macOS arm64
+    needs: resolve
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      TAG: ${{ needs.resolve.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      APP_DIR: ${{ github.workspace }}/installed
+    steps:
+      - uses: actions/checkout@v4   # for scripts/ + the face fixture only
+
+      - name: download the .dmg from the release
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*_aarch64.dmg' --dir dist
+          ls -la dist
+
+      - name: install (mount dmg, copy .app out)
+        run: |
+          set -euo pipefail
+          mnt="$RUNNER_TEMP/dmg"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" dist/*.dmg
+          mkdir -p "$APP_DIR"
+          cp -R "$mnt/Py-feat Live.app" "$APP_DIR/"
+          hdiutil detach "$mnt"
+          ls "$APP_DIR/Py-feat Live.app/Contents/MacOS"
+
+      - name: verify code signature + Gatekeeper assessment
+        run: |
+          set -euo pipefail
+          app="$APP_DIR/Py-feat Live.app"
+          # Hard: an unsigned/broken signature ships as "app is damaged" to users.
+          codesign --verify --deep --strict --verbose=2 "$app"
+          # Soft: notarization ticket check needs Apple's servers; warn only.
+          if ! spctl --assess --type execute --verbose=2 "$app"; then
+            echo "::warning::spctl assessment failed for $app — check notarization/stapling"
+          fi
+
+      - name: launch the app (first run installs the runtime venv)
+        run: |
+          set -euo pipefail
+          bin="$APP_DIR/Py-feat Live.app/Contents/MacOS/pyfeatlive-tauri"
+          nohup "$bin" > app-stdout.log 2>&1 &
+          echo "APP_PID=$!" >> "$GITHUB_ENV"
+          echo "launched pid $!"
+
+      - name: wait for sidecar, import torch, build detector, detect a face
+        run: python3 scripts/smoke_test_release.py --image tests/core/fixtures/single_face.jpg
+
+      - name: collect logs
+        if: always()
+        run: |
+          mkdir -p logs
+          cp app-stdout.log logs/ 2>/dev/null || true
+          cp -R "$HOME/Library/Logs/com.cosanlab.pyfeatlive" logs/app-log-dir 2>/dev/null || true
+          echo "--- app stdout (tail) ---"; tail -n 60 app-stdout.log || true
+          echo "--- sidecar.log (tail) ---"; tail -n 60 "$HOME/Library/Logs/com.cosanlab.pyfeatlive/sidecar.log" || true
+
+      - name: shut down
+        if: always()
+        run: |
+          [ -n "${APP_PID:-}" ] && kill "$APP_PID" 2>/dev/null || true
+          pkill -f 'com.cosanlab.pyfeatlive/runtime' 2>/dev/null || true
+          pkill -f 'pyfeatlive-tauri' 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-logs-macos-${{ needs.resolve.outputs.tag }}
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  windows:
+    name: first run on Windows x86_64
+    needs: resolve
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      TAG: ${{ needs.resolve.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4   # for scripts/ + the face fixture only
+
+      - name: download the NSIS installer from the release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*-setup.exe' --dir dist
+          ls -la dist
+
+      - name: install silently
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Get-ChildItem dist -Filter '*-setup.exe' | Select-Object -First 1
+          Unblock-File $setup.FullName   # drop Mark-of-the-Web if the download set it
+          # Tauri's NSIS installer honours /S (silent). Default installMode is
+          # currentUser → %LOCALAPPDATA%\Programs; search Program Files too in
+          # case that ever changes.
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exited with $($p.ExitCode)" }
+          $roots = @("$env:LOCALAPPDATA\Programs", $env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
+          $exe = $roots | ForEach-Object { Get-ChildItem -Path $_ -Filter 'Py-feat Live.exe' -Recurse -ErrorAction SilentlyContinue } | Select-Object -First 1
+          if (-not $exe) { throw "Py-feat Live.exe not found under: $($roots -join ', ')" }
+          "APP_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "installed: $($exe.FullName)"
+          Get-ChildItem $exe.DirectoryName -Recurse -Depth 1 | Select-Object FullName, Length | Format-Table -AutoSize
+
+      - name: launch the app (first run installs the runtime venv)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $p = Start-Process -FilePath $env:APP_EXE -PassThru
+          "APP_PID=$($p.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "launched pid $($p.Id)"
+
+      - name: wait for sidecar, import torch, build detector, detect a face
+        shell: bash
+        run: python scripts/smoke_test_release.py --image tests/core/fixtures/single_face.jpg
+
+      - name: collect logs
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force logs | Out-Null
+          $logDir = "$env:LOCALAPPDATA\com.cosanlab.pyfeatlive\logs"
+          if (Test-Path $logDir) {
+            Copy-Item -Recurse $logDir logs\app-log-dir
+            Write-Host '--- sidecar.log (tail) ---'
+            Get-Content "$logDir\sidecar.log" -Tail 60 -ErrorAction SilentlyContinue
+          } else {
+            Write-Host "no log dir at $logDir"
+          }
+          # Was the runtime venv created / stamped?
+          $rt = "$env:APPDATA\com.cosanlab.pyfeatlive\runtime"
+          if (Test-Path $rt) { Get-ChildItem $rt -Force | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize }
+
+      - name: shut down
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:APP_PID) { Stop-Process -Id $env:APP_PID -Force -ErrorAction SilentlyContinue }
+          # The sidecar's parent-death watchdog polls getppid(), which never
+          # changes on Windows, so kill the venv's python explicitly.
+          Get-Process python -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -like '*com.cosanlab.pyfeatlive*' } |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+          Get-Process 'Py-feat Live' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-logs-windows-${{ needs.resolve.outputs.tag }}
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 14
