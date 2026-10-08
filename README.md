@@ -115,10 +115,4 @@ If you run into installation issues with py-feat see [this issue](https://github
 
 ## License
 
-The Py-feat Live application code is released under the [MIT License](LICENSE).
-
-**The facial-expression detection models are not covered by MIT.** The app
-downloads and runs pretrained models (via py-feat) that are licensed
-separately by their authors, and **several carry non-commercial / research-only
-stipulations**. You are responsible for reviewing and complying with each
-model's license before use — see the [py-feat model reference](https://py-feat.org/).
+The PyFeat-Live application code is released under the [MIT License](LICENSE), including commercial use. Downloaded detector and visualization weights, third-party libraries, research datasets, and optional generator assets have separate terms. See [the application model notice](LICENSE-MODELS.md) and the [Py-Feat licensing guide](https://py-feat.org/pages/licensing/) for component-specific terms and unresolved permissions. The application's MIT license does not establish unrestricted use of every pretrained model.
