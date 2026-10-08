@@ -22,15 +22,14 @@ SOFTWARE.
 
 ---
 
-Third-party model licenses
-===========================
+Model and dataset notices
+=========================
 
-The MIT license above covers the Py-feat Live application code ONLY. It does
-NOT cover the facial-expression detection models that the app downloads and
-runs (via py-feat). Those pretrained models and their weights are licensed
-separately by their respective authors, and several carry NON-COMMERCIAL or
-research-only stipulations.
+The MIT grant covers the original PyFeat-Live application code. Third-party
+libraries retain their own licenses. Downloaded detector and visualization
+weights, research datasets, and optional generator assets have separate
+terms; the application license does not grant their providers' rights.
 
-You are responsible for reviewing and complying with the license of each model
-you use. See the py-feat documentation for the per-model licenses:
-https://py-feat.org/  (Models reference)
+See LICENSE-MODELS.md for the application-specific notice and links to the
+classic-v1, multitask-v2, and dataset notices. Existing valid model license
+grants are not revoked by this clarification.
