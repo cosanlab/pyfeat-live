@@ -24,6 +24,8 @@ from pyfeatlive_core.analyze_runner import run_item
 from pyfeatlive_core.detector import DetectorConfig, build_detector
 from pyfeatlive_core.recorder import default_sessions_root
 
+from backend.gpu import GPU_EXECUTOR
+
 
 router = APIRouter(prefix="/api/analyze", tags=["analyze"])
 
@@ -283,7 +285,9 @@ async def _get_or_build_detector(app, cfg: DetectorConfig):
         return cached[1]
     app.state.analyze_detector_cache = None  # release old weights first
     loop = asyncio.get_running_loop()
-    detector = await loop.run_in_executor(None, build_detector, cfg)
+    # On the shared GPU worker: building moves weights to the device, which
+    # must not overlap Live/Generate model work (MPS crash — see backend.gpu).
+    detector = await loop.run_in_executor(GPU_EXECUTOR, build_detector, cfg)
     app.state.analyze_detector_cache = (cfg, detector)
     return detector
 
@@ -291,10 +295,13 @@ async def _get_or_build_detector(app, cfg: DetectorConfig):
 async def _runner_loop(app, req: RunRequest) -> None:
     """Drain the queue one item at a time on the asyncio loop.
 
-    Detection happens inside ``run_item``, which is a synchronous
-    generator. We run it inside ``run_in_executor`` to avoid blocking
-    the loop, draining its events through an asyncio.Queue so we can
-    push them to WS subscribers immediately.
+    Detection happens inside ``run_item``, a synchronous generator that
+    yields once per batch. We advance it ONE ``next()`` at a time on the
+    shared GPU worker (backend.gpu) and broadcast each event as it arrives.
+    Stepping per batch — rather than draining the whole generator in one
+    executor call — is what lets live detection interleave between Extract
+    batches on the same single GPU thread instead of waiting for the whole
+    video (and instead of running concurrently, which crashes MPS).
     """
     queue = app.state.analyze_queue
     while True:
@@ -318,8 +325,6 @@ async def _runner_loop(app, req: RunRequest) -> None:
         )
         detector = await _get_or_build_detector(app, cfg)
 
-        events: asyncio.Queue = asyncio.Queue()
-
         # Per-item cancel handle. Stashed on app.state so /stop and the
         # per-row DELETE can signal it. Reset after the item exits so
         # later signals don't leak into the next run.
@@ -327,23 +332,25 @@ async def _runner_loop(app, req: RunRequest) -> None:
         app.state.analyze_current_cancel = cancel
         app.state.analyze_current_item_id = item.id
 
-        def _drain() -> None:
-            for ev in run_item(
-                item, detector, default_sessions_root(),
-                req.batch_size, cancel_event=cancel,
-            ):
-                loop.call_soon_threadsafe(events.put_nowait, ev)
-            loop.call_soon_threadsafe(events.put_nowait, None)  # sentinel
-
-        runner_future = loop.run_in_executor(None, _drain)
+        gen = run_item(
+            item, detector, default_sessions_root(),
+            req.batch_size, cancel_event=cancel,
+        )
+        done = object()
         try:
             while True:
-                ev = await events.get()
-                if ev is None:
+                ev = await loop.run_in_executor(GPU_EXECUTOR, next, gen, done)
+                if ev is done:
                     break
                 _broadcast(app, ev)
-            await runner_future
         finally:
+            # No-op when exhausted; on an early exit (exception / task
+            # cancellation) runs run_item's cleanup on the same thread that
+            # stepped it.
+            try:
+                await loop.run_in_executor(GPU_EXECUTOR, gen.close)
+            except Exception:
+                pass
             app.state.analyze_current_cancel = None
             app.state.analyze_current_item_id = None
     _broadcast(app, {"type": "queue_idle"})

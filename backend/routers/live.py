@@ -7,7 +7,6 @@ import io
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, Optional
 
 # Per-frame transport timing in the log (detect/draw/enc breakdown). Opt-in
@@ -34,6 +33,7 @@ from pyfeatlive_core.recorder import (
     default_sessions_root,
 )
 
+from backend.gpu import GPU_EXECUTOR
 from backend.serialization import serialize_faces
 
 
@@ -41,14 +41,14 @@ router = APIRouter(prefix="/api/live", tags=["live"])
 
 # Live detection + overlay-bake + PNG-encode all run here, OFF the event
 # loop, so the loop stays free to accept uploads and feed the recorder.
-# Single worker: only one detection is ever in flight (gated by
-# _detection_in_flight), and a single thread avoids oversubscribing torch's
-# own intra-op thread pool. The heavy work (torch, draw, zlib) releases the
-# GIL, so this thread genuinely runs in parallel with the loop and the
-# recorder's encoder thread.
-_DETECTION_EXECUTOR = ThreadPoolExecutor(
-    max_workers=1, thread_name_prefix="live-detect",
-)
+# This is the process-wide single GPU worker (backend.gpu): only one
+# detection is ever in flight (gated by _detection_in_flight), a single
+# thread avoids oversubscribing torch's intra-op pool, and sharing it with
+# detector builds, Extract and Generate keeps two threads from issuing MPS
+# work at once (which hard-crashes the process). The heavy work (torch,
+# draw, zlib) releases the GIL, so this thread genuinely runs in parallel
+# with the loop and the recorder's encoder thread.
+_DETECTION_EXECUTOR = GPU_EXECUTOR
 
 
 @router.post("/frame")
@@ -430,9 +430,16 @@ async def configure(req: ConfigureRequest, request: Request) -> dict:
     cfg = DetectorConfig(**{k: v for k, v in req.model_dump().items()
                             if k in detector_fields})
     loop = asyncio.get_running_loop()
-    # Build the new detector OUTSIDE the lock (model load is multi-second;
-    # holding the lock that long would needlessly stall in-flight detection).
-    detector = await loop.run_in_executor(None, build_detector, cfg)
+    # Build the new detector OUTSIDE the asyncio lock (model load is
+    # multi-second; holding the lock would block /hints and the frame
+    # handler's lock waits) but ON the single detection worker thread.
+    # Building moves weights onto the GPU, and on MPS two threads issuing
+    # Metal work at once hard-crashes the process ("A command encoder is
+    # already encoding to this command buffer") — which is exactly what
+    # happened when /configure arrived mid-stream while the build ran on the
+    # default executor. Sharing the one-worker executor serializes the build
+    # with any in-flight detection; detections simply wait for the build.
+    detector = await loop.run_in_executor(_DETECTION_EXECUTOR, build_detector, cfg)
 
     live = request.app.state.live
     # Swap the detector + render config UNDER the lock so we never replace
