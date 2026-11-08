@@ -96,12 +96,16 @@ export class LiveSource implements FaceSource {
       const n = slots[i];
       if (n < 0) return;
       const cx = (rect[0] + rect[2] / 2) / Math.max(1, frameW);
+      const mirrored = this.o.mirrored !== false;
+      const sig = signalsFromLiveFace(face);
+      // Like x, gaze left/right follows what the viewer sees on the mirrored screen.
+      if (sig.gaze && mirrored) sig.gaze = { x: -sig.gaze.x, y: sig.gaze.y };
       out.push({
         slot: `live-${n}`,
         label: `Person ${n + 1}`,
         color: SLOT_COLORS[n % SLOT_COLORS.length],
-        x: Math.min(1, Math.max(0, this.o.mirrored === false ? cx : 1 - cx)),
-        ...signalsFromLiveFace(face),
+        x: Math.min(1, Math.max(0, mirrored ? 1 - cx : cx)),
+        ...sig,
       });
     });
     const frame: StudioFrame = { t, faces: out };

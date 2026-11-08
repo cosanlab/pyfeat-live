@@ -97,6 +97,8 @@ def create_app() -> FastAPI:
     app.include_router(analyze_router.router)
     from backend.routers import generate as generate_router
     app.include_router(generate_router.router)
+    from backend.routers import studio as studio_router
+    app.include_router(studio_router.router)
 
     # ----- Frontend serving --------------------------------------------
     # The built Svelte SPA lives at this path. Set PYFEAT_FRONTEND_DIST

@@ -12,7 +12,19 @@ export const EMOTIONS = ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'su
 /** [x, y, w, h] in source-frame pixels. */
 export type Rect = [number, number, number, number];
 
-export type FaceSignals = Pick<SlotFace, 'aus' | 'emotions' | 'valence' | 'arousal' | 'pose'>;
+export type FaceSignals = Pick<SlotFace, 'aus' | 'emotions' | 'valence' | 'arousal' | 'pose' | 'gaze'>;
+
+/**
+ * Gaze angles (radians, head-relative) → screen-direction components in the
+ * SOURCE frame (not mirrored): x toward image right, y up. Same projection as
+ * the overlay arrow (overlay/primitives.ts drawGaze): py-feat >= 2.1.1 gaze_yaw
+ * is positive toward the subject's right = image left for both the L2CS and
+ * Detectorv2 multitask conventions, so dx = -sin(yaw)·cos(pitch).
+ */
+export function gazeFromAngles(pitch: number | undefined, yaw: number | undefined): SlotFace['gaze'] {
+  if (pitch === undefined || yaw === undefined) return undefined;
+  return { x: -Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch) };
+}
 
 const num = (v: unknown): number | undefined =>
   typeof v === 'number' && Number.isFinite(v) ? v : undefined;
@@ -36,6 +48,7 @@ export function signalsFromFexRow(row: FexRow): FaceSignals {
     valence: num(row.valence),
     arousal: num(row.arousal),
     pose: pitch !== undefined && roll !== undefined && yaw !== undefined ? [pitch, roll, yaw] : undefined,
+    gaze: gazeFromAngles(num(row.gaze_pitch), num(row.gaze_yaw)),
   };
 }
 
@@ -66,6 +79,7 @@ export function signalsFromLiveFace(face: Face): FaceSignals {
     valence: num(face.valence_arousal?.valence),
     arousal: num(face.valence_arousal?.arousal),
     pose,
+    gaze: gazeFromAngles(num(face.gaze?.[0]), num(face.gaze?.[1])),
   };
 }
 

@@ -22,6 +22,12 @@ export interface SlotFace {
   arousal?: number;
   /** pitch, roll, yaw (radians). */
   pose?: [number, number, number];
+  /**
+   * Where the eyes point, relative to the head, as a unit-direction projection:
+   * x = toward the viewer's right on screen (mirror-corrected like `x`),
+   * y = up. Both in -1..1; (0, 0) = straight ahead along the head.
+   */
+  gaze?: { x: number; y: number };
 }
 
 /** Everything a source knows at one detection, on the source clock. */
@@ -42,10 +48,11 @@ export interface FaceSource {
 
 // ---- Patch (mapping) format ----------------------------------------------
 
-export type FeatureGroup = 'aus' | 'blendshapes' | 'emotions' | 'va';
+export type FeatureGroup = 'aus' | 'blendshapes' | 'emotions' | 'va' | 'gaze';
 
 export type SourceRef =
-  /** A raw per-person feature, e.g. {group:'aus', name:'AU12'}; 'va' names are 'valence' | 'arousal'. */
+  /** A raw per-person feature, e.g. {group:'aus', name:'AU12'}; 'va' names are 'valence' | 'arousal';
+   *  'gaze' names are 'shift' | 'away' | 'horizontal' | 'vertical'. */
   | { kind: 'feature'; group: FeatureGroup; name: string }
   /** Rate of change (per second) of the smoothed feature. */
   | { kind: 'velocity'; of: { kind: 'feature'; group: FeatureGroup; name: string } }

@@ -6,6 +6,7 @@
 // and scenes ease continuous values themselves. Scenes are abstract
 // visualisations, not overlays on the video, so they may smooth freely.
 
+import type { ArtSettings } from '../art';
 import type { LeadLag } from '../interaction';
 
 export interface SlotView {
@@ -20,6 +21,8 @@ export interface SlotView {
   values: Record<string, number>;
   valence?: number;
   arousal?: number;
+  /** Smoothed emotion probabilities (0..1), when the model provides them. */
+  emotions?: Record<string, number>;
   /** Overall expressivity: mean positive z across AUs (≈0 at rest). */
   energy: number;
   calibrating: boolean;
@@ -60,6 +63,8 @@ export interface SceneState {
   /** Mimicry events since the previous draw. */
   mimicry: MimicryView[];
   reducedMotion: boolean;
+  /** What drives colour and motion in the art scenes (set by the Studio UI). */
+  art?: ArtSettings;
 }
 
 export interface Scene {

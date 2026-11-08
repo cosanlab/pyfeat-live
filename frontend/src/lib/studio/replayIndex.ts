@@ -92,7 +92,7 @@ export class ReplayIndex {
       let person = iid ? this.people.get(iid) : undefined;
       if (!person) {
         const slot = `face-${fi}`;
-        person = this.people.get(slot) ?? { slot, label: `Face ${fi}`, color: SLOT_COLORS[fi % SLOT_COLORS.length] };
+        person = this.people.get(slot) ?? { slot, label: `Person ${fi + 1}`, color: SLOT_COLORS[fi % SLOT_COLORS.length] };
         this.people.set(slot, person);
       }
       const rect = rectFromFexRow(r);
