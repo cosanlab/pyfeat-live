@@ -92,6 +92,10 @@ class LiveSession:
     _cached_fex: object = None
     _next_detection_at: float = 0.0
     _detection_in_flight: bool = False
+    # Latest-frame mailbox: (jpeg_bytes, frame_id) of the newest upload not
+    # yet detected. Overwritten by every upload; consumed when a detection
+    # starts (on upload if idle, else as soon as the in-flight one ends).
+    _pending_upload: Optional[tuple[bytes, int]] = None
     # Per-face JSON dicts serialized from _cached_fex ONCE per completed
     # detection (in the worker thread). /api/live/frame returns this list
     # verbatim on every poll — polls are ~10x more frequent than
@@ -145,6 +149,7 @@ class LiveSession:
         self._cached_frame_id = None
         self._next_detection_at = 0.0
         self._detection_in_flight = False
+        self._pending_upload = None
         # Bump generation so the frontend's X-Detection-Generation
         # check sees the next baked frame as "new" even if the count
         # of detections-so-far happens to land on the same value.

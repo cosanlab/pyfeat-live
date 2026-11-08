@@ -406,8 +406,9 @@ class SessionRecorder:
         if self._csv_writer is not None:
             return
         self._csv_file = (self.dir / "fex.csv").open("w", newline="")
-        self._csv_writer = csv.DictWriter(self._csv_file, fieldnames=list(columns))
-        self._csv_writer.writeheader()
+        self._csv_cols = list(columns)
+        self._csv_writer = csv.writer(self._csv_file)
+        self._csv_writer.writerow(self._csv_cols)
 
     def _write_fex(
         self, fex: pd.DataFrame, frame_idx: int, frame=None,
@@ -440,8 +441,21 @@ class SessionRecorder:
                 fex["frame"] = int(frame_idx)
             fex["face_idx"] = fex.groupby("frame").cumcount().to_numpy()
             self._ensure_csv(fex.columns)
-            for row in fex.to_dict(orient="records"):
-                self._csv_writer.writerow(row)
+            # Align to the header by column NAME (what DictWriter used to do):
+            # column order can differ between frames (the live coord-scaling
+            # drop+concat reorders columns only when the detection input was
+            # downscaled, e.g. the pre-record 640 frame vs full-res frames).
+            # Columns missing from this frame write as "" (DictWriter restval).
+            if list(fex.columns) != self._csv_cols:
+                fex = fex.reindex(columns=self._csv_cols, fill_value="")
+            # to_numpy(object).tolist() + csv.writer, NOT to_dict("records") +
+            # DictWriter. Output is byte-identical, but to_dict walks the ~2200
+            # Detectorv2 columns one pandas Series at a time: ~50ms of pure
+            # Python per frame with the GIL held, which stalled the event loop
+            # (JPEG decode 0.5 -> ~20ms) and the GPU thread (track frame
+            # 27 -> ~65ms) and halved the live detection = recording rate
+            # (~15/s -> ~8/s). This path is ~1ms.
+            self._csv_writer.writerows(fex.to_numpy(dtype=object).tolist())
         except Exception as e:
             logger.warning("CSV append failed: %s", e)
 
