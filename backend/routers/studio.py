@@ -45,13 +45,27 @@ STATS_EVERY_SEC = 1.0
 
 
 def origin_allowed(origin: str | None, host_header: str | None) -> bool:
-    """No Origin (not a browser), an app origin, or same-origin as the backend."""
+    """No Origin (not a browser), an app origin, or the page this backend
+    serves itself — and only when it's addressed by a loopback name.
+
+    Same-origin alone isn't enough: with DNS rebinding a hostile site points
+    its own name at 127.0.0.1, so its Origin and Host match each other
+    ("evil.example:18640"). Requiring a loopback Host shuts that out.
+    """
     if not origin:
         return True
     if origin in _APP_ORIGINS:
         return True
+    if not host_header:
+        return False
     try:
-        return bool(host_header) and urlparse(origin).netloc == host_header
+        o = urlparse(origin)
+        h = urlparse(f"//{host_header}")
+        return (
+            o.scheme in ("http", "https")
+            and o.netloc == host_header
+            and (h.hostname or "").lower() in _LOOPBACK_NAMES
+        )
     except ValueError:
         return False
 

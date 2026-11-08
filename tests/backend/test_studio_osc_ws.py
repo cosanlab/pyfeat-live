@@ -75,6 +75,15 @@ def test_malformed_input_is_ignored(client, udp):
         assert _recv_all(udp) == [("/ok", [0.25])]
 
 
+def test_rebound_origin_rejected_end_to_end(client):
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            "/api/studio/osc",
+            headers={"origin": "http://evil.example:18640", "host": "evil.example:18640"},
+        ) as ws:
+            ws.receive_json()
+
+
 def test_foreign_browser_origin_rejected(client):
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/api/studio/osc", headers={"origin": "https://evil.example"}) as ws:
@@ -87,6 +96,11 @@ def test_origin_rules():
     assert origin_allowed("http://127.0.0.1:18640", "127.0.0.1:18640")
     assert not origin_allowed("http://127.0.0.1:9999", "127.0.0.1:18640")
     assert not origin_allowed("https://evil.example", "127.0.0.1:18640")
+    # DNS rebinding: a hostile name resolved to 127.0.0.1 matches itself
+    assert not origin_allowed("http://evil.example:18640", "evil.example:18640")
+    assert origin_allowed("http://localhost:18640", "localhost:18640")
+    assert origin_allowed("http://[::1]:18640", "[::1]:18640")
+    assert not origin_allowed("file://", "127.0.0.1:18640")
 
 
 def test_parse_messages_validates_shape_and_types():
