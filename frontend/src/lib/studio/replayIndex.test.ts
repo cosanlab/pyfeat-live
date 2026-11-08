@@ -76,4 +76,14 @@ describe('ReplayIndex', () => {
     expect(faces.map(f => f.slot).sort()).toEqual(['face-0', 'face-1']);
     expect(ix.roster).toHaveLength(2);
   });
+
+  it('measures position against the video width when given (recordings keep the detector frame size in FrameWidth)', () => {
+    // Boxes in 2000-px video space, FrameWidth column still says 1000.
+    const rows = parseFexCsv(CSV);
+    const viaColumn = new ReplayIndex(rows, frameTimesByNumber(rows, times), identities, assignments);
+    const viaVideo = new ReplayIndex(rows, frameTimesByNumber(rows, times), identities, assignments, 2000);
+    const x = (ix: ReplayIndex) => ix.facesAt(0).find(f => f.slot === 'G')!.x;
+    expect(x(viaColumn)).toBeCloseTo(0.8);
+    expect(x(viaVideo)).toBeCloseTo(0.4);
+  });
 });

@@ -64,14 +64,37 @@ export class ReplaySource implements FaceSource {
       }
     }
     const rows = normalizeLegacyFex(parseFexCsv(csv));
-    this.index = new ReplayIndex(rows, frameTimesByNumber(rows, times), identities, assignments);
-
     const url = sessionsApi.videoUrl(id);
     if (!this.video.src.endsWith(url)) this.video.src = url;
+    // Face boxes are stored in the video's pixel space, but recordings keep
+    // the detector's own frame size in FrameWidth (e.g. 640 for a 1280-wide
+    // video: the recorder rescales the boxes, not that column). Measuring
+    // against FrameWidth put everyone right of centre at x = 1 (hard-right
+    // pan). So use the video's real width; FrameWidth only if it's unknown.
+    const videoWidth = await this.videoWidth();
+    this.index = new ReplayIndex(rows, frameTimesByNumber(rows, times), identities, assignments, videoWidth);
+
     this.video.addEventListener('seeking', this.onSeeking);
     this.video.addEventListener('seeked', this.onSeeked);
     this.running = true;
     this.schedule();
+  }
+
+  /** The video's pixel width once its metadata is in (0 if it never arrives). */
+  private videoWidth(timeoutMs = 5000): Promise<number> {
+    const v = this.video;
+    if (v.readyState >= 1 && v.videoWidth) return Promise.resolve(v.videoWidth);
+    return new Promise(resolve => {
+      const done = () => {
+        clearTimeout(timer);
+        v.removeEventListener('loadedmetadata', done);
+        v.removeEventListener('error', done);
+        resolve(v.videoWidth || 0);
+      };
+      const timer = setTimeout(done, timeoutMs);
+      v.addEventListener('loadedmetadata', done);
+      v.addEventListener('error', done);
+    });
   }
 
   /** Stored frames in [t − windowSec, t) — for priming the engine after a seek. */
