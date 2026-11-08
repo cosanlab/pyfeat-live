@@ -141,7 +141,11 @@ export class StudioEngine {
   }
 
   // ---- processing ------------------------------------------------------------
-  ingest(frame: StudioFrame): void {
+  /**
+   * Process one frame. `silent` (used to pre-roll after a seek) updates all
+   * signal state but plays nothing and queues no onsets/mimicry for scenes.
+   */
+  ingest(frame: StudioFrame, silent = false): void {
     const t = frame.t;
     this.t = t;
     const syncValues = new Map<string, Record<string, number | undefined>>();
@@ -151,6 +155,10 @@ export class StudioEngine {
       const sv: Record<string, number | undefined> = {};
       for (const f of this.interaction.features) sv[f] = p.values[f];
       syncValues.set(p.slot, sv);
+      if (silent) {
+        for (const o of onsets) if (this.interaction.features.includes(o.feature)) this.mimicry.onset(p.slot, o.feature, t);
+        continue;
+      }
       for (const o of onsets) {
         this.pendingOnsets.push(o);
         // Mimicry only on the interaction features: across all 20 AUs, "same
@@ -293,6 +301,23 @@ export class StudioEngine {
     this.pendingOnsets = [];
     this.pendingMimicry = [];
     return state;
+  }
+
+  /**
+   * Warm the causal state after a discontinuity by silently replaying the
+   * frames just before the new position, so baselines don't spend 3 s
+   * recalibrating (blank scenes) after every seek.
+   */
+  prime(frames: StudioFrame[]): void {
+    for (const f of frames) this.ingest(f, true);
+  }
+
+  /** Release every voice and detach (switching sources). */
+  dispose(): void {
+    this.detach();
+    for (const slot of this.people.keys()) this.audio?.removePerson(slot);
+    this.people.clear();
+    this.reset();
   }
 
   /** Discontinuity: forget all causal state but keep people (colours, voices, mixer). */

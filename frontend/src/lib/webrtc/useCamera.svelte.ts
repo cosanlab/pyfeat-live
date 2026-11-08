@@ -33,7 +33,11 @@ export async function refreshDevices(): Promise<void> {
         deviceId: d.deviceId,
         label: d.label || `Camera ${d.deviceId.slice(0, 6)}`,
       }));
-    if (!cameraStore.selectedDeviceId && cameraStore.devices.length > 0) {
+    // Also replace a selection that no longer exists (camera unplugged, or a
+    // different device list): a stale id left the picker blank and made
+    // startCamera fail with an {exact: id} constraint nothing satisfies.
+    const known = cameraStore.devices.some(d => d.deviceId === cameraStore.selectedDeviceId);
+    if ((!cameraStore.selectedDeviceId || !known) && cameraStore.devices.length > 0) {
       cameraStore.selectedDeviceId = cameraStore.devices[0].deviceId;
     }
   } catch (err) {

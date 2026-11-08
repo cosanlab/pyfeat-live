@@ -74,6 +74,19 @@ export class ReplaySource implements FaceSource {
     this.schedule();
   }
 
+  /** Stored frames in [t − windowSec, t) — for priming the engine after a seek. */
+  framesBefore(t: number, windowSec: number): StudioFrame[] {
+    const ix = this.index;
+    if (!ix) return [];
+    const out: StudioFrame[] = [];
+    const end = ix.positionAt(t - 1e-3);
+    for (let pos = Math.max(0, ix.positionAt(t - windowSec)); pos >= 0 && pos <= end; pos++) {
+      const ft = ix.timeOf(pos);
+      if (ft >= t - windowSec && ft < t) out.push({ t: ft, faces: ix.facesAt(pos) });
+    }
+    return out;
+  }
+
   stop(): void {
     this.running = false;
     if (this.handle && this.video.cancelVideoFrameCallback) this.video.cancelVideoFrameCallback(this.handle);

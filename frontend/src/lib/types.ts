@@ -1,6 +1,6 @@
 // Shared types used across multiple components.
 
-export type View = 'live' | 'generate' | 'analyze' | 'viewer';
+export type View = 'live' | 'generate' | 'analyze' | 'viewer' | 'studio';
 
 // Backend-mirrored types (see backend/serialization.py + routers/*.py)
 

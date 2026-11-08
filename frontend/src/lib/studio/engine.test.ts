@@ -87,4 +87,24 @@ describe('StudioEngine', () => {
     eng.ingest({ t: 0, faces: [face('A', 0.5, 0.1, { valence: undefined, arousal: undefined, emotions: { happiness: 0.9, sadness: 0.1 } })] });
     expect(eng.sceneState().slots[0].valence).toBeCloseTo(0.875);
   });
+
+  it('prime() warms baselines silently: no notes, no queued onsets, not calibrating', () => {
+    const { sink, calls } = fakeAudio();
+    const eng = new StudioEngine(defaultPatch(), sink);
+    eng.prime(frames(10));
+    expect(calls.filter(c => c.fn === 'playNote')).toEqual([]);
+    const s = eng.sceneState();
+    expect(s.onsets).toEqual([]);
+    expect(s.mimicry).toEqual([]);
+    expect(s.slots.every(x => !x.calibrating)).toBe(true);
+  });
+
+  it('dispose() releases every voice', () => {
+    const { sink, calls } = fakeAudio();
+    const eng = new StudioEngine(defaultPatch(), sink);
+    frames(2).forEach(f => eng.ingest(f));
+    eng.dispose();
+    expect(calls.filter(c => c.fn === 'removePerson').map(c => c.args[0]).sort()).toEqual(['A', 'B']);
+    expect(eng.roster()).toEqual([]);
+  });
 });

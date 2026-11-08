@@ -182,6 +182,13 @@ export class AudioEngine {
     if (this.ctx instanceof AudioContext && this.ctx.state !== 'closed') await this.ctx.close();
   }
 
+  /** Overall output level (0 = silent, 1 = default, up to 2 for quiet rooms;
+   *  the compressor keeps peaks in check). */
+  setMasterVolume(v: number): void {
+    const g = 0.7 * Math.max(0, Math.min(2, v));
+    this.master.gain.setTargetAtTime(g, this.ctx.currentTime, 0.05);
+  }
+
   setPatch(p: PatchSettings): void {
     this.patch = { scale: p.scale, root: p.root, bpm: p.bpm, quantize: p.quantize };
   }
