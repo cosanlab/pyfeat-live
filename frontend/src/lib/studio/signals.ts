@@ -186,6 +186,11 @@ export class FeatureChannel {
     this.onsets = new OnsetDetector(o.onsetOn ?? 1.5, o.onsetOff ?? 0.7, o.refractory ?? 0.25);
   }
 
+  /** Smoothed rate of change (units / s) as of the last update. */
+  get velocity(): number {
+    return this.smoother.velocity;
+  }
+
   update(x: number, t: number): ChannelOutput {
     const value = this.smoother.filter(x, t);
     const z = this.baseline.update(value, t);
