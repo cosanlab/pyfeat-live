@@ -19,30 +19,13 @@
   import OverlayCanvas from '../lib/components/OverlayCanvas.svelte';
   import { placeMetaStack } from '../lib/overlay/metaStack';
   import { LiveCapture } from '../lib/webrtc/liveCapture.svelte';
+  import { DET_BUDGET, CAP_W, CAP_H, defaultLiveConfig } from '../lib/webrtc/liveDefaults';
 
   type Props = { onSwitchView?: (v: View, sessionId?: string) => void };
   let { onSwitchView }: Props = $props();
 
-  // Detection upload budget: the longest edge (px) we downscale a captured
-  // frame to before sending it for detection. The camera's native ASPECT
-  // RATIO is always preserved — everything downstream (overlay coord space,
-  // stage aspect, meta panels) derives from the actual frame dims the
-  // backend echoes back, so the app adapts to any camera/resolution.
-  const DET_BUDGET = 640;
-  // CAPTURE resolution — a *preference* we request from the camera; the
-  // camera reports its real videoWidth/videoHeight, which is what we use.
-  const CAP_W = 1280, CAP_H = 720;
 
-  let config: LiveConfigure = $state({
-    detector_type: 'Detectorv2',
-    face_model: 'retinaface',
-    landmark_model: 'mp_facemesh_v2',
-    au_model: 'mp_blendshapes',
-    emotion_model: 'resmasknet',
-    identity_model: null,
-    gaze_model: 'mp_iris (built-in)',
-    device: 'mps',
-  });
+  let config: LiveConfigure = $state(defaultLiveConfig());
 
   let compute: ComputeInfo | null = $state(null);
   let detectorCaps: DetectorCapabilities | null = $state(null);
