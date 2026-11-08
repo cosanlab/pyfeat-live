@@ -90,3 +90,39 @@ def test_configure_accepts_and_stores_style(client):
     live = client.app.state.live
     assert live.style == style_blob
     assert live.style["landmarks"]["color"] == "#00ff00"
+
+
+def test_configure_builds_detector_on_detection_thread(client, monkeypatch):
+    """Regression: /configure while streaming on MPS hard-crashed the process.
+
+    The detector build (weights → GPU) ran on the default executor while a
+    live detection ran on ``_DETECTION_EXECUTOR`` — two threads issuing Metal
+    work at once → "A command encoder is already encoding to this command
+    buffer" assertion. The build must run on the same single detection
+    worker so GPU work is serialized.
+    """
+    import threading
+    from backend.routers import live as live_router
+
+    seen = {}
+
+    def fake_build(cfg):
+        seen["thread"] = threading.current_thread().name
+        return object()
+
+    monkeypatch.setattr(live_router, "build_detector", fake_build)
+    r = client.post("/api/live/configure", json={
+        "detector_type": "Detectorv2",
+        "face_model": "retinaface",
+        "landmark_model": "mp_facemesh_v2",
+        "au_model": "mp_blendshapes",
+        "emotion_model": None,
+        "identity_model": None,
+        "device": "cpu",
+    })
+    assert r.status_code == 200
+    assert seen["thread"].startswith("gpu")
+    # Same single worker as detection → a build can never overlap it.
+    from backend.gpu import GPU_EXECUTOR
+    assert live_router._DETECTION_EXECUTOR is GPU_EXECUTOR
+    assert GPU_EXECUTOR._max_workers == 1
