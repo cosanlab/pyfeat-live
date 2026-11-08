@@ -6,14 +6,17 @@ import asyncio
 import io
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Request, Response
 from PIL import Image
 
+from backend.gpu import GPU_EXECUTOR
+
 router = APIRouter(prefix="/api/generate", tags=["generate"])
-_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gen-edit")
+# The process-wide single GPU worker (see backend.gpu): FaceEditor work must
+# never overlap Live/Extract model work on MPS.
+_EXECUTOR = GPU_EXECUTOR
 
 
 def _pick_device() -> str:
