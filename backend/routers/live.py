@@ -95,15 +95,20 @@ async def upload_frame(request: Request) -> Response:
             "malformed X-Frame-Id header %r — using -1", raw_frame_id,
         )
         frame_id = -1
-    now = time.perf_counter()
-    if not live._detection_in_flight and now >= live._next_detection_at:
-        try:
-            img = Image.open(io.BytesIO(body)).convert("RGB")
-        except Exception as exc:
-            raise HTTPException(400, f"could not decode image: {exc}") from exc
-        live._detection_in_flight = True
-        loop = asyncio.get_running_loop()
-        loop.create_task(_run_detection(live, img, frame_id))
+    # Latest-frame mailbox: always remember the newest upload, then start a
+    # detection on it if the GPU is idle. _run_detection's finally also
+    # calls _start_pending_detection, so the next detection begins the
+    # moment the previous one finishes — on the newest frame that arrived
+    # meanwhile — instead of idling until the client's NEXT upload lands.
+    # Gating detection on upload arrival cost up to one whole upload
+    # interval (~33ms) of GPU idle per detection: measured mean idle
+    # 8-11ms at a 640 upload and 18-23ms at full res, enough to drop
+    # full-res (recording) detection from ~21/s to ~14/s.
+    live._pending_upload = (body, frame_id)
+    try:
+        _start_pending_detection(live)
+    except ValueError as exc:
+        raise HTTPException(400, f"could not decode image: {exc}") from exc
 
     # NOTE: the recorder is fed from _run_detection (at detection rate),
     # NOT here per-upload — feeding every uploaded frame saturated the
@@ -118,6 +123,27 @@ async def upload_frame(request: Request) -> Response:
         "faces": live._cached_faces,
     }
 
+
+
+def _start_pending_detection(live) -> None:
+    """Launch a detection on ``live._pending_upload`` if none is in flight.
+
+    Decodes the JPEG only for frames we actually detect on (most uploads
+    are superseded in the mailbox before the GPU is free). Raises
+    ValueError on an undecodable body (the upload route maps it to 400).
+    """
+    pending = live._pending_upload
+    if (pending is None or live._detection_in_flight
+            or time.perf_counter() < live._next_detection_at):
+        return
+    live._pending_upload = None
+    body, frame_id = pending
+    try:
+        img = Image.open(io.BytesIO(body)).convert("RGB")
+    except Exception as exc:
+        raise ValueError(str(exc)) from exc
+    live._detection_in_flight = True
+    asyncio.get_running_loop().create_task(_run_detection(live, img, frame_id))
 
 
 async def _run_detection(live, img: Image.Image, frame_id: int = -1) -> None:
@@ -237,6 +263,12 @@ async def _run_detection(live, img: Image.Image, frame_id: int = -1) -> None:
         logging.getLogger(__name__).exception("live detection failed")
     finally:
         live._detection_in_flight = False
+        # Chain straight into the newest frame that arrived while this one
+        # ran (see the mailbox note in upload_frame).
+        try:
+            _start_pending_detection(live)
+        except ValueError:
+            logging.getLogger(__name__).warning("dropped undecodable pending upload")
 
 
 def _detect_and_bake(
