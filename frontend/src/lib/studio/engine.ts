@@ -153,6 +153,10 @@ export class StudioEngine {
       syncValues.set(p.slot, sv);
       for (const o of onsets) {
         this.pendingOnsets.push(o);
+        // Mimicry only on the interaction features: across all 20 AUs, "same
+        // AU in someone else within 1 s" happens by coincidence constantly
+        // (21 events in 18 s on a recorded dyad), which over-claims mimicry.
+        if (!this.interaction.features.includes(o.feature)) continue;
         for (const e of this.mimicry.onset(p.slot, o.feature, t)) {
           this.pendingMimicry.push({ leader: e.leader, follower: e.follower, feature: e.feature, latency: e.latency });
         }
