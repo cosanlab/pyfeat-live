@@ -18,31 +18,14 @@
   import PoseCube from '../lib/components/PoseCube.svelte';
   import OverlayCanvas from '../lib/components/OverlayCanvas.svelte';
   import { placeMetaStack } from '../lib/overlay/metaStack';
-  import { FrameCache } from '../lib/overlay/frameCache';
+  import { LiveCapture } from '../lib/webrtc/liveCapture.svelte';
+  import { DET_BUDGET, CAP_W, CAP_H, defaultLiveConfig } from '../lib/webrtc/liveDefaults';
 
   type Props = { onSwitchView?: (v: View, sessionId?: string) => void };
   let { onSwitchView }: Props = $props();
 
-  // Detection upload budget: the longest edge (px) we downscale a captured
-  // frame to before sending it for detection. The camera's native ASPECT
-  // RATIO is always preserved — everything downstream (overlay coord space,
-  // stage aspect, meta panels) derives from the actual frame dims the
-  // backend echoes back, so the app adapts to any camera/resolution.
-  const DET_BUDGET = 640;
-  // CAPTURE resolution — a *preference* we request from the camera; the
-  // camera reports its real videoWidth/videoHeight, which is what we use.
-  const CAP_W = 1280, CAP_H = 720;
 
-  let config: LiveConfigure = $state({
-    detector_type: 'Detectorv2',
-    face_model: 'retinaface',
-    landmark_model: 'mp_facemesh_v2',
-    au_model: 'mp_blendshapes',
-    emotion_model: 'resmasknet',
-    identity_model: null,
-    gaze_model: 'mp_iris (built-in)',
-    device: 'mps',
-  });
+  let config: LiveConfigure = $state(defaultLiveConfig());
 
   let compute: ComputeInfo | null = $state(null);
   let detectorCaps: DetectorCapabilities | null = $state(null);
@@ -92,18 +75,29 @@
   // Overlay static data (edge sets + AU→dlib68 mapping), fetched once.
   let overlayEdges = $state<OverlayEdgeSets | null>(null);
   let mpToDlib68 = $state<number[] | null>(null);
-  // Frame cache: keeps recently-captured bitmaps keyed by frame id so the
-  // display can paint the exact frame a detection ran on (lock-to-detection).
-  // Sized to cover slow detectors (MPDetector / Detectorv1 run
-  // ~100-250ms/detection): the in-flight window is
-  // ceil(detection_latency ÷ capture_interval) ≈ 8 frames at 250ms latency
-  // with the ~33ms capture cap below, so 16 keeps 2x headroom while capping
-  // the cache at ~60MB of 720p bitmaps instead of ~150MB. Too small and the
-  // detected frame is evicted before its result returns, freezing the video
-  // while the overlay (coords only) keeps moving.
-  const frameCache = new FrameCache(16);
-  let nextFrameId = 0;
-  let lastPaintedId = -1;
+  // Capture → detect loop (frame cache, lock-to-detection pairing, fps) lives
+  // in a shared controller so the Studio tab runs the identical hot path.
+  // We only paint here: the controller hands us the exact frame detection ran
+  // on, which must be drawn synchronously inside onResult.
+  const capture = new LiveCapture({
+    getVideo: () => sourceVideo,
+    detBudget: DET_BUDGET,
+    isRecording: () => isRecording,
+    isActive: () => isStreaming && !isPaused,
+    onError: (msg) => { apiError = msg; },
+    onResult: (r) => {
+      if (r.bitmap && displayCanvas) {
+        if (displayCanvas.width !== r.bitmap.width) displayCanvas.width = r.bitmap.width;
+        if (displayCanvas.height !== r.bitmap.height) displayCanvas.height = r.bitmap.height;
+        const dctx = displayCanvas.getContext('2d')!;
+        dctx.setTransform(1, 0, 0, 1, 0, 0);
+        dctx.drawImage(r.bitmap, 0, 0);
+      }
+      liveFaces = r.faces;
+      frameW = r.frame[0];
+      frameH = r.frame[1];
+    },
+  });
 
   // Capture the currently displayed frame and download it as a PNG.
   function captureFrame() {
@@ -131,19 +125,10 @@
 
   let sourceVideo: HTMLVideoElement | null = $state(null);
   let displayCanvas: HTMLCanvasElement | null = $state(null);
-  let captureCanvas: HTMLCanvasElement | null = null;
-  // Small canvas used to encode a detection-resolution JPEG for upload when NOT
-  // recording. Detection runs at the DET_BUDGET-capped (aspect-preserved) size,
-  // so uploading the full capture res just wastes a big main-thread JPEG encode
-  // each frame; the crisp display
-  // uses the cached full-res bitmap regardless. When recording, we upload full
-  // res so the recorder bakes onto a high-res frame.
-  let uploadCanvas: HTMLCanvasElement | null = null;
 
   let isStreaming = $state(false);
   let isPaused = $state(false);
   let isRecording = $state(false);
-  let loopAbort: AbortController | null = null;
 
   // "Recording saved" toast: session id captured from /recording/stop.
   let savedSessionId: string | null = $state(null);
@@ -154,10 +139,8 @@
     savedToastTimer = setTimeout(() => (savedSessionId = null), 10_000);
   }
 
-  let fps = $state(0);
-  const fpsWindow: number[] = [];
-  let lastGeneration = -1;
-  let frameIndex = $state(0);
+  const fps = $derived(capture.fps);
+  const frameIndex = $derived(capture.frameIndex);
 
   // Landmark/rect coords arrive in the SOURCE (uploaded) frame space — the
   // backend scales detector coords back to the uploaded resolution and reports
@@ -288,8 +271,7 @@
     }
     isPaused = false;
     isStreaming = true;
-    loopAbort = new AbortController();
-    runCaptureLoop(loopAbort.signal);
+    capture.start();
   }
 
   let streamingDeviceId: string | null = null;
@@ -308,139 +290,8 @@
     })();
   });
 
-  // Sequential capture loop: grab → cache bitmap → JPEG-encode → POST →
-  // paint cached frame + update liveFaces. The next capture starts only
-  // after the previous response returns, so display rate tracks round-trip.
-  async function runCaptureLoop(signal: AbortSignal) {
-    if (!captureCanvas) captureCanvas = document.createElement('canvas');
-    // Cap capture at ~30fps. The upload response returns the latest cached
-    // detection immediately, so without a cap the loop spins far faster than
-    // detection and floods the frame cache, evicting frames a slow detector
-    // still needs. Detection is always the real ceiling, so this costs no fps.
-    const MIN_CAPTURE_MS = 33;
-    let lastCaptureAt = 0;
-
-    while (!signal.aborted && isStreaming && !isPaused) {
-      if (!sourceVideo || sourceVideo.readyState < 2) {
-        await new Promise((r) => setTimeout(r, 33));
-        continue;
-      }
-      const sinceLast = performance.now() - lastCaptureAt;
-      if (sinceLast < MIN_CAPTURE_MS) {
-        await new Promise((r) => setTimeout(r, MIN_CAPTURE_MS - sinceLast));
-        if (signal.aborted) return;
-      }
-      lastCaptureAt = performance.now();
-      const profile = (window as any).__pyfeatProfile === true;
-      const t0 = profile ? performance.now() : 0;
-
-      // 1. Grab current frame from <video> at native resolution.
-      const sW = sourceVideo.videoWidth, sH = sourceVideo.videoHeight;
-      if (captureCanvas.width !== sW) captureCanvas.width = sW;
-      if (captureCanvas.height !== sH) captureCanvas.height = sH;
-      const ctx = captureCanvas.getContext('2d')!;
-      ctx.drawImage(sourceVideo, 0, 0, sW, sH);
-      const tDraw = profile ? performance.now() : 0;
-
-      // 2. Cache this frame as a bitmap, tagged with a frame id.
-      const id = nextFrameId++;
-      const bmp = await createImageBitmap(captureCanvas!);
-      frameCache.put(id, bmp);
-
-      // 3. JPEG-encode for upload. Detection only needs a budget-sized frame, so
-      // when NOT recording encode a downscaled copy — a full-res JPEG encode is
-      // the dominant per-frame main-thread cost and pure waste here. When
-      // recording, encode full res so the recorder bakes onto a high-res frame.
-      // CRITICAL: downscale PRESERVING the camera's aspect ratio (fit the longest
-      // edge to DET_BUDGET). The old code forced a fixed 640×360, which squished
-      // any non-16:9 camera before detection — py-feat then fit a correct mesh to
-      // a distorted face, and it no longer lined up with the (true-aspect) video.
-      // q=0.92: lower DCT noise → less bbox jitter.
-      let encodeCanvas = captureCanvas!;
-      if (!isRecording) {
-        const s = Math.min(1, DET_BUDGET / Math.max(sW, sH));
-        const dW = Math.max(1, Math.round(sW * s));
-        const dH = Math.max(1, Math.round(sH * s));
-        if (!uploadCanvas) uploadCanvas = document.createElement('canvas');
-        if (uploadCanvas.width !== dW) uploadCanvas.width = dW;
-        if (uploadCanvas.height !== dH) uploadCanvas.height = dH;
-        uploadCanvas.getContext('2d')!.drawImage(captureCanvas!, 0, 0, dW, dH);
-        encodeCanvas = uploadCanvas;
-      }
-      // SYNCHRONOUS toDataURL (~3ms) instead of toBlob, which stalls ~1s while a webcam
-      // MediaStream is active (Chromium async-task starvation). Decode base64 -> Blob inline.
-      const dataURL = encodeCanvas.toDataURL('image/jpeg', 0.92);
-      const b64 = atob(dataURL.slice(dataURL.indexOf(',') + 1));
-      const arr = new Uint8Array(b64.length);
-      for (let i = 0; i < b64.length; i++) arr[i] = b64.charCodeAt(i);
-      const blob = new Blob([arr], { type: 'image/jpeg' });
-      if (signal.aborted) return;
-      const tEnc = profile ? performance.now() : 0;
-
-      // 4. Round-trip to backend; receive JSON face data.
-      let result;
-      try {
-        result = await liveApi.uploadFrame(blob, id);
-        apiError = null;
-      } catch (e: any) {
-        if (signal.aborted) return;
-        apiError = `Frame upload failed: ${(e as Error).message}`;
-        await new Promise((r) => setTimeout(r, 250));
-        continue;
-      }
-      const tNet = profile ? performance.now() : 0;
-
-      // Stop may have fired DURING the upload await. Without this guard the
-      // resolving response would re-paint and re-set liveFaces AFTER
-      // stopStream() already cleared them, leaving a frozen facebox/mesh on a
-      // stopped (camera-off) stage.
-      if (signal.aborted) return;
-
-      // 5. Paint the cached frame that detection ran on (lock-to-detection).
-      const fid = result.id;
-      if (fid != null && fid > lastPaintedId) {
-        const frame = frameCache.get(fid);
-        if (frame && displayCanvas) {
-          if (displayCanvas.width !== frame.width) displayCanvas.width = frame.width;
-          if (displayCanvas.height !== frame.height) displayCanvas.height = frame.height;
-          const dctx = displayCanvas.getContext('2d')!;
-          dctx.setTransform(1, 0, 0, 1, 0, 0);
-          dctx.drawImage(frame, 0, 0);
-        }
-        liveFaces = result.faces;
-        frameW = result.frame[0];
-        frameH = result.frame[1];
-        lastPaintedId = fid;
-        frameCache.evictBelow(fid);
-        if (result.generation !== lastGeneration) {
-          lastGeneration = result.generation;
-          fpsWindow.push(performance.now());
-          frameIndex += 1;
-        }
-      }
-      const tBlit = profile ? performance.now() : 0;
-
-      // FPS: trim window to last 1 second, compute rate.
-      const now = performance.now();
-      while (fpsWindow.length > 0 && fpsWindow[0]! < now - 1000) fpsWindow.shift();
-      fps = fpsWindow.length;
-
-      if (profile) {
-        console.log(
-          `frame total=${(tBlit - t0).toFixed(1)}ms ` +
-          `draw=${(tDraw - t0).toFixed(1)} ` +
-          `jpegEncode=${(tEnc - tDraw).toFixed(1)} ` +
-          `net=${(tNet - tEnc).toFixed(1)} ` +
-          `blit=${(tBlit - tNet).toFixed(1)} ` +
-          `blobBytes=${blob.size}`,
-        );
-      }
-    }
-  }
-
   function stopLoop() {
-    loopAbort?.abort();
-    loopAbort = null;
+    capture.stop();
   }
 
   async function stopStream() {
@@ -453,10 +304,9 @@
     }
     isStreaming = false;
     isPaused = false;
-    frameCache.clear();
-    liveFaces = [];
-    lastPaintedId = -1;
     stopLoop();
+    capture.reset();
+    liveFaces = [];
     stopCamera();
     if (sourceVideo) sourceVideo.srcObject = null;
     if (displayCanvas) {
@@ -464,10 +314,6 @@
       dctx.setTransform(1, 0, 0, 1, 0, 0);
       dctx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
     }
-    fps = 0;
-    fpsWindow.length = 0;
-    lastGeneration = -1;
-    frameIndex = 0;
   }
 
   function pauseStream() {
@@ -477,8 +323,7 @@
       stopLoop();
     } else {
       isPaused = false;
-      loopAbort = new AbortController();
-      runCaptureLoop(loopAbort.signal);
+      capture.start();
     }
   }
 

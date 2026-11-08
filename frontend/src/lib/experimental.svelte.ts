@@ -10,6 +10,7 @@ const STORAGE_KEY = 'pyfeat:experimental';
 export const FLAGS = [
   { id: 'generateLive', label: 'Generate · Live mode', desc: 'Webcam → live edited video' },
   { id: 'generateImage', label: 'Generate · Image mode', desc: 'Drop an image → edit' },
+  { id: 'studio', label: 'Studio', desc: 'Expressions → sound & visuals (live or replay)' },
 ] as const;
 
 export type FlagId = (typeof FLAGS)[number]['id'];

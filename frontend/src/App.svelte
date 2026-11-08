@@ -8,6 +8,8 @@
   import Generate from './routes/Generate.svelte';
   import Analyze from './routes/Analyze.svelte';
   import Viewer from './routes/Viewer.svelte';
+  import Studio from './routes/Studio.svelte';
+  import { experimental } from './lib/experimental.svelte';
   import LogsDrawer from './lib/components/LogsDrawer.svelte';
   import type { View } from './lib/types';
 
@@ -18,6 +20,12 @@
   // "Open in Viewer" and Live's recording-saved toast; cleared on manual
   // tab navigation so it doesn't go stale).
   let pendingSession: string | null = $state(null);
+
+  // Turning the Studio flag off while on Studio returns to Live (mirrors
+  // Generate's handling of its experimental sub-modes).
+  $effect(() => {
+    if (view === 'studio' && !experimental.studio) view = 'live';
+  });
 
   onMount(() => {
     // The native "Py-feat → Settings…" menu item (Rust) emits this. Tauri only;
@@ -42,6 +50,8 @@
         <Analyze onSwitchView={(v, sid) => { pendingSession = sid ?? null; view = v; }} />
       {:else if view === 'viewer'}
         <Viewer initialSessionId={pendingSession} />
+      {:else if view === 'studio'}
+        <Studio />
       {/if}
     </main>
     <!-- Logs drawer lives at the app level (flex sibling of the view) so the

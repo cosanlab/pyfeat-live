@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { sessionsApi, identitiesApi, annotationsApi, systemApi } from '../lib/api';
+  import { parseFexCsv, normalizeLegacyFex, frameTimesByNumber, type FexRow } from '../lib/fex';
   import type { AuTable, OverlayEdgeSets } from '../lib/api';
   import type {
     SessionSummary, SessionDetail, Identity, IdentityAssignment, Annotation, AnnotationKind,
@@ -344,41 +345,22 @@
 
       // Fex CSV: a failed fetch leaves fexRows empty so the Viewer shows the
       // video without overlays rather than stranding a half-loaded session.
-      let rows: Record<string, number | string | null>[] = [];
+      let rows: FexRow[] = [];
       try {
         rows = parseFexCsv(await csvPromise);
       } catch (e) {
         console.warn(`failed to load fex CSV for session ${id}:`, e);
       }
       if (tok !== selectToken) return;
-      fexRows = rows;
-
-      // Recovery for legacy sessions recorded with the pre-fix recorder
-      // that emitted frame=0 for every row and no face_idx column.
-      const frameAllZero = fexRows.length > 1 && fexRows.every(
-        r => !r.frame || Number(r.frame) === 0,
-      );
-      if (frameAllZero) {
-        fexRows.forEach((r, i) => { r.frame = i; });
-      }
-      if (fexRows.length > 0 && !('face_idx' in fexRows[0])) {
-        fexRows.forEach(r => { r.face_idx = 0; });
-      }
+      // Legacy-session recovery (all-zero frame column, missing face_idx).
+      fexRows = normalizeLegacyFex(rows);
 
       // Map each fex frame to the video's REAL presentation time. Drives the
       // by-time overlay⇄video mapping (variable-rate live recordings).
       let ft: number[] = [];
       try {
         const { times } = await timesPromise;
-        const uniq = [...new Set(fexRows.map(r => Number(r.frame)))]
-          .filter(n => Number.isFinite(n) && n >= 0).sort((a, b) => a - b);
-        if (uniq.length > 0 && times.length > 0) {
-          // Index by frame NUMBER, not position: a positional zip misaligns
-          // the overlay when fex frames aren't contiguous.
-          const arr: number[] = [];
-          for (const fn of uniq) if (fn < times.length) arr[fn] = times[fn];
-          ft = arr;
-        }
+        ft = frameTimesByNumber(fexRows, times);
       } catch (e) {
         console.warn(`frame-times unavailable for ${id}; using fps mapping`, e);
       }
@@ -391,23 +373,6 @@
     } finally {
       if (tok === selectToken) sessionLoading = false;
     }
-  }
-
-  function parseFexCsv(text: string): Record<string, number | string | null>[] {
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) return [];
-    const headers = lines[0].split(',');
-    return lines.slice(1).map(line => {
-      const cells = line.split(',');
-      const row: Record<string, number | string | null> = {};
-      headers.forEach((h, i) => {
-        const cell = cells[i];
-        if (cell === undefined || cell === '') { row[h] = null; return; }
-        const n = Number(cell);
-        row[h] = Number.isNaN(n) ? cell : n;
-      });
-      return row;
-    });
   }
 
   function onSeek(f: number) {
