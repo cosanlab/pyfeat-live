@@ -155,7 +155,7 @@ Tests (synthetic):
 
 Rows arrive at 4.5–25 Hz irregularly, per source → **resample each slot's smoothed feature onto a fixed 10 Hz grid** (linear interp, hold-last up to 0.5 s, gap beyond that = NaN) before any correlation.
 
-- `windowedSync(a, b, windowSec = 3)` → Pearson r over the last window; NaN if < 60% valid samples or either σ < floor.
+- `windowedSync(a, b, windowSec = 8)` → Pearson r over the last window; NaN if < 60% valid samples or either σ < floor. **Window chosen empirically (Task 5):** against a time-shifted null on the four dyads, 3 s and 6 s windows were indistinguishable from chance (|r| p90 real 0.79/0.64 vs null 0.75/0.61); at 10 s real coupling separated (23% of windows above the null p90 of 0.43). Pairs expose `strength = max(0, (r − 0.5)/(1 − 0.5))` (synchrony beyond chance) and lead/lag is reported only for interior peaks with r above the same chance level.
 - `leadLag(a, b, maxLagSec = 1.5)` → `{lagSec, r}` at the peak of the cross-correlation over the last 6 s; positive lag = A leads.
 - `MimicryTracker`: onset in A followed by same-feature onset in B within 1 s → `{leader: A, follower: B, latency}` event.
 - `InteractionState.update(t, slots)` computes all pairs (n ≤ 6 → ≤ 15 pairs; cheap at 10 Hz) and exposes `pairs[]` + per-voice `consonance` = mean of max(0, sync) with others.
@@ -199,7 +199,7 @@ Tests:
 - Per slot `Voice`: `OscillatorNode`s for lead (triangle) / bell (sine + short FM) / low (sine sub) / perc (filtered noise burst) → `BiquadFilter` (lowpass, `cutoff` param) → `GainNode` (mixer volume, mute/solo) → `StereoPannerNode` (pan = `2x − 1`, smoothed) → master.
 - **Never set AudioParams directly from detection callbacks**: use `setTargetAtTime(v, now, 0.05)` for continuous params.
 - Notes: `scale.ts` → `degreeToFreq(scale, root, degree, octave)`; strength picks degree. If `patch.quantize`, schedule at next 16th note of `patch.bpm` via `currentTime` (hides 50–150 ms detection latency); else play now + 10 ms.
-- **Synchrony → harmony**: each slot has a base degree offset (slot n → 0, 2, 4 … ). When a slot plays, its interval relative to the most recently sounding other voice is chosen from consonant {unison, 3rd, 5th, octave} with probability = that pair's `consonance`, otherwise from {2nd, tritone, 7th}; plus detune `±(1 − consonance) × 25` cents on held tones. In-sync pairs audibly lock; out-of-sync drift.
+- **Synchrony → harmony** (revised after Task 5's real-data check): `consonance` is *beyond-chance* synchrony and is 0 most of the time on real dyads, so 0 must sound **neutral**, never sour. Each slot plays freely on the patch scale from its base degree offset (slot n → 0, 2, 4 …). As a pair's `consonance` rises, the follower's next note is increasingly snapped to a consonant interval {unison, 5th, octave} of the most recently sounding other voice, and their held tones' detune converges to 0 — in-sync people audibly lock together; unsynchronized people simply sound independent.
 - Voice per slot assigned round-robin timbre: slot 0 lead-pluck, 1 bell, 2 soft pad, 3 marimba-ish, … so each person is audibly distinct (and matches their colour in the UI).
 - Tests (`scale.test.ts`): degree→frequency for A4 root, pentatonic wraps octaves correctly, quantize helper rounds to the next 16th boundary.
 - [ ] `pnpm test`, `pnpm check`. Commit: `feat(studio): web audio engine with scale, quantize and sync harmony`.
