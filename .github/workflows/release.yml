@@ -43,14 +43,14 @@ jobs:
       matrix:
         include:
           # macOS arm64 (Apple Silicon) — the only supported target.
-          # macos-14 GHA runners are themselves Apple Silicon, so this is
+          # macos-15 GHA runners are themselves Apple Silicon, so this is
           # a native host build (no --target), which keeps bundle output
           # in the default target/release/bundle path. That matters for
           # the updater: tauri-action only finds the .app.tar.gz.sig and
           # emits latest.json when artifacts are at the un-prefixed path
           # (an explicit --target nests them under target/<triple>/ and
           # the signature lookup misses them → "Signature not found").
-          - platform: macos-14
+          - platform: macos-15
             environment: macos-release
             target: aarch64-apple-darwin
             uv_asset: uv-aarch64-apple-darwin.tar.gz
@@ -286,7 +286,7 @@ jobs:
           # APPLE_API_KEY_PATH is exported by the previous step into GITHUB_ENV
         with:
           projectPath: tauri
-          # No --target: build natively for the host (macos-14 = Apple
+          # No --target: build natively for the host (macos-15 = Apple
           # Silicon). This keeps bundle output at target/release/bundle so
           # tauri-action finds the .app.tar.gz.sig and emits latest.json
           # for the auto-updater. An explicit --target nests artifacts

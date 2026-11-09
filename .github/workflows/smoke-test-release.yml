@@ -81,7 +81,7 @@ jobs:
   macos:
     name: first run on macOS arm64
     needs: resolve
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     env:
       TAG: ${{ needs.resolve.outputs.tag }}
