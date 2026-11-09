@@ -1,7 +1,7 @@
 // frontend/src/lib/studio/features.ts
 // The features a person can pick in the mapping panel, with plain-language
 // names. Keys are strings ('aus:AU12', 'va:valence', 'emotions:happiness',
-// 'sync:AU12', 'sync:*') so they can sit directly in a <select>.
+// 'pose:nod', 'sync:AU12', 'sync:*') so they can sit directly in a <select>.
 
 import type { FeatureGroup, SourceRef, Transform } from './types';
 
@@ -52,6 +52,14 @@ export const GAZE_LABELS: Record<string, string> = {
   vertical: 'Eyes up ↔ down',
 };
 
+/** Head pose, screen-relative (mirror-corrected in Live like position). */
+export const POSE_LABELS: Record<string, string> = {
+  movement: 'Head movement',
+  turn: 'Head turn left ↔ right',
+  nod: 'Head up ↔ down',
+  tilt: 'Head tilt (ear toward shoulder)',
+};
+
 /** Expressions whose pairwise synchrony is tracked (see engine). */
 export const SYNC_LABELS: Record<string, string> = {
   '*': 'Any expression',
@@ -74,10 +82,17 @@ export interface FeatureOptionGroup {
 const opts = (group: FeatureGroup | 'sync', labels: Record<string, string>): FeatureOption[] =>
   Object.entries(labels).map(([name, label]) => ({ key: `${group}:${name}`, label }));
 
-/** Sources that can trigger notes: facial movements (they have onsets). */
+/** Sources that can trigger notes: anything with onsets (a clear rise above
+ *  the person's own recent level). */
 export const EVENT_SOURCES: FeatureOptionGroup[] = [
   { label: 'Facial movements', options: opts('aus', AU_LABELS) },
+  { label: 'Emotions', options: Object.entries(EMOTION_LABELS).map(([name, label]) => ({ key: `emotions:${name}`, label: `${label.replace(/ \(.*\)$/, '')} rises` })) },
+  { label: 'Overall', options: [
+    { key: 'va:valence', label: 'Mood lifts' },
+    { key: 'va:arousal', label: 'Energy rises' },
+  ] },
   { label: 'Eyes', options: [{ key: 'gaze:shift', label: 'Glance (eyes jump)' }] },
+  { label: 'Head', options: [{ key: 'pose:movement', label: 'Head moves (nod, turn)' }] },
 ];
 
 /** Sources for continuous controls. */
@@ -85,6 +100,7 @@ export const CONTINUOUS_SOURCES: FeatureOptionGroup[] = [
   { label: 'Overall', options: opts('va', VA_LABELS) },
   { label: 'Emotions', options: opts('emotions', EMOTION_LABELS) },
   { label: 'Eyes', options: opts('gaze', GAZE_LABELS) },
+  { label: 'Head', options: opts('pose', POSE_LABELS) },
   { label: 'Facial movements', options: opts('aus', AU_LABELS) },
 ];
 
@@ -121,11 +137,19 @@ export function continuousTransform(key: string): Transform {
     if (name === 'horizontal') return { smooth: 1.0, min: -0.5, max: 0.5 };
     return { smooth: 1.0, min: -0.35, max: 0.35 };
   }
+  if (group === 'pose') {
+    if (name === 'movement') return { baseline: true, min: 0, max: 3 };
+    // Up/down relative to the person's resting pitch: camera height alone
+    // shifts everyone's pitch by tens of degrees.
+    if (name === 'nod') return { baseline: true, min: -2.5, max: 2.5 };
+    if (name === 'turn') return { smooth: 1.0, min: -0.6, max: 0.6 };
+    return { smooth: 1.0, min: -0.35, max: 0.35 };
+  }
   return { smooth: 1.0, min: 0, max: 0.8, curve: 0.7 };
 }
 
 export function labelFor(key: string): string {
-  for (const g of [...CONTINUOUS_SOURCES, ...SYNC_SOURCES]) {
+  for (const g of [...CONTINUOUS_SOURCES, ...EVENT_SOURCES, ...SYNC_SOURCES]) {
     const o = g.options.find(x => x.key === key);
     if (o) return o.label;
   }

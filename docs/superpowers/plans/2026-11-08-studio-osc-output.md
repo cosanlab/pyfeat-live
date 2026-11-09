@@ -30,9 +30,13 @@ The prefix defaults to `/pyfeat` and can be changed. `{n}` is the person number:
 | `/pyfeat/person/{n}/gaze/x`, `…/gaze/y` | f | Eyes | Eye direction relative to the head: right+ / up+, −1..1 |
 | `/pyfeat/person/{n}/gaze/away` | f | Eyes | Radians off straight ahead |
 | `/pyfeat/person/{n}/gaze/movement` | f | Eyes | Eye-movement z (glances spike) |
+| `/pyfeat/person/{n}/head/turn`, `…/head/nod`, `…/head/tilt` | f | Head | Head direction in radians, screen-relative: turn right+, nod up+, tilt (top of head) right+; mirror-corrected in Live |
+| `/pyfeat/person/{n}/head/movement` | f | Head | Head-movement z (nods and turns spike) |
 | `/pyfeat/person/{n}/color` | f f f | Colour | The colour the art scenes paint this person (r, g, b 0..1), following the Colour from setting and palette |
 | `/pyfeat/person/{n}/onset/AU12` | f | Events | Fires on each expression onset; arg = strength |
 | `/pyfeat/person/{n}/glance` | f | Events | Fires on each glance; arg = strength |
+| `/pyfeat/person/{n}/headmove` | f | Events | Fires on each nod or turn; arg = strength |
+| `/pyfeat/person/{n}/onset/happiness`, `…/onset/valence`, `…/onset/arousal` | f | Events | Fires when an emotion, mood or energy rises clearly above the person's recent level |
 | `/pyfeat/sync` | f | Synchrony | Strongest pair synchrony right now, 0..1 |
 | `/pyfeat/sync/{a}/{b}` | f | Synchrony | Pair synchrony, a < b |
 | `/pyfeat/mimicry` | i i s f | Synchrony | Leader, follower, feature, latency (s) |

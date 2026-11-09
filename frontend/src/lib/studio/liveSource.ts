@@ -100,6 +100,7 @@ export class LiveSource implements FaceSource {
       const sig = signalsFromLiveFace(face);
       // Like x, gaze left/right follows what the viewer sees on the mirrored screen.
       if (sig.gaze && mirrored) sig.gaze = { x: -sig.gaze.x, y: sig.gaze.y };
+      if (sig.head && mirrored) sig.head = { turn: -sig.head.turn, nod: sig.head.nod, tilt: -sig.head.tilt };
       out.push({
         slot: `live-${n}`,
         label: `Person ${n + 1}`,

@@ -12,7 +12,7 @@ export const EMOTIONS = ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'su
 /** [x, y, w, h] in source-frame pixels. */
 export type Rect = [number, number, number, number];
 
-export type FaceSignals = Pick<SlotFace, 'aus' | 'emotions' | 'valence' | 'arousal' | 'pose' | 'gaze'>;
+export type FaceSignals = Pick<SlotFace, 'aus' | 'emotions' | 'valence' | 'arousal' | 'pose' | 'gaze' | 'head'>;
 
 /**
  * Gaze angles (radians, head-relative) → screen-direction components in the
@@ -24,6 +24,28 @@ export type FaceSignals = Pick<SlotFace, 'aus' | 'emotions' | 'valence' | 'arous
 export function gazeFromAngles(pitch: number | undefined, yaw: number | undefined): SlotFace['gaze'] {
   if (pitch === undefined || yaw === undefined) return undefined;
   return { x: -Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch) };
+}
+
+/**
+ * Head pose (pitch, roll, yaw radians) → screen-relative head direction in the
+ * SOURCE frame (not mirrored). Checked against the 68-point mesh on recorded
+ * Detectorv2 sessions: Yaw tracks the nose's offset from the eye midpoint
+ * (r = -0.96, + = toward image left = the subject's right) and Roll tracks the
+ * eye-line angle (r = -0.99, + = counter-clockwise on screen). Pitch + = up
+ * (weaker evidence, r = -0.2..-0.5 against nose height in the face), so the
+ * nod control works relative to each person's own resting pitch.
+ *
+ * The classic Detector (img2pose) reports a forward face as yaw ≈ ±π (see
+ * overlay drawPose's yawOffset); folding yaw into ±π/2 brings that back to 0
+ * and is a no-op for Detectorv2, whose mesh yaw is clipped to ±π/2.
+ */
+export function headFromPose(pose: [number, number, number] | undefined): SlotFace['head'] {
+  if (!pose) return undefined;
+  const [pitch, roll, yaw] = pose;
+  let y = Math.atan2(Math.sin(yaw), Math.cos(yaw));
+  if (y > Math.PI / 2) y -= Math.PI;
+  else if (y < -Math.PI / 2) y += Math.PI;
+  return { turn: -y, nod: pitch, tilt: -roll };
 }
 
 const num = (v: unknown): number | undefined =>
@@ -42,13 +64,16 @@ export function signalsFromFexRow(row: FexRow): FaceSignals {
     if (n !== undefined) emotions[e] = n;
   }
   const pitch = num(row.Pitch), roll = num(row.Roll), yaw = num(row.Yaw);
+  const pose: [number, number, number] | undefined =
+    pitch !== undefined && roll !== undefined && yaw !== undefined ? [pitch, roll, yaw] : undefined;
   return {
     aus,
     emotions: Object.keys(emotions).length ? emotions : undefined,
     valence: num(row.valence),
     arousal: num(row.arousal),
-    pose: pitch !== undefined && roll !== undefined && yaw !== undefined ? [pitch, roll, yaw] : undefined,
+    pose,
     gaze: gazeFromAngles(num(row.gaze_pitch), num(row.gaze_yaw)),
+    head: headFromPose(pose),
   };
 }
 
@@ -80,6 +105,7 @@ export function signalsFromLiveFace(face: Face): FaceSignals {
     arousal: num(face.valence_arousal?.arousal),
     pose,
     gaze: gazeFromAngles(num(face.gaze?.[0]), num(face.gaze?.[1])),
+    head: headFromPose(pose),
   };
 }
 

@@ -22,8 +22,8 @@
   import type { SessionSummary } from '../lib/types';
   import { cameraStore, refreshDevices } from '../lib/webrtc/useCamera.svelte';
   import { StudioEngine, type RosterEntry } from '../lib/studio/engine';
-  import { defaultPatch } from '../lib/studio/defaultPatch';
-  import { AudioEngine } from '../lib/studio/audio';
+  import { normalizePatch } from '../lib/studio/defaultPatch';
+  import { AudioEngine, KITS } from '../lib/studio/audio';
   import { ReplaySource } from '../lib/studio/replaySource';
   import { LiveSource } from '../lib/studio/liveSource';
   import { Facegram } from '../lib/studio/scenes/facegram';
@@ -31,8 +31,9 @@
   import { Aura } from '../lib/studio/scenes/aura';
   import { Currents } from '../lib/studio/scenes/currents';
   import { Horizon } from '../lib/studio/scenes/horizon';
+  import { Murmuration } from '../lib/studio/scenes/murmuration';
   import { DEFAULT_ART, normalizeArt, type ArtSettings } from '../lib/studio/art';
-  import type { Patch } from '../lib/studio/types';
+  import type { Patch, SoundKit, Voice } from '../lib/studio/types';
   import StudioMappings from '../lib/components/StudioMappings.svelte';
   import StudioArtSettings from '../lib/components/StudioArtSettings.svelte';
   import StudioCustomize, { type CustomizeTab } from '../lib/components/StudioCustomize.svelte';
@@ -43,11 +44,12 @@
   import StudioMixer from '../lib/components/StudioMixer.svelte';
 
   type SourceKind = 'session' | 'live';
-  type SceneId = 'aura' | 'currents' | 'horizon' | 'facegram' | 'orbs';
+  type SceneId = 'aura' | 'currents' | 'murmuration' | 'horizon' | 'facegram' | 'orbs';
   type SceneInfo = { id: SceneId; label: string; blurb: string };
   const ART_SCENES: SceneInfo[] = [
     { id: 'aura', label: 'Aura', blurb: 'Soft glows of colour, one per person, blending where they meet.' },
     { id: 'currents', label: 'Currents', blurb: 'Flowing threads that braid together as people fall into sync.' },
+    { id: 'murmuration', label: 'Murmuration', blurb: 'A flock per person. In sync, flocks fly as one; mimicry sends the follower after the leader.' },
     { id: 'horizon', label: 'Horizon', blurb: "A landscape whose sky, sun and sea follow the room's mood." },
   ];
   const ANALYSIS_SCENES: SceneInfo[] = [
@@ -68,13 +70,6 @@
       return {};
     }
   }
-  function validPatch(p: Patch | undefined): Patch {
-    const d = defaultPatch();
-    if (!p || !Array.isArray(p.mappings)) return d;
-    // Keep saved mappings only if they're the same set the panel knows.
-    const ids = new Set(p.mappings.map((m) => m.id));
-    return d.mappings.every((m) => ids.has(m.id)) ? { ...d, ...p } : d;
-  }
   const saved = loadSaved();
   const SPEEDS = [0.25, 0.5, 1, 2];
   /** Seconds of stored frames replayed silently after a seek to warm baselines. */
@@ -86,7 +81,7 @@
   let sceneId: SceneId = $state(saved.sceneId && ALL_SCENES.includes(saved.sceneId) ? saved.sceneId : 'aura');
   const sceneInfo = $derived([...ART_SCENES, ...ANALYSIS_SCENES].find((x) => x.id === sceneId));
   const isArtScene = $derived(ART_SCENES.some((x) => x.id === sceneId));
-  let patch: Patch = $state(validPatch(saved.patch));
+  let patch: Patch = $state(normalizePatch(saved.patch));
   let art: ArtSettings = $state(normalizeArt(saved.art));
   let customizeOpen = $state(false);
   let customizeTab: CustomizeTab = $state('look');
@@ -129,7 +124,7 @@
   /** Apply a preset (built in, saved, or pasted): each part is validated. */
   function applyPreset(p: StudioPreset) {
     if (p.sceneId && (ALL_SCENES as string[]).includes(p.sceneId)) sceneId = p.sceneId as SceneId;
-    if (p.patch) patch = validPatch(structuredClone(p.patch));
+    if (p.patch) patch = normalizePatch(structuredClone(p.patch));
     if (p.art) art = normalizeArt(structuredClone(p.art));
   }
   /** Plain copy of `art` for the render loop (no proxy reads at 60 Hz). */
@@ -225,7 +220,7 @@
   // Engine objects are plain (non-reactive) on purpose: they're class
   // instances mutated at detection rate, not UI state.
   const scenes: Record<SceneId, Scene> = {
-    aura: new Aura(), currents: new Currents(), horizon: new Horizon(),
+    aura: new Aura(), currents: new Currents(), murmuration: new Murmuration(), horizon: new Horizon(),
     facegram: new Facegram(), orbs: new MoodOrbs(),
   };
   let engine: StudioEngine | null = null;
@@ -354,6 +349,21 @@
     } catch (e: any) {
       error = `Audio failed to start: ${e?.message ?? e}`;
     }
+  }
+
+  // Customize → Sound → Voices: hear a voice without waiting for a face.
+  // A temporary centre-panned voice plays one note, then is released.
+  let previewTimer: ReturnType<typeof setTimeout> | null = null;
+  async function previewVoice(v: Voice) {
+    if (!soundOn) await toggleSound();
+    const a = audio;
+    if (!a) return;
+    a.ensurePerson('preview', 0);
+    a.setPan('preview', 0.5);
+    a.setParam('preview', 'cutoff', 0.7);
+    a.playNote('preview', v, 4);
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => { audio?.removePerson('preview'); previewTimer = null; }, 4000);
   }
 
   function togglePlay() {
@@ -589,6 +599,17 @@
         >
           {#if soundOn}<Volume2 size={12} /> Sound on{:else}<VolumeX size={12} /> Start sound{/if}
         </button>
+        <div class="mt-2">
+        <div class="grid grid-cols-3 gap-1 p-0.5 rounded-md bg-zinc-950 border border-zinc-800" role="radiogroup" aria-label="Sound set">
+          {#each Object.entries(KITS) as [id, k] (id)}
+            <button
+              role="radio" aria-checked={(patch.kit ?? 'classic') === id} title={k.blurb}
+              class="px-1.5 py-1 rounded text-[10.5px] {(patch.kit ?? 'classic') === id ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500 hover:text-zinc-300'}"
+              onclick={() => (patch.kit = id as SoundKit)}
+            >{k.label}</button>
+          {/each}
+        </div>
+        </div>
         {#if soundOn}
           <label class="mt-2 flex items-center gap-2 text-[10.5px] text-zinc-500">
             Volume
@@ -686,6 +707,7 @@
           onOscTest={() => oscLink.test()}
           onClose={() => (customizeOpen = false)}
           onApply={applyPreset}
+          onPreview={previewVoice}
         />
       {/if}
 

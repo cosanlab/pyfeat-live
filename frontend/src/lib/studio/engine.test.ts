@@ -8,7 +8,7 @@ function fakeAudio() {
   const rec = (fn: string) => (...args: unknown[]) => { calls.push({ fn, args }); return 0; };
   const sink = {
     ensurePerson: rec('ensurePerson'), removePerson: rec('removePerson'), playNote: rec('playNote'),
-    setParam: rec('setParam'), setPan: rec('setPan'), setMute: rec('setMute'), setSolo: rec('setSolo'),
+    setParam: rec('setParam'), resetParam: rec('resetParam'), setPan: rec('setPan'), setMute: rec('setMute'), setSolo: rec('setSolo'),
     setVolume: rec('setVolume'), setPatch: rec('setPatch'),
   } as unknown as AudioSink;
   return { sink, calls };
@@ -165,6 +165,67 @@ describe('StudioEngine', () => {
     // Glances stay out of the scenes' onset stream and the mixer meters.
     expect(eng.sceneState().onsets.some(o => o.feature.startsWith('gaze:'))).toBe(false);
     expect(eng.roster()[0].top.every(m => m.feature.startsWith('AU'))).toBe(true);
+  });
+
+  it('an emotion rising plays a note; a mood rise does too', () => {
+    const { sink, calls } = fakeAudio();
+    const patch = defaultPatch();
+    patch.mappings.find(m => m.id === 'smile-note')!.source = { kind: 'feature', group: 'emotions', name: 'happiness' };
+    patch.mappings.find(m => m.id === 'brow-raise-bell')!.source = { kind: 'feature', group: 'va', name: 'valence' };
+    const eng = new StudioEngine(patch, sink);
+    // Flickering, mostly-neutral face for 8 s, then happiness and mood rise and stay.
+    for (let i = 0; i <= 120; i++) {
+      const t = i / 10;
+      const flick = 0.02 * Math.sin(i * 1.3);
+      const happy = t < 8 ? 0.1 + flick : 0.75 + flick;
+      eng.ingest({ t, faces: [face('A', 0.5, 0.1, {
+        emotions: { happiness: happy, neutral: 1 - happy },
+        valence: t < 8 ? flick : 0.6 + flick,
+      })] });
+    }
+    const voices = calls.filter(c => c.fn === 'playNote').map(c => c.args[1]);
+    expect(voices.filter(v => v === 'lead')).toHaveLength(1);
+    expect(voices.filter(v => v === 'bell')).toHaveLength(1);
+    // Emotion and mood rises are sound-only, like glances.
+    expect(eng.sceneState().onsets.every(o => o.feature.startsWith('AU'))).toBe(true);
+  });
+
+  it('head movement plays a note, and head direction is a continuous source', () => {
+    const { sink, calls } = fakeAudio();
+    const patch = defaultPatch();
+    patch.mappings.find(m => m.id === 'smile-note')!.source = { kind: 'feature', group: 'pose', name: 'movement' };
+    const shimmer = patch.mappings.find(m => m.id === 'arousal-tremolo')!;
+    shimmer.source = { kind: 'feature', group: 'pose', name: 'turn' };
+    shimmer.transform = { min: -0.6, max: 0.6 };
+    const eng = new StudioEngine(patch, sink);
+    const outs: number[] = [];
+    eng.setOutputListener(f => outs.push(f.people[0].values['pose:turn']));
+    // Still head (1° jitter) for 8 s, then one quick turn to the right that holds.
+    for (let i = 0; i <= 100; i++) {
+      const t = i / 10;
+      const jitter = 0.017 * Math.sin(i * 1.7);
+      const turn = t < 8 ? jitter : 0.5 + jitter;
+      eng.ingest({ t, faces: [face('A', 0.5, 0.1, { head: { turn, nod: jitter, tilt: 0 } })] });
+    }
+    expect(calls.filter(c => c.fn === 'playNote' && c.args[1] === 'lead')).toHaveLength(1);
+    const tremolo = calls.filter(c => c.fn === 'setParam' && c.args[1] === 'tremolo').map(c => c.args[2] as number);
+    expect(tremolo.at(-1)!).toBeGreaterThan(0.85);
+    expect(outs.at(-1)!).toBeGreaterThan(0.45);
+    expect(eng.roster()[0].top.every(m => m.feature.startsWith('AU'))).toBe(true);
+  });
+
+  it('a control switched off goes back to neutral', () => {
+    const { sink, calls } = fakeAudio();
+    const patch = defaultPatch();
+    const eng = new StudioEngine(patch, sink);
+    frames(4).forEach(f => eng.ingest(f));
+    const p2 = structuredClone(patch);
+    p2.mappings.find(m => m.id === 'smile-brightness')!.enabled = false;
+    eng.setPatch(p2);
+    const resets = calls.filter(c => c.fn === 'resetParam').map(c => c.args);
+    expect(resets).toEqual([['A', 'cutoff'], ['B', 'cutoff']]);
+    eng.setPatch(structuredClone(p2)); // nothing newly undriven → no more resets
+    expect(calls.filter(c => c.fn === 'resetParam')).toHaveLength(2);
   });
 
   it('a face lost for a while does not count as an eye movement', () => {

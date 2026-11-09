@@ -11,9 +11,12 @@
   const MOTION_OPTIONS: FeatureOptionGroup[] = [
     { label: 'Overall', options: [
       { key: 'arousal', label: 'Energy (calm ↔ activated)' },
+      { key: 'valence', label: 'Mood (more when pleasant)' },
       { key: 'expressivity', label: 'Expressiveness (any movement)' },
     ] },
+    { label: 'Emotions', options: Object.entries(EMOTION_LABELS).map(([k, label]) => ({ key: `emotions:${k}`, label })) },
     { label: 'Eyes', options: [{ key: 'gaze:shift', label: 'Eye movement' }] },
+    { label: 'Head', options: [{ key: 'pose:movement', label: 'Head movement' }] },
     { label: 'Facial movements', options: Object.entries(AU_LABELS).map(([k, label]) => ({ key: `aus:${k}`, label })) },
   ];
   const changed = $derived(art.colorBy !== DEFAULT_ART.colorBy || art.motionBy !== DEFAULT_ART.motionBy);

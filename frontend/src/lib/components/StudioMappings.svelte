@@ -22,6 +22,8 @@
     { id: 'smile-brightness', label: 'Brightness', hint: 'opens up the tone', kind: 'continuous' },
     { id: 'arousal-tremolo', label: 'Shimmer', hint: 'adds a trembling pulse', kind: 'continuous' },
     { id: 'smile-sync-harmony', label: 'Harmony', hint: 'voices move into consonance when people are in sync on', kind: 'sync' },
+    { id: 'drone-level', label: 'Drone', hint: 'raises the background drone', kind: 'continuous' },
+    { id: 'drone-wobble', label: 'Wobble', hint: 'makes the background drone waver', kind: 'continuous' },
   ];
   const GROUPS: Record<RowKind, FeatureOptionGroup[]> = {
     event: EVENT_SOURCES, continuous: CONTINUOUS_SOURCES, sync: SYNC_SOURCES,

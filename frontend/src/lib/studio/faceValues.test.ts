@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gazeFromAngles, signalsFromFexRow, signalsFromLiveFace } from './faceValues';
+import { gazeFromAngles, headFromPose, signalsFromFexRow, signalsFromLiveFace } from './faceValues';
 import type { FexRow } from '../fex';
 
 describe('gaze from angles', () => {
@@ -15,5 +15,23 @@ describe('gaze from angles', () => {
     const live = signalsFromLiveFace({ face_idx: 0, gaze: [0.1, -0.2] });
     expect(signalsFromFexRow(row).gaze).toEqual(live.gaze);
     expect(signalsFromLiveFace({ face_idx: 0, gaze: [null, 0.1] }).gaze).toBeUndefined();
+  });
+});
+
+describe('head from pose', () => {
+  it('turn is toward image right (−Yaw), tilt is −Roll, nod is Pitch', () => {
+    expect(headFromPose([0.1, 0.2, 0.3])).toEqual({ turn: -0.3, nod: 0.1, tilt: -0.2 });
+    expect(headFromPose(undefined)).toBeUndefined();
+  });
+
+  it("folds the classic detector's forward yaw (≈ ±π) back to 0", () => {
+    expect(headFromPose([0, 0, Math.PI - 0.2])!.turn).toBeCloseTo(0.2);
+    expect(headFromPose([0, 0, -Math.PI + 0.2])!.turn).toBeCloseTo(-0.2);
+  });
+
+  it('reads head pose from fex rows and live faces alike', () => {
+    const row = { Pitch: 0.1, Roll: -0.05, Yaw: 0.4 } as unknown as FexRow;
+    const live = signalsFromLiveFace({ face_idx: 0, pose: [0.1, -0.05, 0.4] });
+    expect(signalsFromFexRow(row).head).toEqual(live.head);
   });
 });

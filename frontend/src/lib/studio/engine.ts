@@ -7,14 +7,21 @@ import type { AudioEngine } from './audio';
 import { FACEGRAM_AUS } from './defaultPatch';
 import { InteractionState, MimicryTracker } from './interaction';
 import type { MimicryView, OnsetView, PairView, SceneState, SlotView } from './scenes/scene';
-import { FeatureChannel } from './signals';
-import type { FaceSource, Mapping, Patch, SlotFace, StudioFrame } from './types';
+import { FeatureChannel, type FeatureChannelOptions } from './signals';
+import type { AudioParam, FaceSource, Mapping, Patch, SlotFace, StudioFrame } from './types';
 
 /** The audio calls the engine makes (AudioEngine satisfies it; tests fake it). */
 export type AudioSink = Pick<
   AudioEngine,
-  'ensurePerson' | 'removePerson' | 'playNote' | 'setParam' | 'setPan' | 'setMute' | 'setSolo' | 'setVolume' | 'setPatch'
+  'ensurePerson' | 'removePerson' | 'playNote' | 'setParam' | 'resetParam' | 'setPan' | 'setMute' | 'setSolo' | 'setVolume' | 'setPatch'
 >;
+
+/** Audio params some enabled mapping drives. */
+function drivenParams(patch: Patch): Set<AudioParam> {
+  const out = new Set<AudioParam>();
+  for (const m of patch.mappings) if (m.enabled && m.dest.kind === 'param') out.add(m.dest.param);
+  return out;
+}
 
 const SYNC_FEATURES_DEFAULT = ['AU12', 'AU04', 'AU06'];
 /** Emotion probabilities flicker frame to frame; smooth them harder than AUs
@@ -29,10 +36,25 @@ const FORGET_SEC = 2.0;
 const GAZE_SHIFT_CUTOFF = 3.0;
 const GAZE_MAX_SPEED = 8;
 const GAZE_MAX_GAP = 0.6;
+/** Head movement: angular speed (rad/s) across turn, nod and tilt, handled
+ *  like eye movement. A brisk nod or turn is ~1-3 rad/s. */
+const HEAD_MAX_SPEED = 4;
+/** Emotion and mood channels also emit onsets ("happiness rises"). Their
+ *  values drift slowly with small flickers, so a rise has to clear a wider
+ *  noise floor and they can't re-fire within a second. */
+const EMOTION_CHANNEL: FeatureChannelOptions = { minCutoff: EMOTION_CUTOFF, sigmaFloor: 0.06, refractory: 1.0 };
+const MOOD_CHANNEL: FeatureChannelOptions = { sigmaFloor: 0.05, refractory: 1.0 };
 
-/** Channel key for a feature: AUs use their bare name, gaze is prefixed. */
-const channelKey = (group: string, name: string) => (group === 'gaze' ? `gaze:${name}` : name);
-const isGaze = (feature: string) => feature.startsWith('gaze:');
+/** Channel key for a feature (also the `feature` of its onsets): AUs and
+ *  valence/arousal use their bare name, the other groups are prefixed. */
+function channelKey(group: string, name: string): string {
+  if (group === 'gaze' || group === 'pose') return `${group}:${name}`;
+  if (group === 'emotions') return `emotion:${name}`;
+  return name;
+}
+/** Facial-movement (AU) features: the only ones the scenes' onset effects
+ *  (ripples, bursts, Facegram ticks) and the mixer meters are about. */
+const isExpression = (feature: string) => /^AU\d+$/.test(feature);
 
 interface Person {
   slot: string;
@@ -51,6 +73,8 @@ interface Person {
   emotionZ: Record<string, number>;
   /** Previous raw gaze, for eye-movement speed. */
   lastGaze?: { x: number; y: number; t: number };
+  /** Previous raw head direction, for head-movement speed. */
+  lastHead?: { turn: number; nod: number; tilt: number; t: number };
   energy: number;
   calibrating: boolean;
   muted: boolean;
@@ -127,6 +151,14 @@ export class StudioEngine {
    * rebuilt (it re-fills within its 8 s window).
    */
   setPatch(patch: Patch): void {
+    // A control nobody drives any more goes back to neutral rather than
+    // freezing at the last value it was sent.
+    const before = this.patch ? drivenParams(this.patch) : new Set<AudioParam>();
+    const after = drivenParams(patch);
+    for (const param of before) {
+      if (after.has(param)) continue;
+      for (const slot of this.people.keys()) this.audio?.resetParam(slot, param);
+    }
     this.patch = patch;
     const syncFeats = StudioEngine.syncFeatures(patch);
     const cur = this.interaction.features;
@@ -208,7 +240,7 @@ export class StudioEngine {
         slot: p.slot, label: p.label, color: this.colorOf(p),
         muted: p.muted, solo: p.solo, volume: p.volume, calibrating: p.calibrating,
         top: Object.entries(p.z)
-          .filter(([f, z]) => z > 0 && !isGaze(f))
+          .filter(([f, z]) => z > 0 && isExpression(f))
           .sort((a, b) => b[1] - a[1])
           .slice(0, 3)
           .map(([feature, z]) => ({ feature, z })),
@@ -238,9 +270,9 @@ export class StudioEngine {
       }
       if (this.outputCb) outOnsets.push(...onsets);
       for (const o of onsets) {
-        // Glances drive sound only: the scenes' onset effects (ripples,
-        // bursts, Facegram ticks) are about facial expressions.
-        if (isGaze(o.feature)) continue;
+        // Glances, head movements and emotion/mood rises drive sound and
+        // outputs only: the scenes' onset effects are about facial expressions.
+        if (!isExpression(o.feature)) continue;
         this.pendingOnsets.push(o);
         // Mimicry only on the interaction features: across all 20 AUs, "same
         // AU in someone else within 1 s" happens by coincidence constantly
@@ -296,9 +328,9 @@ export class StudioEngine {
     return p;
   }
 
-  private channel(p: Person, key: string, minCutoff?: number): FeatureChannel {
+  private channel(p: Person, key: string, opts: FeatureChannelOptions = {}): FeatureChannel {
     let c = p.channels.get(key);
-    if (!c) p.channels.set(key, (c = new FeatureChannel(minCutoff === undefined ? {} : { minCutoff })));
+    if (!c) p.channels.set(key, (c = new FeatureChannel(opts)));
     return c;
   }
 
@@ -320,9 +352,10 @@ export class StudioEngine {
     for (const k of ['valence', 'arousal'] as const) {
       const v = face[k];
       if (v === undefined) continue;
-      const o = this.channel(p, k).update(v, t);
+      const o = this.channel(p, k, MOOD_CHANNEL).update(v, t);
       p.values[k] = o.value;
       p[k] = o.value;
+      if (o.onset) onsets.push({ slot: p.slot, feature: k, t, strength: o.onset.strength });
     }
     // No valence/arousal model (e.g. Detectorv1): rough proxies so the
     // mood plane still moves.
@@ -334,30 +367,44 @@ export class StudioEngine {
     if (face.arousal === undefined) p.arousal = Math.max(-1, Math.min(1, p.energy / 2 - 0.5));
     if (face.emotions) {
       for (const [name, v] of Object.entries(face.emotions)) {
-        const o = this.channel(p, `emotion:${name}`, EMOTION_CUTOFF).update(v, t);
+        const key = `emotion:${name}`;
+        const o = this.channel(p, key, EMOTION_CHANNEL).update(v, t);
         p.emotions[name] = Math.max(0, o.value);
         p.emotionZ[name] = o.z;
+        if (o.onset) onsets.push({ slot: p.slot, feature: key, t, strength: o.onset.strength });
       }
     }
+    const put = (key: string, v: number, cutoff?: number) => {
+      const o = this.channel(p, key, cutoff === undefined ? {} : { minCutoff: cutoff }).update(v, t);
+      p.values[key] = o.value;
+      p.z[key] = o.z;
+      return o;
+    };
     const g = face.gaze;
     if (g) {
-      const put = (name: string, v: number, cutoff?: number) => {
-        const key = `gaze:${name}`;
-        const o = this.channel(p, key, cutoff).update(v, t);
-        p.values[key] = o.value;
-        p.z[key] = o.z;
-        return o;
-      };
-      put('horizontal', g.x);
-      put('vertical', g.y);
-      put('away', Math.asin(Math.min(1, Math.hypot(g.x, g.y))));
+      put('gaze:horizontal', g.x);
+      put('gaze:vertical', g.y);
+      put('gaze:away', Math.asin(Math.min(1, Math.hypot(g.x, g.y))));
       const last = p.lastGaze;
       if (last && t > last.t && t - last.t <= GAZE_MAX_GAP) {
         const speed = Math.min(GAZE_MAX_SPEED, Math.hypot(g.x - last.x, g.y - last.y) / (t - last.t));
-        const o = put('shift', speed, GAZE_SHIFT_CUTOFF);
+        const o = put('gaze:shift', speed, GAZE_SHIFT_CUTOFF);
         if (o.onset) onsets.push({ slot: p.slot, feature: 'gaze:shift', t, strength: o.onset.strength });
       }
       p.lastGaze = { x: g.x, y: g.y, t };
+    }
+    const h = face.head;
+    if (h) {
+      put('pose:turn', h.turn);
+      put('pose:nod', h.nod);
+      put('pose:tilt', h.tilt);
+      const last = p.lastHead;
+      if (last && t > last.t && t - last.t <= GAZE_MAX_GAP) {
+        const d = Math.hypot(h.turn - last.turn, h.nod - last.nod, h.tilt - last.tilt);
+        const o = put('pose:movement', Math.min(HEAD_MAX_SPEED, d / (t - last.t)), GAZE_SHIFT_CUTOFF);
+        if (o.onset) onsets.push({ slot: p.slot, feature: 'pose:movement', t, strength: o.onset.strength });
+      }
+      p.lastHead = { ...h, t };
     }
     return onsets;
   }
@@ -374,7 +421,7 @@ export class StudioEngine {
     const f = s.kind === 'feature' ? s : s.of;
     const name = channelKey(f.group, f.name);
     if (f.group === 'emotions') {
-      const v = m.transform.baseline ? p.emotionZ[name] : p.emotions[name];
+      const v = m.transform.baseline ? p.emotionZ[f.name] : p.emotions[f.name];
       return v === undefined ? null : v;
     }
     if (f.group === 'va') {
@@ -471,6 +518,7 @@ export class StudioEngine {
       p.emotions = {};
       p.emotionZ = {};
       p.lastGaze = undefined;
+      p.lastHead = undefined;
       p.energy = 0;
       p.calibrating = true;
     }

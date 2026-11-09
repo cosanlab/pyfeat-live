@@ -16,20 +16,20 @@ export interface StudioPreset {
 }
 
 const palette = (id: string) => PALETTES.find(p => p.id === id)!.palette;
-const withSound = (o: Partial<Pick<Patch, 'scale' | 'root' | 'bpm' | 'quantize'>>): Patch => ({ ...defaultPatch(), ...o });
+const withSound = (o: Partial<Pick<Patch, 'scale' | 'root' | 'bpm' | 'quantize' | 'kit'>>): Patch => ({ ...defaultPatch(), ...o });
 
 export const BUILTIN_PRESETS: StudioPreset[] = [
   {
     name: 'Meditative',
     sceneId: 'aura',
     art: { ...DEFAULT_ART, palette: palette('ocean'), speed: 0.5, smoothness: 2.2, spread: 1.15, grain: 0.6, bursts: false },
-    patch: withSound({ scale: 'pentatonic', root: 57, bpm: 68 }),
+    patch: withSound({ scale: 'pentatonic', root: 57, bpm: 68, kit: 'glass' }),
   },
   {
     name: 'Lively',
     sceneId: 'currents',
     art: { ...DEFAULT_ART, palette: palette('neon'), motionBy: 'expressivity', speed: 1.4, smoothness: 0.6, intensity: 1.25, trail: 0.45 },
-    patch: withSound({ scale: 'major', root: 60, bpm: 118 }),
+    patch: withSound({ scale: 'major', root: 60, bpm: 118, kit: 'pulse' }),
   },
   {
     name: 'Sunset',
