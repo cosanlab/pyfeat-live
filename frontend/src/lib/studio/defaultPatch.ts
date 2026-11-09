@@ -3,6 +3,8 @@
 // Phase 2's mapping-grid editor starts from (a copy of) this.
 
 import type { Mapping, Patch } from './types';
+import { defaultVoices, normalizeVoices } from './voices';
+import { isSoundKit } from './audio';
 
 const au = (name: string) => ({ kind: 'feature', group: 'aus', name }) as const;
 const va = (name: 'valence' | 'arousal') => ({ kind: 'feature', group: 'va', name }) as const;
@@ -26,6 +28,11 @@ const mappings: Mapping[] = [
   // Synchrony of smiles pulls voices toward consonant intervals.
   { id: 'smile-sync-harmony', source: { kind: 'sync', feature: 'AU12' }, transform: {},
     dest: { kind: 'param', param: 'harmony' }, enabled: true },
+  // The background drone, off by default: its level, and a chorus "wobble".
+  { id: 'drone-level', source: va('arousal'), transform: { smooth: 0.5, min: -0.3, max: 0.9 },
+    dest: { kind: 'param', param: 'gain' }, enabled: false },
+  { id: 'drone-wobble', source: { kind: 'feature', group: 'gaze', name: 'away' }, transform: { smooth: 1.0, min: 0.05, max: 0.5 },
+    dest: { kind: 'param', param: 'detune' }, enabled: false },
 
   // --- visuals ---------------------------------------------------------------
   { id: 'valence-hue', source: va('valence'), transform: { smooth: 0.5, min: -1, max: 1 },
@@ -43,6 +50,8 @@ export function defaultPatch(): Patch {
     root: 57, // A3
     bpm: 96,
     quantize: true,
+    kit: 'classic',
+    voices: defaultVoices(),
     mappings: structuredClone(mappings),
   };
 }
@@ -53,3 +62,34 @@ export const FACEGRAM_AUS = [
   'AU12', 'AU14', 'AU15', 'AU17', 'AU20', 'AU23', 'AU24', 'AU25', 'AU26',
   'AU28', 'AU43',
 ] as const;
+
+/**
+ * Validate a saved or pasted patch against the current defaults, row by row:
+ * a saved mapping is kept when its row still exists and has the same kind of
+ * destination; rows added since it was saved come in with their defaults.
+ * (Replacing the whole set whenever the row list changed used to wipe a
+ * person's mapping on every update that added a row.)
+ */
+export function normalizePatch(p: Partial<Patch> | null | undefined): Patch {
+  const d = defaultPatch();
+  if (!p || typeof p !== 'object') return d;
+  const saved = new Map((Array.isArray(p.mappings) ? p.mappings : []).filter(m => m && typeof m.id === 'string').map(m => [m.id, m]));
+  const mappings = d.mappings.map(dm => {
+    const m = saved.get(dm.id);
+    const ok = m && m.source && typeof m.source === 'object' && m.dest?.kind === dm.dest.kind &&
+      (dm.dest.kind !== 'note' || (m.dest.kind === 'note' && m.dest.voice === dm.dest.voice && Number.isFinite(m.dest.onsetThreshold))) &&
+      (dm.dest.kind !== 'param' || (m.dest.kind === 'param' && m.dest.param === dm.dest.param));
+    return ok ? { ...dm, ...m, transform: { ...(m.transform ?? {}) }, enabled: m.enabled !== false } : dm;
+  });
+  const n = (v: unknown, lo: number, hi: number, def: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : def);
+  return {
+    name: typeof p.name === 'string' ? p.name : d.name,
+    scale: p.scale === 'major' || p.scale === 'minor' || p.scale === 'pentatonic' ? p.scale : d.scale,
+    root: Math.round(n(p.root, 24, 96, d.root)),
+    bpm: Math.round(n(p.bpm, 40, 200, d.bpm)),
+    quantize: typeof p.quantize === 'boolean' ? p.quantize : d.quantize,
+    kit: isSoundKit(p.kit) ? p.kit : d.kit,
+    voices: normalizeVoices(p.voices),
+    mappings,
+  };
+}

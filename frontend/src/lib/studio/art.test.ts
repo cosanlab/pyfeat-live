@@ -54,6 +54,14 @@ describe('art colour', () => {
     expect(artDrive(s, { ...DEFAULT_ART, motionBy: 'aus:AU04' })).toBe(0);
   });
 
+  it('drive can follow mood, an emotion, or head movement', () => {
+    const s = slot({ valence: 0.1, emotions: { happiness: 0.4 }, z: { 'pose:movement': 1.5 } });
+    expect(artDrive(s, { ...DEFAULT_ART, motionBy: 'valence' })).toBeCloseTo(0.5);
+    expect(artDrive(s, { ...DEFAULT_ART, motionBy: 'emotions:happiness' })).toBeCloseTo(0.5);
+    expect(artDrive(s, { ...DEFAULT_ART, motionBy: 'emotions:anger' })).toBe(0);
+    expect(artDrive(s, { ...DEFAULT_ART, motionBy: 'pose:movement' })).toBeCloseTo(0.5);
+  });
+
   it('anchors: centre for one, edges for two, corners for four', () => {
     expect(anchorsFor(1)).toEqual([[0.5, 0.55]]);
     const two = anchorsFor(2);

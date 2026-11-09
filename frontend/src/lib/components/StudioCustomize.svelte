@@ -14,12 +14,15 @@
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import Send from '@lucide/svelte/icons/send';
+  import Play from '@lucide/svelte/icons/play';
   import {
     DEFAULT_ART, DEFAULT_MOOD, DEFAULT_PALETTE, DEFAULT_PERSON_COLORS, PALETTES, type ArtSettings,
   } from '../studio/art';
   import { EMOTION_LABELS, continuousTransform, sourceKey } from '../studio/features';
   import { BUILTIN_PRESETS, loadUserPresets, parsePreset, saveUserPresets, type StudioPreset } from '../studio/presets';
-  import type { Patch, ScaleName } from '../studio/types';
+  import type { Patch, ScaleName, SoundKit, Voice } from '../studio/types';
+  import { defaultVoices, DRUM_TYPES, voiceChanged, type DrumType, type Voices } from '../studio/voices';
+  import { KITS } from '../studio/audio';
   import { OSC_GROUP_LABELS, normalizePrefix, type OscGroup, type OscMsg, type OscSettings, type OscStats, type OscStatus } from '../studio/osc';
 
   type Props = {
@@ -37,10 +40,12 @@
     onOscTest: () => void;
     onClose: () => void;
     onApply: (p: StudioPreset) => void;
+    /** Play a sample note on a voice (starts sound if it's off). */
+    onPreview?: (voice: Voice) => void;
   };
   let {
     patch = $bindable(), art = $bindable(), osc = $bindable(), tab = $bindable('look'),
-    sceneId, isArtScene, oscStatus, oscError, oscStats, oscPeek, onOscTest, onClose, onApply,
+    sceneId, isArtScene, oscStatus, oscError, oscStats, oscPeek, onOscTest, onClose, onApply, onPreview,
   }: Props = $props();
 
   const TABS: { id: CustomizeTab; label: string }[] = [
@@ -87,6 +92,26 @@
   const octave = $derived(Math.floor(patch.root / 12) - 1);
   const setRoot = (note: number, oct: number) => (patch.root = (oct + 1) * 12 + note);
 
+  // Per-voice shaping (Voices section).
+  const VOICE_ROWS: { id: Voice; label: string }[] = [
+    { id: 'lead', label: 'Melody' },
+    { id: 'bell', label: 'Bells' },
+    { id: 'low', label: 'Bass' },
+    { id: 'perc', label: 'Drum' },
+  ];
+  const voices = $derived(patch.voices ?? defaultVoices());
+  function setVoice(id: Voice, key: string, value: number | string) {
+    patch.voices ??= defaultVoices();
+    (patch.voices[id] as unknown as Record<string, number | string>)[key] = value;
+  }
+  function resetVoice(id: Voice) {
+    patch.voices ??= defaultVoices();
+    (patch.voices as Voices)[id] = structuredClone(defaultVoices()[id]) as never;
+  }
+  const kickHeard = $derived(voices.perc.type === 'kick' || (voices.perc.type === 'set' && (patch.kit ?? 'classic') === 'pulse'));
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const signed = (v: number, unit = '') => `${v > 0 ? '+' : ''}${v}${unit}`;
+
   const VOICES: { id: string; label: string }[] = [
     { id: 'smile-note', label: 'Melody' },
     { id: 'brow-raise-bell', label: 'Bells' },
@@ -94,6 +119,8 @@
     { id: 'jaw-drop-perc', label: 'Drum' },
     { id: 'smile-brightness', label: 'Brightness' },
     { id: 'arousal-tremolo', label: 'Shimmer' },
+    { id: 'drone-level', label: 'Drone' },
+    { id: 'drone-wobble', label: 'Wobble' },
   ];
   // Sensitivity 0..1. Notes: onset threshold 3.5 (only big moves) → 1.5 (every
   // rise). Continuous: how much of the default input range reaches the top.
@@ -203,6 +230,15 @@
   </label>
 {/snippet}
 
+{#snippet mini(label: string, min: number, max: number, step: number, value: number, shown: string, set: (v: number) => void)}
+  <label class="flex items-center gap-2">
+    <span class="w-[52px] shrink-0 text-[10.5px] text-zinc-400">{label}</span>
+    <input type="range" {min} {max} {step} {value} class="flex-1 min-w-0 accent-zinc-300 h-1" aria-label={label}
+      oninput={(e) => set(Number((e.target as HTMLInputElement).value))} />
+    <span class="w-[38px] shrink-0 text-right text-[10px] font-mono text-zinc-500">{shown}</span>
+  </label>
+{/snippet}
+
 {#snippet section(title: string)}
   <div class="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">{title}</div>
 {/snippet}
@@ -307,6 +343,20 @@
 
     {:else if tab === 'sound'}
       <div class="space-y-3">
+        {@render section('Sound set')}
+        <div class="space-y-1">
+          {#each Object.entries(KITS) as [id, k] (id)}
+            {@const on = (patch.kit ?? 'classic') === id}
+            <button
+              class="w-full text-left px-2.5 py-1.5 rounded-md border {on ? 'border-zinc-600 bg-zinc-800' : 'border-zinc-800 hover:border-zinc-700'}"
+              aria-pressed={on}
+              onclick={() => (patch.kit = id as SoundKit)}
+            >
+              <span class="block text-[11.5px] {on ? 'text-zinc-50' : 'text-zinc-300'}">{k.label}</span>
+              <span class="block text-[10.5px] text-zinc-500">{k.blurb}</span>
+            </button>
+          {/each}
+        </div>
         {@render section('Music')}
         <label class="block">
           <span class="text-[11px] text-zinc-300">Scale</span>
@@ -349,6 +399,64 @@
           <input type="checkbox" checked={patch.quantize} class="accent-green-500" onchange={(e) => (patch.quantize = (e.target as HTMLInputElement).checked)} />
           Snap notes to the beat
         </label>
+      </div>
+      <div class="space-y-2">
+        {@render section('Voices')}
+        <p class="text-[10px] text-zinc-600 leading-snug">Shape each instrument. The play button sounds a sample note.</p>
+        {#each VOICE_ROWS as r (r.id)}
+          {@const v = voices[r.id]}
+          <div class="rounded-md border border-zinc-800 px-2 py-1.5 space-y-1.5">
+            <div class="flex items-center gap-1.5">
+              <button
+                class="p-1 rounded text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
+                title={`Play a ${r.label.toLowerCase()} note`} aria-label={`Play a ${r.label.toLowerCase()} note`}
+                onclick={() => onPreview?.(r.id)}
+              ><Play size={11} /></button>
+              <span class="text-[11.5px] text-zinc-200">{r.label}</span>
+              {#if voiceChanged(voices, r.id)}
+                <button class="ml-auto p-0.5 rounded text-zinc-500 hover:text-zinc-200" title={`Reset ${r.label.toLowerCase()}`}
+                  aria-label={`Reset ${r.label.toLowerCase()}`} onclick={() => resetVoice(r.id)}><RotateCcw size={11} /></button>
+              {/if}
+            </div>
+            {#if r.id === 'perc'}
+              <label class="flex items-center gap-2">
+                <span class="w-[52px] shrink-0 text-[10.5px] text-zinc-400">Sound</span>
+                <div class="relative flex-1 min-w-0">
+                  <select class="w-full appearance-none pl-2 pr-6 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-[11px] text-zinc-300"
+                    value={voices.perc.type} aria-label="Drum sound"
+                    onchange={(e) => setVoice('perc', 'type', (e.target as HTMLSelectElement).value as DrumType)}>
+                    {#each DRUM_TYPES as t (t.id)}<option value={t.id}>{t.label}</option>{/each}
+                  </select>
+                  <ChevronDown size={10} class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                </div>
+              </label>
+              {@render mini('Pitch', -12, 12, 1, voices.perc.pitch, signed(voices.perc.pitch, ' st'), (x) => setVoice('perc', 'pitch', x))}
+              {#if kickHeard}
+                {@render mini('Punch', 0, 1, 0.05, voices.perc.punch, pct(voices.perc.punch), (x) => setVoice('perc', 'punch', x))}
+              {/if}
+            {:else}
+              <div class="flex items-center gap-2">
+                <span class="w-[52px] shrink-0 text-[10.5px] text-zinc-400">Octave</span>
+                <div class="flex-1 grid grid-cols-5 gap-0.5 p-0.5 rounded bg-zinc-950 border border-zinc-800" role="radiogroup" aria-label={`${r.label} octave`}>
+                  {#each [-2, -1, 0, 1, 2] as o (o)}
+                    <button role="radio" aria-checked={v.octave === o}
+                      class="py-0.5 rounded text-[10px] font-mono {v.octave === o ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500 hover:text-zinc-300'}"
+                      onclick={() => setVoice(r.id, 'octave', o)}>{signed(o)}</button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+            {@render mini('Volume', 0, 1.5, 0.05, v.volume, pct(v.volume), (x) => setVoice(r.id, 'volume', x))}
+            {@render mini('Length', 0.25, 3, 0.05, v.length, `${v.length.toFixed(2)}×`, (x) => setVoice(r.id, 'length', x))}
+            {#if r.id !== 'perc'}
+              {@render mini('Tone', -1, 1, 0.05, v.tone, v.tone < -0.02 ? 'darker' : v.tone > 0.02 ? 'brighter' : 'as is', (x) => setVoice(r.id, 'tone', x))}
+            {/if}
+          </div>
+        {/each}
+        <div class="rounded-md border border-zinc-800 px-2 py-1.5">
+          {@render mini('Drone', 0, 2, 0.05, voices.drone, voices.drone < 0.02 ? 'off' : pct(voices.drone), (x) => { patch.voices ??= defaultVoices(); patch.voices.drone = x; })}
+          <p class="mt-1 text-[10px] text-zinc-600 leading-snug">The quiet hum under each person. The Drone and Wobble rows in the sidebar can drive it from the face.</p>
+        </div>
       </div>
       <div class="space-y-3">
         {@render section('Sensitivity')}

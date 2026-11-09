@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_ART } from './art';
 import { defaultPatch } from './defaultPatch';
 import { StudioEngine, type OutputFrame, type OutputPerson } from './engine';
-import { DEFAULT_OSC, normalizeOsc, normalizePrefix, OscFrameBuilder, type OscSettings } from './osc';
+import { DEFAULT_OSC, normalizeOsc, normalizePrefix, onsetAddress, OscFrameBuilder, type OscSettings } from './osc';
 import type { SlotFace } from './types';
 
 const person = (n: number, extra: Partial<OutputPerson> = {}): OutputPerson => ({
   n, slot: `s${n}`, label: `P${n}`, color: '#ff0000', x: 0.25 * n,
-  z: { AU12: 2, 'gaze:shift': 3.5 },
-  values: { AU12: 0.6, AU04: 0.1, valence: 0.4, 'gaze:horizontal': 0.2, 'gaze:vertical': -0.1, 'gaze:away': 0.3 },
+  z: { AU12: 2, 'gaze:shift': 3.5, 'pose:movement': 1.5 },
+  values: { AU12: 0.6, AU04: 0.1, valence: 0.4, 'gaze:horizontal': 0.2, 'gaze:vertical': -0.1, 'gaze:away': 0.3,
+    'pose:turn': 0.3, 'pose:nod': -0.1, 'pose:tilt': 0.05 },
   valence: 0.4, arousal: 0.1, energy: 0.8, emotions: { happiness: 0.7, neutral: 0.3 },
   calibrating: false, muted: false, ...extra,
 });
@@ -21,6 +22,11 @@ const only = (...groups: (keyof OscSettings['groups'])[]): OscSettings => ({
 const map = (msgs: [string, string, unknown[]][]) => new Map(msgs.map(([a, t, v]) => [a, { t, v }]));
 
 describe('OSC frame builder', () => {
+  it('names every onset kind', () => {
+    expect(['AU12', 'gaze:shift', 'pose:movement', 'emotion:happiness', 'valence'].map(onsetAddress))
+      .toEqual(['onset/AU12', 'glance', 'headmove', 'onset/happiness', 'onset/valence']);
+  });
+
   it('always sends count, presence and position', () => {
     const m = map(new OscFrameBuilder().build(frame([person(1), person(2)]), only(), DEFAULT_ART));
     expect(m.get('/pyfeat/count')).toEqual({ t: 'i', v: [2] });
@@ -40,6 +46,9 @@ describe('OSC frame builder', () => {
     expect(m.get('/pyfeat/group/energy')!.v).toEqual([0.8]);
     expect(m.get('/pyfeat/person/1/gaze/x')!.v).toEqual([0.2]);
     expect(m.get('/pyfeat/person/1/gaze/movement')!.v).toEqual([3.5]);
+    expect(m.get('/pyfeat/person/1/head/turn')!.v).toEqual([0.3]);
+    expect(m.get('/pyfeat/person/1/head/movement')!.v).toEqual([1.5]);
+    expect(m.has('/pyfeat/person/1/au/pose:turn')).toBe(false);
     const c = m.get('/pyfeat/person/1/color')!;
     expect(c.t).toBe('fff');
     expect(c.v.every(x => typeof x === 'number' && x >= 0 && x <= 1)).toBe(true);

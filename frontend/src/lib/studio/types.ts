@@ -5,6 +5,8 @@
 // Mappings are DATA, not code, so the phase-2 mapping-grid editor can edit a
 // Patch without touching the engine.
 
+import type { Voices } from './voices';
+
 /** One person at one instant, keyed by a stable slot (never face_idx). */
 export interface SlotFace {
   /** Stable key: identity_id (replay) or 'live-<n>' (live tracker). */
@@ -28,6 +30,12 @@ export interface SlotFace {
    * y = up. Both in -1..1; (0, 0) = straight ahead along the head.
    */
   gaze?: { x: number; y: number };
+  /**
+   * Head direction in radians, screen-relative like `gaze`: turn = toward the
+   * viewer's right, nod = up, tilt = top of the head toward the viewer's right.
+   * (0, 0, 0) = facing the camera upright.
+   */
+  head?: { turn: number; nod: number; tilt: number };
 }
 
 /** Everything a source knows at one detection, on the source clock. */
@@ -48,11 +56,12 @@ export interface FaceSource {
 
 // ---- Patch (mapping) format ----------------------------------------------
 
-export type FeatureGroup = 'aus' | 'blendshapes' | 'emotions' | 'va' | 'gaze';
+export type FeatureGroup = 'aus' | 'blendshapes' | 'emotions' | 'va' | 'gaze' | 'pose';
 
 export type SourceRef =
   /** A raw per-person feature, e.g. {group:'aus', name:'AU12'}; 'va' names are 'valence' | 'arousal';
-   *  'gaze' names are 'shift' | 'away' | 'horizontal' | 'vertical'. */
+   *  'gaze' names are 'shift' | 'away' | 'horizontal' | 'vertical';
+   *  'pose' names are 'movement' | 'turn' | 'nod' | 'tilt'. */
   | { kind: 'feature'; group: FeatureGroup; name: string }
   /** Rate of change (per second) of the smoothed feature. */
   | { kind: 'velocity'; of: { kind: 'feature'; group: FeatureGroup; name: string } }
@@ -93,6 +102,10 @@ export interface Mapping {
 
 export type ScaleName = 'pentatonic' | 'major' | 'minor';
 
+/** The set of instruments the voices play: 'classic' plucks, bells and noise
+ *  hits; 'glass' airy FM tones with reverb; 'pulse' electronic synths and a kick. */
+export type SoundKit = 'classic' | 'glass' | 'pulse';
+
 export interface Patch {
   name: string;
   scale: ScaleName;
@@ -101,5 +114,10 @@ export interface Patch {
   bpm: number;
   /** Snap note triggers to the next 16th note (hides detection latency). */
   quantize: boolean;
+  /** Instrument set (absent in patches saved before sound sets: 'classic'). */
+  kit?: SoundKit;
+  /** Per-voice octave/volume/length/tone, drum type and drone level
+   *  (absent in older patches: defaults). */
+  voices?: Voices;
   mappings: Mapping[];
 }

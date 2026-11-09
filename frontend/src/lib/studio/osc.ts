@@ -6,7 +6,7 @@
 import { artLab, labToRgb, type ArtSettings } from './art';
 import type { OutputFrame } from './engine';
 
-export type OscGroup = 'aus' | 'ausRelative' | 'emotions' | 'mood' | 'eyes' | 'colour' | 'events' | 'sync';
+export type OscGroup = 'aus' | 'ausRelative' | 'emotions' | 'mood' | 'eyes' | 'head' | 'colour' | 'events' | 'sync';
 
 export interface OscSettings {
   enabled: boolean;
@@ -25,8 +25,9 @@ export const OSC_GROUP_LABELS: Record<OscGroup, { label: string; hint: string }>
   aus: { label: 'Facial movements', hint: '…/au/AU12 0–1' },
   ausRelative: { label: 'Facial movements, relative to each person', hint: '…/auz/AU12 (≈0 at rest)' },
   eyes: { label: 'Eyes', hint: '…/gaze/x, y, away, movement' },
+  head: { label: 'Head', hint: '…/head/turn, nod, tilt (radians), movement' },
   colour: { label: 'Art colour', hint: '…/color r g b (0–1)' },
-  events: { label: 'Expression bursts & glances', hint: '…/onset/AU12, …/glance' },
+  events: { label: 'Bursts, rises, glances, head moves', hint: '…/onset/AU12, …/onset/happiness, …/glance, …/headmove' },
   sync: { label: 'Synchrony & mimicry', hint: '/sync, /sync/1/2, /mimicry' },
 };
 
@@ -36,7 +37,7 @@ export const DEFAULT_OSC: OscSettings = {
   port: 9000,
   prefix: '/pyfeat',
   allowLan: false,
-  groups: { emotions: true, mood: true, aus: true, ausRelative: false, eyes: true, colour: true, events: true, sync: true },
+  groups: { emotions: true, mood: true, aus: true, ausRelative: false, eyes: true, head: true, colour: true, events: true, sync: true },
 };
 
 export function normalizePrefix(p: string): string {
@@ -66,6 +67,15 @@ export type OscMsg = [string, string, (number | string)[]];
 
 const f = (addr: string, v: number | undefined): OscMsg | null =>
   v === undefined || !Number.isFinite(v) ? null : [addr, 'f', [v]];
+
+/** Address (under the person) for an engine onset feature. Emotion and mood
+ *  names don't collide with AU names, so they share `onset/`. */
+export function onsetAddress(feature: string): string {
+  if (feature === 'gaze:shift') return 'glance';
+  if (feature === 'pose:movement') return 'headmove';
+  if (feature.startsWith('emotion:')) return `onset/${feature.slice(8)}`;
+  return `onset/${feature}`;
+}
 
 /**
  * Builds the messages for each frame. Stateful only to announce departures:
@@ -109,6 +119,14 @@ export class OscFrameBuilder {
           f(`${base}/gaze/movement`, p.z['gaze:shift']),
         );
       }
+      if (g.head) {
+        out.push(
+          f(`${base}/head/turn`, p.values['pose:turn']),
+          f(`${base}/head/nod`, p.values['pose:nod']),
+          f(`${base}/head/tilt`, p.values['pose:tilt']),
+          f(`${base}/head/movement`, p.z['pose:movement']),
+        );
+      }
       if (g.colour) {
         const [L, A, B] = artLab(p, art);
         const [r, gg, b] = labToRgb(L, A, B);
@@ -126,9 +144,7 @@ export class OscFrameBuilder {
       for (const o of frame.onsets) {
         const n = byslot.get(o.slot);
         if (n === undefined) continue;
-        out.push(o.feature === 'gaze:shift'
-          ? f(`${P}/person/${n}/glance`, o.strength)
-          : f(`${P}/person/${n}/onset/${o.feature}`, o.strength));
+        out.push(f(`${P}/person/${n}/${onsetAddress(o.feature)}`, o.strength));
       }
     }
     if (g.sync) {

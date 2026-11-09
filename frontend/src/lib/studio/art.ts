@@ -13,7 +13,7 @@ export type ColorBy = 'emotions' | 'mood' | 'person';
 
 export interface ArtSettings {
   colorBy: ColorBy;
-  /** 'arousal' | 'expressivity' | 'aus:AUxx' | 'gaze:shift' */
+  /** 'arousal' | 'valence' | 'expressivity' | 'emotions:name' | 'aus:AUxx' | 'gaze:shift' | 'pose:movement' */
   motionBy: string;
   /** Emotion name → '#rrggbb'. */
   palette: Record<string, string>;
@@ -256,10 +256,14 @@ export function artLab(s: SlotView, art: ArtSettings): Lab {
 /** How much a person moves the scene, 0..1, per the Visuals setting. */
 export function artDrive(s: SlotView, art: ArtSettings): number {
   const clamp = (x: number) => Math.max(0, Math.min(1, x));
-  if (art.motionBy === 'expressivity') return clamp(s.energy / 1.5);
-  if (art.motionBy.startsWith('aus:') || art.motionBy.startsWith('gaze:')) {
-    // AU channels are keyed by bare name, gaze channels keep their prefix.
-    const z = s.z[art.motionBy.startsWith('aus:') ? art.motionBy.slice(4) : art.motionBy];
+  const m = art.motionBy;
+  if (m === 'expressivity') return clamp(s.energy / 1.5);
+  if (m === 'valence') return clamp(((s.valence ?? 0) + 0.6) / 1.4);
+  // How strongly an emotion shows (probability; 0.8 already reads as strong).
+  if (m.startsWith('emotions:')) return clamp((s.emotions?.[m.slice(9)] ?? 0) / 0.8);
+  if (m.startsWith('aus:') || m.startsWith('gaze:') || m.startsWith('pose:')) {
+    // AU channels are keyed by bare name, gaze and head channels keep their prefix.
+    const z = s.z[m.startsWith('aus:') ? m.slice(4) : m];
     return z === undefined ? 0 : clamp(z / 3);
   }
   return clamp(((s.arousal ?? 0) + 0.3) / 1.1);
