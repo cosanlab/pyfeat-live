@@ -81,7 +81,12 @@ export interface Transform {
 }
 
 export type Voice = 'lead' | 'bell' | 'low' | 'perc';
-export type AudioParam = 'cutoff' | 'gain' | 'tremolo' | 'detune' | 'harmony';
+/** Continuous sound controls, each 0..1 per person:
+ *  cutoff (brightness), resonance, tremolo (shimmer), gain (drone level),
+ *  detune (drone wobble), harmony, reverb (extra room), width (stereo
+ *  spread), pitch (melody home, 0.5 = unchanged, ±4 scale steps). */
+export type AudioParam = 'cutoff' | 'resonance' | 'tremolo' | 'gain' | 'detune' | 'harmony' | 'reverb' | 'width' | 'pitch';
+export const AUDIO_PARAMS: readonly AudioParam[] = ['cutoff', 'resonance', 'tremolo', 'gain', 'detune', 'harmony', 'reverb', 'width', 'pitch'];
 export type VisualParam = 'hue' | 'brightness' | 'size' | 'pulse';
 
 export type DestRef =
@@ -98,6 +103,10 @@ export interface Mapping {
   transform: Transform;
   dest: DestRef;
   enabled: boolean;
+  /** Continuous controls only: how far this source moves the control,
+   *  −1..1 (negative = the more of the source, the lower). Absent = 1.
+   *  Several mappings to one control add up, on top of the control's knob. */
+  amount?: number;
 }
 
 export type ScaleName = 'pentatonic' | 'major' | 'minor';
@@ -105,6 +114,18 @@ export type ScaleName = 'pentatonic' | 'major' | 'minor';
 /** The set of instruments the voices play: 'classic' plucks, bells and noise
  *  hits; 'glass' airy FM tones with reverb; 'pulse' electronic synths and a kick. */
 export type SoundKit = 'classic' | 'glass' | 'pulse';
+
+/** How several people are told apart by ear (Customize → Sound → People). */
+export interface PeopleSound {
+  /** Each person gets their own octave and their own bell and drum colour. */
+  separate: boolean;
+  /** Spread people evenly left to right (in screen order) instead of panning
+   *  by exact face position, which is often only a few degrees apart. */
+  widePan: boolean;
+  /** Two or more people making the same movement within a second ring a
+   *  chord with one tone per person. */
+  together: boolean;
+}
 
 export interface Patch {
   name: string;
@@ -119,5 +140,11 @@ export interface Patch {
   /** Per-voice octave/volume/length/tone, drum type and drone level
    *  (absent in older patches: defaults). */
   voices?: Voices;
+  /** Absent in older patches: defaults (all on). */
+  people?: PeopleSound;
+  /** Knob positions (synth view): the resting value of a control, 0..1,
+   *  which its sources then add to. A control with no knob value and no
+   *  source stays at the sound set's own neutral setting. */
+  knobs?: Partial<Record<AudioParam, number>>;
   mappings: Mapping[];
 }

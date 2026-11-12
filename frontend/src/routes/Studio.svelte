@@ -30,7 +30,6 @@
   import { MoodOrbs } from '../lib/studio/scenes/moodOrbs';
   import { Aura } from '../lib/studio/scenes/aura';
   import { Currents } from '../lib/studio/scenes/currents';
-  import { Horizon } from '../lib/studio/scenes/horizon';
   import { Murmuration } from '../lib/studio/scenes/murmuration';
   import { DEFAULT_ART, normalizeArt, type ArtSettings } from '../lib/studio/art';
   import type { Patch, SoundKit, Voice } from '../lib/studio/types';
@@ -38,19 +37,20 @@
   import StudioArtSettings from '../lib/components/StudioArtSettings.svelte';
   import StudioCustomize, { type CustomizeTab } from '../lib/components/StudioCustomize.svelte';
   import { normalizeOsc, OscFrameBuilder, OscLink, type OscMsg, type OscSettings, type OscStats, type OscStatus } from '../lib/studio/osc';
+  import { MidiFrameBuilder, MidiLink, normalizeMidi, type MidiSettings, type MidiStats, type MidiStatus } from '../lib/studio/midi';
   import type { OutputFrame } from '../lib/studio/engine';
   import type { StudioPreset } from '../lib/studio/presets';
   import type { Scene, SceneState } from '../lib/studio/scenes/scene';
   import StudioMixer from '../lib/components/StudioMixer.svelte';
+  import StudioSynth from '../lib/components/StudioSynth.svelte';
 
   type SourceKind = 'session' | 'live';
-  type SceneId = 'aura' | 'currents' | 'murmuration' | 'horizon' | 'facegram' | 'orbs';
+  type SceneId = 'aura' | 'currents' | 'murmuration' | 'facegram' | 'orbs';
   type SceneInfo = { id: SceneId; label: string; blurb: string };
   const ART_SCENES: SceneInfo[] = [
     { id: 'aura', label: 'Aura', blurb: 'Soft glows of colour, one per person, blending where they meet.' },
     { id: 'currents', label: 'Currents', blurb: 'Flowing threads that braid together as people fall into sync.' },
     { id: 'murmuration', label: 'Murmuration', blurb: 'A flock per person. In sync, flocks fly as one; mimicry sends the follower after the leader.' },
-    { id: 'horizon', label: 'Horizon', blurb: "A landscape whose sky, sun and sea follow the room's mood." },
   ];
   const ANALYSIS_SCENES: SceneInfo[] = [
     { id: 'facegram', label: 'Facegram', blurb: "Each person's facial movements scrolling over time." },
@@ -84,8 +84,14 @@
   let patch: Patch = $state(normalizePatch(saved.patch));
   let art: ArtSettings = $state(normalizeArt(saved.art));
   let customizeOpen = $state(false);
+  // Sound routing editor: the simple list in the sidebar, or the synth
+  // panel under the scene. Both edit the same patch. Remembered per viewer.
+  const MAPVIEW_KEY = 'pyfeat.studio.mapView';
+  let synthOpen = $state((() => { try { return localStorage.getItem(MAPVIEW_KEY) === 'synth'; } catch { return false; } })());
+  $effect(() => {
+    try { localStorage.setItem(MAPVIEW_KEY, synthOpen ? 'synth' : 'simple'); } catch { /* not remembered */ }
+  });
   let customizeTab: CustomizeTab = $state('look');
-  let pillW = $state(0);
 
   // OSC output (Customize → Outputs). Remembered per viewer, but never part
   // of a preset: loading a preset shouldn't silently start sending.
@@ -105,20 +111,59 @@
     oscError = oscLink.error;
     oscStats = { ...oscLink.stats };
   });
-  function onOutput(f: OutputFrame) {
-    const msgs = oscBuilder.build(f, oscPlain, artPlain);
-    oscLast = msgs;
-    oscLink.send(msgs);
+  // MIDI output (Customize → Outputs → MIDI): same rules as OSC. Solo (send
+  // one control alone, for MIDI-learn) is a momentary tool, never remembered.
+  const MIDI_KEY = 'pyfeat.studio.midi.v1';
+  function loadMidi(): MidiSettings {
+    try { return { ...normalizeMidi(JSON.parse(localStorage.getItem(MIDI_KEY) ?? 'null')), solo: null }; } catch { return normalizeMidi(undefined); }
   }
+  let midi: MidiSettings = $state(loadMidi());
+  let midiPlain: MidiSettings = normalizeMidi(undefined);
+  let midiStatus: MidiStatus = $state('off');
+  let midiError: string | null = $state(null);
+  let midiStats: MidiStats = $state({ messages: 0, errors: 0 });
+  let midiTarget: string | null = $state(null);
+  let outputKind: 'osc' | 'midi' = $state('osc');
+  const midiBuilder = new MidiFrameBuilder();
+  const midiLink = new MidiLink(() => {
+    midiStatus = midiLink.status;
+    midiError = midiLink.error;
+    midiStats = { ...midiLink.stats };
+    midiTarget = midiLink.target;
+  }, () => midiBuilder.reset()); // a newly opened port gets every control afresh
+  /** Plain copy of `patch` for the output builders (no proxy reads per frame). */
+  let patchPlain: Patch = normalizePatch(undefined);
+
+  function onOutput(f: OutputFrame) {
+    if (oscPlain.enabled) {
+      const msgs = oscBuilder.build(f, oscPlain, artPlain);
+      oscLast = msgs;
+      oscLink.send(msgs);
+    }
+    if (midiPlain.enabled) midiLink.send(midiBuilder.build(f, midiPlain, patchPlain));
+  }
+  const wantsOutput = () => oscPlain.enabled || midiPlain.enabled;
   $effect(() => {
     const o = $state.snapshot(osc) as OscSettings;
     oscPlain = o;
     untrack(() => {
       oscLink.apply(o);
-      engine?.setOutputListener(o.enabled ? onOutput : null);
+      engine?.setOutputListener(wantsOutput() ? onOutput : null);
       if (!o.enabled) oscBuilder.reset();
     });
     try { localStorage.setItem(OSC_KEY, JSON.stringify(o)); } catch { /* not remembered */ }
+  });
+  $effect(() => {
+    const m = $state.snapshot(midi) as MidiSettings;
+    const soloChanged = m.solo !== midiPlain.solo;
+    midiPlain = m;
+    untrack(() => {
+      midiLink.apply(m);
+      engine?.setOutputListener(wantsOutput() ? onOutput : null);
+      // Leaving solo (or entering it) resends every control it held back.
+      if (soloChanged || !m.enabled) midiBuilder.reset();
+    });
+    try { localStorage.setItem(MIDI_KEY, JSON.stringify({ ...m, solo: null })); } catch { /* not remembered */ }
   });
 
   /** Apply a preset (built in, saved, or pasted): each part is validated. */
@@ -220,7 +265,7 @@
   // Engine objects are plain (non-reactive) on purpose: they're class
   // instances mutated at detection rate, not UI state.
   const scenes: Record<SceneId, Scene> = {
-    aura: new Aura(), currents: new Currents(), murmuration: new Murmuration(), horizon: new Horizon(),
+    aura: new Aura(), currents: new Currents(), murmuration: new Murmuration(),
     facegram: new Facegram(), orbs: new MoodOrbs(),
   };
   let engine: StudioEngine | null = null;
@@ -268,6 +313,7 @@
       video.removeAttribute('src');
       video.load();
     }
+    midiLink.panic();
     roster = [];
     playing = false;
     currentTime = 0;
@@ -291,7 +337,7 @@
     status = 'loading';
     const eng = new StudioEngine($state.snapshot(patch) as Patch, audio);
     eng.setPersonColors(artPlain.personColors);
-    eng.setOutputListener(oscPlain.enabled ? onOutput : null);
+    eng.setOutputListener(wantsOutput() ? onOutput : null);
     engine = eng;
     try {
       if (kind === 'session') {
@@ -428,6 +474,7 @@
     const a = $state.snapshot(art) as ArtSettings;
     const sc = sceneId;
     artPlain = a;
+    patchPlain = p;
     untrack(() => { engine?.setPatch(p); engine?.setPersonColors(a.personColors); });
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({ sceneId: sc, patch: p, art: a }));
@@ -495,6 +542,7 @@
     ro?.disconnect();
     window.removeEventListener('keydown', onKey);
     oscLink.stop();
+    midiLink.stop();
     source?.stop();
     engine?.dispose();
     audio?.close();
@@ -621,7 +669,19 @@
             />
           </label>
         {/if}
-        <div class="mt-3"><StudioMappings bind:patch /></div>
+        <div class="mt-3 grid grid-cols-2 gap-1 p-0.5 rounded-md bg-zinc-950 border border-zinc-800" role="radiogroup" aria-label="Sound routing view">
+          <button role="radio" aria-checked={!synthOpen} title="A short list: what plays each sound"
+            class="px-1.5 py-1 rounded text-[10.5px] {!synthOpen ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500 hover:text-zinc-300'}"
+            onclick={() => (synthOpen = false)}>Simple</button>
+          <button role="radio" aria-checked={synthOpen} title="Knobs for every sound control, each routable to any face signal"
+            class="px-1.5 py-1 rounded text-[10.5px] {synthOpen ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500 hover:text-zinc-300'}"
+            onclick={() => (synthOpen = true)}>Synth</button>
+        </div>
+        {#if synthOpen}
+          <p class="mt-2 text-[10.5px] leading-snug text-zinc-500">Routing is in the synth panel under the scene.</p>
+        {:else}
+          <div class="mt-2"><StudioMappings bind:patch /></div>
+        {/if}
       </div>
 
       <!-- Mixer -->
@@ -649,30 +709,41 @@
     <div class="relative flex-1 min-h-0" bind:this={stage}>
       <canvas bind:this={canvas} class="absolute inset-0 w-full h-full block"></canvas>
 
-      <!-- status pill -->
-      <span bind:clientWidth={pillW} class="absolute bottom-3 left-3 {stageMode ? 'opacity-0 hover:opacity-100 transition-opacity' : ''} px-2.5 py-1 rounded text-[10px] font-semibold tracking-wider border bg-zinc-950/70 border-zinc-800 text-zinc-300 inline-flex items-center gap-2">
-        {#if status === 'loading'}
-          LOADING…
-        {:else if status === 'running' && sourceKind === 'live'}
-          <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span> LIVE · {liveFps} fps
-        {:else if status === 'running'}
-          REPLAY · {rate}×
-        {:else}
-          IDLE
+      <!-- status pills -->
+      <div class="absolute bottom-3 left-3 flex items-center gap-1.5 {stageMode ? 'opacity-0 hover:opacity-100 focus-within:opacity-100 transition-opacity' : ''}">
+        <span class="px-2.5 py-1 rounded text-[10px] font-semibold tracking-wider border bg-zinc-950/70 border-zinc-800 text-zinc-300 inline-flex items-center gap-2">
+          {#if status === 'loading'}
+            LOADING…
+          {:else if status === 'running' && sourceKind === 'live'}
+            <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span> LIVE · {liveFps} fps
+          {:else if status === 'running'}
+            REPLAY · {rate}×
+          {:else}
+            IDLE
+          {/if}
+          {#if anyCalibrating && status === 'running'}<span class="text-zinc-500 font-normal">calibrating</span>{/if}
+        </span>
+        {#if osc.enabled}
+          <button
+            class="px-2 py-1 rounded text-[10px] font-semibold tracking-wider border bg-zinc-950/70 border-zinc-800 text-zinc-300 inline-flex items-center gap-1.5 hover:text-zinc-100"
+            title={oscStatus === 'sending' ? `OSC → ${osc.host}:${osc.port}` : oscError ?? 'OSC'}
+            onclick={() => { customizeTab = 'outputs'; outputKind = 'osc'; customizeOpen = true; }}
+          >
+            <span class="w-1.5 h-1.5 rounded-full {oscStatus === 'sending' ? 'bg-green-500' : oscStatus === 'error' ? 'bg-red-500' : oscStatus === 'connecting' ? 'bg-amber-400' : 'bg-zinc-600'}"></span>
+            OSC{#if oscStatus === 'sending'}<span class="font-normal text-zinc-500">{osc.port}</span>{/if}
+          </button>
         {/if}
-        {#if anyCalibrating && status === 'running'}<span class="text-zinc-500 font-normal">calibrating</span>{/if}
-      </span>
-      {#if osc.enabled}
-        <button
-          class="absolute bottom-3 left-[calc(0.75rem+var(--pill-w,0px))] translate-y-0 {stageMode ? 'opacity-0 hover:opacity-100 transition-opacity' : ''} px-2 py-1 rounded text-[10px] font-semibold tracking-wider border bg-zinc-950/70 border-zinc-800 text-zinc-300 inline-flex items-center gap-1.5 hover:text-zinc-100"
-          style="--pill-w: {pillW + 6}px"
-          title={oscStatus === 'sending' ? `OSC → ${osc.host}:${osc.port}` : oscError ?? 'OSC'}
-          onclick={() => { customizeTab = 'outputs'; customizeOpen = true; }}
-        >
-          <span class="w-1.5 h-1.5 rounded-full {oscStatus === 'sending' ? 'bg-green-500' : oscStatus === 'error' ? 'bg-red-500' : oscStatus === 'connecting' ? 'bg-amber-400' : 'bg-zinc-600'}"></span>
-          OSC{#if oscStatus === 'sending'}<span class="font-normal text-zinc-500">{osc.port}</span>{/if}
-        </button>
-      {/if}
+        {#if midi.enabled}
+          <button
+            class="px-2 py-1 rounded text-[10px] font-semibold tracking-wider border bg-zinc-950/70 border-zinc-800 text-zinc-300 inline-flex items-center gap-1.5 hover:text-zinc-100"
+            title={midiStatus === 'sending' ? `MIDI → ${midiTarget ?? ''}` : midiError ?? 'MIDI'}
+            onclick={() => { customizeTab = 'outputs'; outputKind = 'midi'; customizeOpen = true; }}
+          >
+            <span class="w-1.5 h-1.5 rounded-full {midiStatus === 'sending' ? 'bg-green-500' : midiStatus === 'error' ? 'bg-red-500' : midiStatus === 'connecting' ? 'bg-amber-400' : 'bg-zinc-600'}"></span>
+            MIDI{#if midi.solo}<span class="font-normal text-amber-300">solo</span>{/if}
+          </button>
+        {/if}
+      </div>
 
       <div class="absolute top-3 right-3 flex gap-1.5 {stageMode ? 'opacity-0 hover:opacity-100 focus-within:opacity-100 transition-opacity' : ''}">
         <button
@@ -701,10 +772,13 @@
 
       {#if customizeOpen}
         <StudioCustomize
-          bind:patch bind:art bind:osc bind:tab={customizeTab}
+          bind:patch bind:art bind:osc bind:midi bind:tab={customizeTab} bind:output={outputKind}
           {sceneId} {isArtScene} {oscStatus} {oscError} {oscStats}
           oscPeek={() => oscLast}
           onOscTest={() => oscLink.test()}
+          {midiStatus} {midiError} {midiStats} {midiTarget}
+          onMidiTest={() => midiLink.test()}
+          onMidiPanic={() => midiLink.panic()}
           onClose={() => (customizeOpen = false)}
           onApply={applyPreset}
           onPreview={previewVoice}
@@ -740,6 +814,10 @@
         ><MoveDiagonal2 size={11} /></span>
       </div>
     </div>
+
+    {#if synthOpen && !stageMode}
+      <StudioSynth bind:patch getEngine={() => engine} midiOn={midi.enabled} onClose={() => (synthOpen = false)} />
+    {/if}
 
     {#if sourceKind === 'session' && !stageMode}
       <div class="flex items-center gap-3 px-4 py-2.5 bg-zinc-950 border-t border-zinc-900">

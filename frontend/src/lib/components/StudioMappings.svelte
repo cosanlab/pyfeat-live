@@ -6,6 +6,7 @@
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import type { Patch } from '../studio/types';
   import { defaultPatch } from '../studio/defaultPatch';
+  import { extraRoutes } from '../studio/synth';
   import {
     CONTINUOUS_SOURCES, EVENT_SOURCES, SYNC_SOURCES,
     continuousTransform, sourceFromKey, sourceKey, type FeatureOptionGroup,
@@ -42,6 +43,8 @@
 
   const mapping = (id: string) => patch.mappings.find(m => m.id === id);
   const changed = $derived(JSON.stringify(patch.mappings) !== JSON.stringify(defaultPatch().mappings));
+  // Routings and knob settings made in the synth view that this list can't show.
+  const extras = $derived(extraRoutes(patch) + Object.keys(patch.knobs ?? {}).length);
 
   function setSource(id: string, kind: RowKind, key: string) {
     const m = mapping(id);
@@ -123,6 +126,9 @@
           </div>
         {/if}
       {/each}
+      {#if extras > 0}
+        <p class="text-[10px] text-zinc-600 leading-snug">Plus {extras} more {extras === 1 ? 'setting' : 'settings'} made in the Synth view.</p>
+      {/if}
       <label class="block pt-1.5">
         <span class="flex justify-between text-[10.5px] text-zinc-500"><span>Fewer notes</span><span>More notes</span></span>
         <input

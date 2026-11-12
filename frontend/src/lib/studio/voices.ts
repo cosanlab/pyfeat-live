@@ -4,7 +4,7 @@
 // punch, and the background drone's level. Part of the Patch, so they save
 // with the Studio settings and travel with presets.
 
-import type { Voice } from './types';
+import type { PeopleSound, Voice } from './types';
 
 /** 'set' = whatever the sound set plays (Classic tick, Glass shaker, Pulse kick). */
 export type DrumType = 'set' | 'tick' | 'shaker' | 'kick' | 'clap';
@@ -83,6 +83,15 @@ export function normalizeVoices(v: unknown): Voices {
     },
     drone: num(o.drone, 0, 2, 1),
   };
+}
+
+export function defaultPeople(): PeopleSound {
+  return { separate: true, widePan: true, together: true };
+}
+
+export function normalizePeople(v: unknown): PeopleSound {
+  const o = (v && typeof v === 'object' ? v : {}) as Partial<PeopleSound>;
+  return { separate: o.separate !== false, widePan: o.widePan !== false, together: o.together !== false };
 }
 
 /** True when a voice differs from its default (for the per-row reset button). */

@@ -20,9 +20,11 @@
   } from '../studio/art';
   import { EMOTION_LABELS, continuousTransform, sourceKey } from '../studio/features';
   import { BUILTIN_PRESETS, loadUserPresets, parsePreset, saveUserPresets, type StudioPreset } from '../studio/presets';
-  import type { Patch, ScaleName, SoundKit, Voice } from '../studio/types';
-  import { defaultVoices, DRUM_TYPES, voiceChanged, type DrumType, type Voices } from '../studio/voices';
+  import type { Patch, PeopleSound, ScaleName, SoundKit, Voice } from '../studio/types';
+  import { defaultPeople, defaultVoices, DRUM_TYPES, voiceChanged, type DrumType, type Voices } from '../studio/voices';
   import { KITS } from '../studio/audio';
+  import StudioMidiOutput from './StudioMidiOutput.svelte';
+  import type { MidiSettings, MidiStats, MidiStatus } from '../studio/midi';
   import { OSC_GROUP_LABELS, normalizePrefix, type OscGroup, type OscMsg, type OscSettings, type OscStats, type OscStatus } from '../studio/osc';
 
   type Props = {
@@ -38,14 +40,24 @@
     /** Latest OSC messages sent (for the monitor). */
     oscPeek: () => OscMsg[];
     onOscTest: () => void;
+    midi: MidiSettings;
+    midiStatus: MidiStatus;
+    midiError: string | null;
+    midiStats: MidiStats;
+    midiTarget: string | null;
+    onMidiTest: () => void;
+    onMidiPanic: () => void;
+    /** Which output's settings show (OSC or MIDI). */
+    output?: 'osc' | 'midi';
     onClose: () => void;
     onApply: (p: StudioPreset) => void;
     /** Play a sample note on a voice (starts sound if it's off). */
     onPreview?: (voice: Voice) => void;
   };
   let {
-    patch = $bindable(), art = $bindable(), osc = $bindable(), tab = $bindable('look'),
-    sceneId, isArtScene, oscStatus, oscError, oscStats, oscPeek, onOscTest, onClose, onApply, onPreview,
+    patch = $bindable(), art = $bindable(), osc = $bindable(), midi = $bindable(), tab = $bindable('look'), output = $bindable('osc'),
+    sceneId, isArtScene, oscStatus, oscError, oscStats, oscPeek, onOscTest,
+    midiStatus, midiError, midiStats, midiTarget, onMidiTest, onMidiPanic, onClose, onApply, onPreview,
   }: Props = $props();
 
   const TABS: { id: CustomizeTab; label: string }[] = [
@@ -58,6 +70,14 @@
 
   const HEX = /^#[0-9a-f]{6}$/i;
 
+  // ---- Sound → People ----------------------------------------------------------
+  const people = $derived(patch.people ?? defaultPeople());
+  const PEOPLE_ROWS: { key: keyof PeopleSound; label: string; hint: string }[] = [
+    { key: 'separate', label: 'A different sound for each person', hint: 'Everyone gets their own octave, bell colour and drum pitch.' },
+    { key: 'widePan', label: 'Spread people left to right', hint: 'In the order they sit on screen, as far apart as the speakers allow.' },
+    { key: 'together', label: 'Ring a chord when people move together', hint: 'The same movement within a second sounds one tone per person.' },
+  ];
+
   // ---- Look ------------------------------------------------------------------
   type Slider = { key: 'speed' | 'intensity' | 'spread' | 'smoothness' | 'grain' | 'trail'; label: string; lo: string; hi: string; min: number; max: number; step: number; scenes?: string[] };
   const SLIDERS: Slider[] = [
@@ -66,7 +86,7 @@
     { key: 'intensity', label: 'Glow', lo: 'soft', hi: 'bright', min: 0.4, max: 1.6, step: 0.05 },
     { key: 'spread', label: 'Colour spread', lo: 'tight', hi: 'wide', min: 0.5, max: 1.6, step: 0.05 },
     { key: 'grain', label: 'Film grain', lo: 'none', hi: 'heavy', min: 0, max: 1, step: 0.05, scenes: ['aura'] },
-    { key: 'trail', label: 'Trails', lo: 'short', hi: 'long', min: 0, max: 1, step: 0.02, scenes: ['currents'] },
+    { key: 'trail', label: 'Trails', lo: 'short', hi: 'long', min: 0, max: 1, step: 0.02, scenes: ['currents', 'murmuration'] },
   ];
   const sliders = $derived(SLIDERS.filter(s => !s.scenes || s.scenes.includes(sceneId)));
   const bgScene = $derived(sceneId === 'aura' || sceneId === 'currents');
@@ -262,7 +282,7 @@
   <div class="flex-1 overflow-y-auto px-4 py-4 space-y-5">
     {#if tab === 'look'}
       {#if !isArtScene}
-        <p class="text-[11px] text-zinc-500 leading-snug">These settings shape the art scenes (Aura, Currents, Horizon). Pick one under Scene to see them.</p>
+        <p class="text-[11px] text-zinc-500 leading-snug">These settings shape the art scenes (Aura, Currents, Murmuration). Pick one under Scene to see them.</p>
       {/if}
       <div class="space-y-3.5 {isArtScene ? '' : 'opacity-50 pointer-events-none'}">
         {#each sliders as s (s.key)}
@@ -401,6 +421,17 @@
         </label>
       </div>
       <div class="space-y-2">
+        {@render section('People')}
+        <p class="text-[10px] text-zinc-600 leading-snug">How several people are told apart by ear.</p>
+        {#each PEOPLE_ROWS as r (r.key)}
+          <label class="flex items-start gap-2 text-[11px] text-zinc-300">
+            <input type="checkbox" checked={people[r.key]} class="accent-green-500 mt-0.5"
+              onchange={(e) => { patch.people = { ...people, [r.key]: (e.target as HTMLInputElement).checked }; }} />
+            <span>{r.label}<span class="block text-[10px] text-zinc-600 leading-snug">{r.hint}</span></span>
+          </label>
+        {/each}
+      </div>
+      <div class="space-y-2">
         {@render section('Voices')}
         <p class="text-[10px] text-zinc-600 leading-snug">Shape each instrument. The play button sounds a sample note.</p>
         {#each VOICE_ROWS as r (r.id)}
@@ -467,6 +498,17 @@
       </div>
 
     {:else if tab === 'outputs'}
+      <div class="grid grid-cols-2 gap-1 p-0.5 rounded-md bg-zinc-950 border border-zinc-800" role="radiogroup" aria-label="Output">
+        {#each [['osc', 'OSC', osc.enabled], ['midi', 'MIDI', midi.enabled]] as [id, label, live] (id)}
+          <button role="radio" aria-checked={output === id}
+            class="px-2 py-1 rounded text-[11px] inline-flex items-center justify-center gap-1.5 {output === id ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-500 hover:text-zinc-300'}"
+            onclick={() => (output = id as 'osc' | 'midi')}
+          >{label}{#if live}<span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>{/if}</button>
+        {/each}
+      </div>
+      {#if output === 'midi'}
+        <StudioMidiOutput bind:midi status={midiStatus} error={midiError} stats={midiStats} target={midiTarget} onTest={onMidiTest} onPanic={onMidiPanic} />
+      {:else}
       <div class="space-y-3">
         <div class="flex items-center gap-2">
           <button
@@ -564,6 +606,7 @@
           </ul>
         {/if}
       </div>
+      {/if}
 
     {:else}
       <div class="space-y-2">

@@ -7,6 +7,7 @@
 // visualisations, not overlays on the video, so they may smooth freely.
 
 import type { ArtSettings } from '../art';
+import type { Echo, Hub, Link, Turn } from '../coupling';
 import type { LeadLag } from '../interaction';
 
 export interface SlotView {
@@ -62,6 +63,13 @@ export interface SceneState {
   onsets: OnsetView[];
   /** Mimicry events since the previous draw. */
   mimicry: MimicryView[];
+  /** Patterns between people beyond same-expression synchrony (coupling.ts):
+   *  each pair's strongest lagged cross-signal link, pairs taking turns, the
+   *  group's hub, and learned cue → response events since the previous draw. */
+  links?: Link[];
+  turns?: Turn[];
+  hub?: Hub | null;
+  echoes?: Echo[];
   reducedMotion: boolean;
   /** What drives colour and motion in the art scenes (set by the Studio UI). */
   art?: ArtSettings;

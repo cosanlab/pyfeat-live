@@ -7,7 +7,7 @@ function fakeAudio() {
   const calls: { fn: string; args: unknown[] }[] = [];
   const rec = (fn: string) => (...args: unknown[]) => { calls.push({ fn, args }); return 0; };
   const sink = {
-    ensurePerson: rec('ensurePerson'), removePerson: rec('removePerson'), playNote: rec('playNote'),
+    ensurePerson: rec('ensurePerson'), removePerson: rec('removePerson'), playNote: rec('playNote'), playTogether: rec('playTogether'),
     setParam: rec('setParam'), resetParam: rec('resetParam'), setPan: rec('setPan'), setMute: rec('setMute'), setSolo: rec('setSolo'),
     setVolume: rec('setVolume'), setPatch: rec('setPatch'),
   } as unknown as AudioSink;
@@ -40,12 +40,76 @@ describe('StudioEngine', () => {
     // smile onsets → 'lead' notes for A then B
     expect(notes.map(n => [n.args[0], n.args[1]])).toEqual([['A', 'lead'], ['B', 'lead']]);
     expect(calls.filter(c => c.fn === 'ensurePerson').map(c => c.args)).toEqual([['A', 0], ['B', 1]]);
-    const pans = calls.filter(c => c.fn === 'setPan' && c.args[0] === 'B');
-    expect(pans.at(-1)!.args[1]).toBeCloseTo(0.8);
+    // Wide pan (default): two people sit hard left and right in screen order.
+    const pan = (slot: string) => calls.filter(c => c.fn === 'setPan' && c.args[0] === slot).at(-1)!.args[1];
+    expect([pan('A'), pan('B')]).toEqual([0, 1]);
     // continuous params are sent (cutoff from smile, harmony from sync)
     const params = new Set(calls.filter(c => c.fn === 'setParam').map(c => c.args[1]));
     expect(params).toContain('cutoff');
     expect(params).toContain('harmony');
+  });
+
+  it('rings a together chord when two people make the same movement within a second', () => {
+    const { sink, calls } = fakeAudio();
+    const eng = new StudioEngine(defaultPatch(), sink);
+    frames().forEach(f => eng.ingest(f));
+    // A smiles at 6 s, B at 6.5 s: one chord, naming both, on the melody voice.
+    expect(calls.filter(c => c.fn === 'playTogether').map(c => c.args.slice(0, 2))).toEqual([[['A', 'B'], 'lead']]);
+  });
+
+  it('people settings: no chord when off, and pan follows face position', () => {
+    const { sink, calls } = fakeAudio();
+    const patch = defaultPatch();
+    patch.people = { separate: true, widePan: false, together: false };
+    const eng = new StudioEngine(patch, sink);
+    frames().forEach(f => eng.ingest(f));
+    expect(calls.filter(c => c.fn === 'playTogether')).toEqual([]);
+    expect(calls.filter(c => c.fn === 'setPan' && c.args[0] === 'B').at(-1)!.args[1]).toBeCloseTo(0.8);
+  });
+
+  it('a control is its knob plus the sum of its sources, each scaled by its amount', () => {
+    const { sink, calls } = fakeAudio();
+    const patch = defaultPatch();
+    // Brightness: knob at 0.2, the default smile source at half strength,
+    // and a second source (mood) pulling it down.
+    patch.knobs = { cutoff: 0.2, reverb: 0.6 };
+    const smile = patch.mappings.find(m => m.id === 'smile-brightness')!;
+    smile.transform = { min: 0, max: 1 };
+    smile.amount = 0.5;
+    patch.mappings.push({
+      id: 'mod-1', source: { kind: 'feature', group: 'va', name: 'valence' }, transform: { min: 0, max: 1 },
+      dest: { kind: 'param', param: 'cutoff' }, enabled: true, amount: -1,
+    });
+    const eng = new StudioEngine(patch, sink);
+    const outs: Record<string, number | undefined>[] = [];
+    eng.setOutputListener(f => outs.push(f.people[0].params));
+    for (let i = 0; i <= 80; i++) eng.ingest({ t: i / 10, faces: [face('A', 0.5, 0.8, { valence: 0.1 })] });
+    const last = (param: string) => calls.filter(c => c.fn === 'setParam' && c.args[1] === param).at(-1)!.args[2] as number;
+    // 0.2 + 0.5 × 0.8 − 1 × 0.1
+    expect(last('cutoff')).toBeCloseTo(0.5, 1);
+    // A knob with no source is a constant; the frame reports the same values.
+    expect(last('reverb')).toBeCloseTo(0.6);
+    expect(outs.at(-1)!.cutoff).toBeCloseTo(0.5, 1);
+    // Removing the knob and its sources sends the control back to neutral.
+    const next = structuredClone(patch);
+    next.knobs = {};
+    eng.setPatch(next);
+    expect(calls.some(c => c.fn === 'resetParam' && c.args[1] === 'reverb')).toBe(true);
+  });
+
+  it('reports the notes it played, with pitches, with or without a synth attached', () => {
+    const eng = new StudioEngine(defaultPatch());
+    const notes: { n: number; voice: string; midi: number | null }[] = [];
+    const chords: number[][] = [];
+    eng.setOutputListener(f => { notes.push(...f.notes); chords.push(...f.together.map(t => t.midis)); });
+    frames().forEach(f => eng.ingest(f));
+    // A (person 1) then B (person 2, an octave up) on the melody; in A pentatonic.
+    expect(notes.map(n => [n.n, n.voice])).toEqual([[1, 'lead'], [2, 'lead']]);
+    expect(notes[0].midi).toBeGreaterThanOrEqual(57);
+    expect(notes[0].midi).toBeLessThanOrEqual(66);
+    expect(notes[1].midi! - notes[0].midi!).toBeGreaterThanOrEqual(8);
+    // The together chord: A's home (A3) and B's (C#4).
+    expect(chords).toEqual([[57, 61]]);
   });
 
   it('scene state drains onsets and mimicry once, and reports the pair', () => {

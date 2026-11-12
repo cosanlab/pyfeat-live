@@ -2,8 +2,8 @@
 // The phase-1 patch: one sensible mapping set applied to every person.
 // Phase 2's mapping-grid editor starts from (a copy of) this.
 
-import type { Mapping, Patch } from './types';
-import { defaultVoices, normalizeVoices } from './voices';
+import { AUDIO_PARAMS, type AudioParam, type FeatureGroup, type Mapping, type Patch, type SourceRef } from './types';
+import { defaultPeople, defaultVoices, normalizePeople, normalizeVoices } from './voices';
 import { isSoundKit } from './audio';
 
 const au = (name: string) => ({ kind: 'feature', group: 'aus', name }) as const;
@@ -52,6 +52,8 @@ export function defaultPatch(): Patch {
     quantize: true,
     kit: 'classic',
     voices: defaultVoices(),
+    people: defaultPeople(),
+    knobs: {},
     mappings: structuredClone(mappings),
   };
 }
@@ -62,6 +64,23 @@ export const FACEGRAM_AUS = [
   'AU12', 'AU14', 'AU15', 'AU17', 'AU20', 'AU23', 'AU24', 'AU25', 'AU26',
   'AU28', 'AU43',
 ] as const;
+
+/** Most extra sources a patch may carry (synth view). */
+export const MAX_MODS = 32;
+const GROUPS: readonly FeatureGroup[] = ['aus', 'blendshapes', 'emotions', 'va', 'gaze', 'pose'];
+
+function validSource(s: unknown): s is SourceRef {
+  const o = s as { kind?: unknown; group?: unknown; name?: unknown; feature?: unknown; of?: unknown } | null;
+  if (!o || typeof o !== 'object') return false;
+  if (o.kind === 'sync') return typeof o.feature === 'string';
+  if (o.kind === 'velocity') return validSource(o.of) && (o.of as { kind: string }).kind === 'feature';
+  return o.kind === 'feature' && GROUPS.includes(o.group as FeatureGroup) && typeof o.name === 'string';
+}
+
+/** A mapping's amount, clamped to −1..1 (absent when it has none). */
+function amountOf(m: Mapping): { amount?: number } {
+  return typeof m.amount === 'number' && Number.isFinite(m.amount) ? { amount: Math.max(-1, Math.min(1, m.amount)) } : {};
+}
 
 /**
  * Validate a saved or pasted patch against the current defaults, row by row:
@@ -79,8 +98,27 @@ export function normalizePatch(p: Partial<Patch> | null | undefined): Patch {
     const ok = m && m.source && typeof m.source === 'object' && m.dest?.kind === dm.dest.kind &&
       (dm.dest.kind !== 'note' || (m.dest.kind === 'note' && m.dest.voice === dm.dest.voice && Number.isFinite(m.dest.onsetThreshold))) &&
       (dm.dest.kind !== 'param' || (m.dest.kind === 'param' && m.dest.param === dm.dest.param));
-    return ok ? { ...dm, ...m, transform: { ...(m.transform ?? {}) }, enabled: m.enabled !== false } : dm;
+    return ok ? { ...dm, ...m, transform: { ...(m.transform ?? {}) }, enabled: m.enabled !== false, ...amountOf(m) } : dm;
   });
+  // Extra sources added in the synth view ('mod-…'): any number, each onto
+  // one continuous control.
+  const defaults = new Set(d.mappings.map(m => m.id));
+  for (const m of saved.values()) {
+    if (mappings.length >= d.mappings.length + MAX_MODS) break;
+    if (defaults.has(m.id) || !m.id.startsWith('mod-') || !validSource(m.source)) continue;
+    if (m.dest?.kind !== 'param' || !AUDIO_PARAMS.includes(m.dest.param)) continue;
+    mappings.push({
+      id: m.id.slice(0, 40), source: m.source, transform: { ...(m.transform ?? {}) },
+      dest: { kind: 'param', param: m.dest.param }, enabled: m.enabled !== false, ...amountOf(m),
+    });
+  }
+  const knobs: Partial<Record<AudioParam, number>> = {};
+  if (p.knobs && typeof p.knobs === 'object') {
+    for (const k of AUDIO_PARAMS) {
+      const v = p.knobs[k];
+      if (typeof v === 'number' && Number.isFinite(v)) knobs[k] = Math.min(1, Math.max(0, v));
+    }
+  }
   const n = (v: unknown, lo: number, hi: number, def: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : def);
   return {
     name: typeof p.name === 'string' ? p.name : d.name,
@@ -90,6 +128,8 @@ export function normalizePatch(p: Partial<Patch> | null | undefined): Patch {
     quantize: typeof p.quantize === 'boolean' ? p.quantize : d.quantize,
     kit: isSoundKit(p.kit) ? p.kit : d.kit,
     voices: normalizeVoices(p.voices),
+    people: normalizePeople(p.people),
+    knobs,
     mappings,
   };
 }

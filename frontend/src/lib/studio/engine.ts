@@ -4,29 +4,44 @@
 // by the Patch. Same causal processing for live and replay.
 
 import type { AudioEngine } from './audio';
+import { channelValues, CouplingState, EchoTracker, onsetChannel, type Channel, type Echo } from './coupling';
 import { FACEGRAM_AUS } from './defaultPatch';
 import { InteractionState, MimicryTracker } from './interaction';
+import { homeMidi, noteLevel, NotePicker } from './notes';
 import type { MimicryView, OnsetView, PairView, SceneState, SlotView } from './scenes/scene';
 import { FeatureChannel, type FeatureChannelOptions } from './signals';
-import type { AudioParam, FaceSource, Mapping, Patch, SlotFace, StudioFrame } from './types';
+import { AUDIO_PARAMS, type AudioParam, type FaceSource, type Mapping, type Patch, type SlotFace, type StudioFrame, type Voice } from './types';
+import { normalizeVoices } from './voices';
 
 /** The audio calls the engine makes (AudioEngine satisfies it; tests fake it). */
 export type AudioSink = Pick<
   AudioEngine,
-  'ensurePerson' | 'removePerson' | 'playNote' | 'setParam' | 'resetParam' | 'setPan' | 'setMute' | 'setSolo' | 'setVolume' | 'setPatch'
+  'ensurePerson' | 'removePerson' | 'playNote' | 'playTogether' | 'setParam' | 'resetParam' | 'setPan' | 'setMute' | 'setSolo' | 'setVolume' | 'setPatch'
 >;
 
-/** Audio params some enabled mapping drives. */
-function drivenParams(patch: Patch): Set<AudioParam> {
+/** Audio params that a knob sets or some enabled mapping drives. */
+export function drivenParams(patch: Patch): Set<AudioParam> {
   const out = new Set<AudioParam>();
   for (const m of patch.mappings) if (m.enabled && m.dest.kind === 'param') out.add(m.dest.param);
+  for (const k of AUDIO_PARAMS) if (typeof patch.knobs?.[k] === 'number') out.add(k);
   return out;
+}
+
+/** One source's 0..1 contribution to a control: range, then curve. */
+export function shape(v: number, m: Mapping): number {
+  const { min = 0, max = 1, curve = 1 } = m.transform;
+  return Math.max(0, Math.min(1, (v - min) / (max - min || 1))) ** curve;
 }
 
 const SYNC_FEATURES_DEFAULT = ['AU12', 'AU04', 'AU06'];
 /** Emotion probabilities flicker frame to frame; smooth them harder than AUs
  *  (One-Euro min cutoff in Hz) so colours drift rather than flash. */
 const EMOTION_CUTOFF = 0.4;
+/** Two people's onsets of the same mapped movement this close together (s)
+ *  count as "together" and ring a chord. Recordings run at 5-10 detections a
+ *  second and people rarely land on the same frame (0 of 60 notes on two
+ *  recorded sessions), so same-frame alone would never fire. */
+const TOGETHER_SEC = 1.0;
 /** People unseen for this long are dropped (voice released). */
 const FORGET_SEC = 2.0;
 /** Eye-movement speed (direction units / s) is a spiky signal: a glance is one
@@ -80,12 +95,39 @@ interface Person {
   muted: boolean;
   solo: boolean;
   volume: number;
+  /** Current 0..1 value of every driven control, and stereo position 0..1. */
+  params: Partial<Record<AudioParam, number>>;
+  pan: number;
+}
+
+/** A note the engine played: the same pitch goes to the synth and to MIDI. */
+export interface NoteEvent {
+  slot: string;
+  /** Person number (1, 2, …) and arrival index (n − 1). */
+  n: number;
+  voice: Voice;
+  /** MIDI pitch (null for the drum). */
+  midi: number | null;
+  /** 0..1: how hard (onset strength). */
+  level: number;
+}
+
+/** Several people made the same mapped movement within a moment. */
+export interface TogetherEvent {
+  ns: number[];
+  voice: Voice;
+  /** One tone per person. */
+  midis: number[];
+  level: number;
 }
 
 /** One person in an output frame: the scene view plus their number (1, 2, …
  *  in arrival order, as in the mixer). */
 export interface OutputPerson extends SlotView {
   n: number;
+  params: Partial<Record<AudioParam, number>>;
+  /** Stereo position, 0 (left) .. 1 (right). */
+  pan: number;
 }
 
 /** Everything an external output (OSC) needs from one detection. */
@@ -96,6 +138,8 @@ export interface OutputFrame {
   onsets: OnsetView[];
   pairs: PairView[];
   mimicry: MimicryView[];
+  notes: NoteEvent[];
+  together: TogetherEvent[];
 }
 
 export interface RosterEntry {
@@ -126,11 +170,17 @@ export class StudioEngine {
   private mimicry = new MimicryTracker(1.0);
   private pendingOnsets: OnsetView[] = [];
   private pendingMimicry: MimicryView[] = [];
+  private coupling = new CouplingState();
+  private echoes = new EchoTracker();
+  private pendingEchoes: Echo[] = [];
   private unsubs: (() => void)[] = [];
   private tracked: string[] = [];
   /** Custom person colours by arrival order (null = the source's colours). */
   private personColors: string[] | null = null;
   private outputCb: ((f: OutputFrame) => void) | null = null;
+  /** Mapping id → slot → time of that person's last note on it. */
+  private lastTrigger = new Map<string, Map<string, number>>();
+  private picker = new NotePicker();
 
   constructor(public patch: Patch, public audio: AudioSink | null = null) {
     this.interaction = new InteractionState(StudioEngine.syncFeatures(patch));
@@ -157,7 +207,10 @@ export class StudioEngine {
     const after = drivenParams(patch);
     for (const param of before) {
       if (after.has(param)) continue;
-      for (const slot of this.people.keys()) this.audio?.resetParam(slot, param);
+      for (const p of this.people.values()) {
+        this.audio?.resetParam(p.slot, param);
+        delete p.params[param];
+      }
     }
     this.patch = patch;
     const syncFeats = StudioEngine.syncFeatures(patch);
@@ -193,11 +246,11 @@ export class StudioEngine {
     audio.setPatch(this.patch);
     for (const p of this.people.values()) {
       audio.ensurePerson(p.slot, p.index);
-      audio.setPan(p.slot, p.x);
       audio.setVolume(p.slot, p.volume);
       audio.setMute(p.slot, p.muted);
       audio.setSolo(p.slot, p.solo);
     }
+    this.applyPan();
   }
 
   /** Receive an OutputFrame after every (non-silent) detection; null stops. */
@@ -247,6 +300,36 @@ export class StudioEngine {
       }));
   }
 
+  // ---- synth view ------------------------------------------------------------
+  /** Every person's current control values (0..1), for the knobs' live rings. */
+  liveParams(): { slot: string; color: string; params: Partial<Record<AudioParam, number>> }[] {
+    return [...this.people.values()]
+      .sort((a, b) => a.index - b.index)
+      .map(p => ({ slot: p.slot, color: this.colorOf(p), params: p.params }));
+  }
+
+  /** When each voice last played (ms, Date.now clock), for the trigger pads. */
+  readonly lastPlayed: Record<Voice, number> = { lead: 0, bell: 0, low: 0, perc: 0 };
+
+  /**
+   * How far each feature is from its owner's resting level right now, as the
+   * largest |z| over the people present, keyed like the mapping sources
+   * ('aus:AU12', 'emotions:happiness', 'pose:nod', 'gaze:shift', …). The
+   * synth view's "learn" watches this for the feature someone just moved.
+   */
+  learnValues(): Record<string, number> {
+    const out: Record<string, number> = {};
+    const put = (k: string, z: number | undefined) => {
+      if (z !== undefined && Number.isFinite(z) && Math.abs(z) > (out[k] ?? 0)) out[k] = Math.abs(z);
+    };
+    for (const p of this.people.values()) {
+      if (p.calibrating) continue;
+      for (const [k, z] of Object.entries(p.z)) put(isExpression(k) ? `aus:${k}` : k, z);
+      for (const [k, z] of Object.entries(p.emotionZ)) if (k !== 'neutral') put(`emotions:${k}`, z);
+    }
+    return out;
+  }
+
   // ---- processing ------------------------------------------------------------
   /**
    * Process one frame. `silent` (used to pre-roll after a seek) updates all
@@ -256,14 +339,27 @@ export class StudioEngine {
     const t = frame.t;
     this.t = t;
     const syncValues = new Map<string, Record<string, number | undefined>>();
+    const channels = new Map<string, Partial<Record<Channel, number>>>();
     const outOnsets: OnsetView[] = [];
     const outMimicry: MimicryView[] = [];
+    const outNotes: NoteEvent[] = [];
+    const outTogether: TogetherEvent[] = [];
     for (const face of frame.faces) {
       const p = this.person(face, t);
       const onsets = this.updateChannels(p, face, t);
       const sv: Record<string, number | undefined> = {};
       for (const f of this.interaction.features) sv[f] = p.values[f];
       syncValues.set(p.slot, sv);
+      channels.set(p.slot, channelValues(p.values, p.valence, p.energy));
+      // Learned cue → response pairs (any channel to any channel). Priming
+      // after a seek counts too, but only real playback reports them.
+      this.echoes.seen(p.slot, t);
+      for (const o of onsets) {
+        const ch = onsetChannel(o.feature);
+        if (!ch) continue;
+        const found = this.echoes.onset(p.slot, ch, t);
+        if (!silent) this.pendingEchoes.push(...found);
+      }
       if (silent) {
         for (const o of onsets) if (this.interaction.features.includes(o.feature)) this.mimicry.onset(p.slot, o.feature, t);
         continue;
@@ -284,9 +380,11 @@ export class StudioEngine {
           if (this.outputCb) outMimicry.push(mv);
         }
       }
-      this.applyAudio(p, onsets);
+      this.applyAudio(p, onsets, outNotes, outTogether);
     }
     this.interaction.update(t, syncValues);
+    this.coupling.update(t, channels);
+    this.applyPan();
     // Forget people who left.
     for (const [slot, p] of this.people) {
       if (t - p.lastSeen > FORGET_SEC) {
@@ -294,7 +392,10 @@ export class StudioEngine {
         this.audio?.removePerson(slot);
       }
     }
-    this.interaction.prune(new Set(this.people.keys()));
+    const active = new Set(this.people.keys());
+    this.interaction.prune(active);
+    this.coupling.prune(active);
+    if (this.pendingEchoes.length > 100) this.pendingEchoes.splice(0, this.pendingEchoes.length - 100);
     // Bound the queues if nobody is drawing (e.g. hidden tab).
     if (this.pendingOnsets.length > 500) this.pendingOnsets.splice(0, this.pendingOnsets.length - 500);
     if (this.pendingMimicry.length > 100) this.pendingMimicry.splice(0, this.pendingMimicry.length - 100);
@@ -303,8 +404,8 @@ export class StudioEngine {
       const views = this.slotViews(order);
       this.outputCb({
         t,
-        people: views.map((v, i) => ({ ...v, n: order[i].index + 1 })),
-        onsets: outOnsets, pairs: this.pairViews(), mimicry: outMimicry,
+        people: views.map((v, i) => ({ ...v, n: order[i].index + 1, params: { ...order[i].params }, pan: order[i].pan })),
+        onsets: outOnsets, pairs: this.pairViews(), mimicry: outMimicry, notes: outNotes, together: outTogether,
       });
     }
   }
@@ -316,6 +417,7 @@ export class StudioEngine {
         slot: face.slot, label: face.label, color: face.color, index: this.nextIndex++,
         x: face.x, lastSeen: t, channels: new Map(), values: {}, z: {},
         emotions: {}, emotionZ: {}, energy: 0, calibrating: true, muted: false, solo: false, volume: 0.8,
+        params: {}, pan: face.x,
       };
       this.people.set(face.slot, p);
       this.audio?.ensurePerson(p.slot, p.index);
@@ -324,7 +426,6 @@ export class StudioEngine {
     p.color = face.color;
     p.x = face.x;
     p.lastSeen = t;
-    this.audio?.setPan(p.slot, p.x);
     return p;
   }
 
@@ -436,28 +537,95 @@ export class StudioEngine {
     return raw === undefined ? null : raw;
   }
 
-  private applyAudio(p: Person, onsets: OnsetView[]): void {
+  /**
+   * Turn one person's frame into sound: onsets of mapped sources play notes,
+   * and every driven control is set to its knob value plus the sum of its
+   * sources (each scaled by its amount). Runs without an audio sink too, so
+   * MIDI output and the synth view work with the built-in sound off.
+   */
+  private applyAudio(p: Person, onsets: OnsetView[], notes: NoteEvent[], together: TogetherEvent[]): void {
     const audio = this.audio;
-    if (!audio) return;
-    for (const m of this.patch.mappings) {
+    const patch = this.patch;
+    const acc: Partial<Record<AudioParam, number>> = {};
+    for (const k of AUDIO_PARAMS) {
+      const v = patch.knobs?.[k];
+      if (typeof v === 'number') acc[k] = v;
+    }
+    for (const m of patch.mappings) {
       if (!m.enabled) continue;
       const d = m.dest;
       if (d.kind === 'note') {
         const f = featureName(m);
         for (const o of onsets) {
-          if (o.feature === f && o.strength >= d.onsetThreshold) audio.playNote(p.slot, d.voice, o.strength);
+          if (o.feature !== f || o.strength < d.onsetThreshold) continue;
+          const midi = d.voice === 'perc' ? null : this.pitch(p, d.voice, o.strength, o.t);
+          audio?.playNote(p.slot, d.voice, o.strength, undefined, midi ?? undefined);
+          this.lastPlayed[d.voice] = Date.now();
+          notes.push({ slot: p.slot, n: p.index + 1, voice: d.voice, midi, level: noteLevel(o.strength) });
+          const who = this.together(m.id, p.slot, o.t);
+          if (who.length > 1 && patch.people?.together !== false) {
+            audio?.playTogether(who, d.voice, o.strength);
+            const idx = who.map(sl => this.people.get(sl)!.index);
+            const octave = d.voice === 'bell' ? 12 : d.voice === 'low' ? -12 : 0;
+            together.push({
+              ns: idx.map(i => i + 1), voice: d.voice, level: noteLevel(o.strength),
+              midis: [...new Set(idx.map(i => homeMidi(patch.scale, patch.root, i) + octave))],
+            });
+          }
         }
       } else if (d.kind === 'param') {
         const v = this.sourceValue(p, m);
         if (v === null) continue;
-        const { min = 0, max = 1, curve = 1 } = m.transform;
-        const x = Math.max(0, Math.min(1, (v - min) / (max - min || 1))) ** curve;
-        audio.setParam(p.slot, d.param, x);
+        acc[d.param] = (acc[d.param] ?? 0) + (m.amount ?? 1) * shape(v, m);
       }
     }
+    const params: Partial<Record<AudioParam, number>> = {};
+    for (const k of AUDIO_PARAMS) {
+      const v = acc[k];
+      if (v === undefined) continue;
+      params[k] = Math.max(0, Math.min(1, v));
+      audio?.setParam(p.slot, k, params[k]!);
+    }
+    p.params = params;
   }
 
-  /** Latest state for the scenes; drains onsets/mimicry since the last call. */
+  /** The pitch of a note for this person (see NotePicker). */
+  private pitch(p: Person, voice: Exclude<Voice, 'perc'>, strength: number, t: number): number {
+    const patch = this.patch;
+    const shift = p.params.pitch === undefined ? 0 : Math.round((p.params.pitch - 0.5) * 8);
+    return this.picker.pick(
+      { scale: patch.scale, root: patch.root, voices: normalizeVoices(patch.voices), separate: patch.people?.separate !== false },
+      p.slot, p.index, voice, strength, p.params.harmony ?? 0, t, shift,
+    );
+  }
+
+  /** Record `slot`'s note on mapping `id`; returns everyone (this person
+   *  included) who played the same mapping within TOGETHER_SEC. */
+  private together(id: string, slot: string, t: number): string[] {
+    let m = this.lastTrigger.get(id);
+    if (!m) this.lastTrigger.set(id, (m = new Map()));
+    m.set(slot, t);
+    const who: string[] = [];
+    for (const [s, ts] of m) {
+      if (Math.abs(t - ts) <= TOGETHER_SEC && this.people.has(s)) who.push(s);
+      else if (t - ts > TOGETHER_SEC || ts > t) m.delete(s);
+    }
+    return who;
+  }
+
+  /** Stereo position per person: exact face position, or (wide) evenly
+   *  spread left to right in screen order so neighbours are still apart. */
+  private applyPan(): void {
+    const people = [...this.people.values()];
+    if (this.patch.people?.widePan === false || people.length < 2) {
+      for (const p of people) p.pan = p.x;
+    } else {
+      people.sort((a, b) => a.x - b.x || a.index - b.index);
+      people.forEach((p, i) => (p.pan = i / (people.length - 1)));
+    }
+    for (const p of people) this.audio?.setPan(p.slot, p.pan);
+  }
+
   private slotViews(order: Person[]): SlotView[] {
     return order.map(p => ({
       slot: p.slot, label: p.label, color: this.colorOf(p), x: p.x,
@@ -486,7 +654,9 @@ export class StudioEngine {
     const state: SceneState = {
       t: this.t, slots, pairs: this.pairViews(),
       onsets: this.pendingOnsets, mimicry: this.pendingMimicry, reducedMotion,
+      links: this.coupling.links, turns: this.coupling.turns, hub: this.coupling.hub, echoes: this.pendingEchoes,
     };
+    this.pendingEchoes = [];
     this.pendingOnsets = [];
     this.pendingMimicry = [];
     return state;
@@ -524,6 +694,11 @@ export class StudioEngine {
     }
     this.interaction.reset();
     this.mimicry.reset();
+    this.lastTrigger.clear();
+    this.picker.reset();
+    this.coupling.reset();
+    this.echoes.reset();
+    this.pendingEchoes = [];
     this.pendingOnsets = [];
     this.pendingMimicry = [];
   }
