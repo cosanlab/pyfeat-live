@@ -11,10 +11,10 @@ const person = (n: number, extra: Partial<OutputPerson> = {}): OutputPerson => (
   values: { AU12: 0.6, AU04: 0.1, valence: 0.4, 'gaze:horizontal': 0.2, 'gaze:vertical': -0.1, 'gaze:away': 0.3,
     'pose:turn': 0.3, 'pose:nod': -0.1, 'pose:tilt': 0.05 },
   valence: 0.4, arousal: 0.1, energy: 0.8, emotions: { happiness: 0.7, neutral: 0.3 },
-  calibrating: false, muted: false, ...extra,
+  calibrating: false, muted: false, params: {}, pan: 0.25 * n, ...extra,
 });
 const frame = (people: OutputPerson[], extra: Partial<OutputFrame> = {}): OutputFrame =>
-  ({ t: 1, people, onsets: [], pairs: [], mimicry: [], ...extra });
+  ({ t: 1, people, onsets: [], pairs: [], mimicry: [], notes: [], together: [], ...extra });
 const only = (...groups: (keyof OscSettings['groups'])[]): OscSettings => ({
   ...DEFAULT_OSC, enabled: true,
   groups: Object.fromEntries(Object.keys(DEFAULT_OSC.groups).map(k => [k, groups.includes(k as never)])) as OscSettings['groups'],

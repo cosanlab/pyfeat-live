@@ -1,9 +1,10 @@
-"""Studio OSC output: the page streams per-detection messages over a
-WebSocket; this sends them on as OSC/UDP to TouchDesigner, Max, Resolume…
+"""Studio outputs: the page streams per-detection messages over a WebSocket;
+this sends them on as OSC/UDP (TouchDesigner, Max, Resolume…) or as MIDI
+(a DAW or a hardware synth).
 
-Design: docs/superpowers/plans/2026-11-08-studio-osc-output.md
+OSC design: docs/superpowers/plans/2026-11-08-studio-osc-output.md
 
-Protocol (JSON text frames):
+OSC protocol, /api/studio/osc (JSON text frames):
   client → server
     {"type": "config", "host": str, "port": int, "allowLan": bool}
     {"type": "frame", "msgs": [[address, typetags, [args…]], …]}
@@ -11,6 +12,19 @@ Protocol (JSON text frames):
   server → client
     {"type": "status", "ok": bool, "error"?: str, "target"?: str}
     {"type": "stats", "messages": n, "packets": n, "bytes": n, "errors": n, "lastError"?: str}
+
+MIDI protocol, /api/studio/midi:
+  client → server
+    {"type": "ports"}
+    {"type": "config", "port": str | null}       null = create the app's own port
+    {"type": "frame", "msgs": [[status, d1, d2?], …],
+                      "notes": [[channel 0-15, note, velocity, delayMs, durationMs], …]}
+    {"type": "test"}                              middle C on channel 1
+    {"type": "panic"}                             stop every sounding note
+  server → client
+    {"type": "ports", "available": bool, "virtual": bool, "ports": [str], "error"?: str}
+    {"type": "status", "ok": bool, "error"?: str, "target"?: str}
+    {"type": "stats", "messages": n, "errors": n, "lastError"?: str}
 """
 
 from __future__ import annotations
@@ -24,6 +38,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from backend import midi
 from backend.osc import encode_bundles
 
 router = APIRouter(prefix="/api/studio", tags=["studio"])
@@ -227,3 +242,179 @@ async def studio_osc(ws: WebSocket) -> None:
         pass
     finally:
         sender.close()
+
+
+# ---- MIDI ---------------------------------------------------------------------
+
+MAX_MIDI_MSGS_PER_FRAME = 512
+MAX_NOTE_DELAY_MS = 2000
+MAX_NOTE_MS = 10000
+
+
+class _MidiSession:
+    """One page's MIDI output: an open port, plus the timers that start
+    notes on the beat and end them."""
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, opener=None) -> None:
+        self.loop = loop
+        self.opener = opener or midi.open_port
+        self.port: midi.Port | None = None
+        self.timers: set[asyncio.TimerHandle] = set()
+        self.sounding: dict[tuple[int, int], int] = {}  # (channel, note) → count
+        self.messages = self.errors = 0
+        self.last_error: str | None = None
+
+    def open(self, name: str | None) -> str:
+        self.close()
+        self.port = self.opener(name)
+        return self.port.name
+
+    def _send(self, msg: list[int]) -> None:
+        if self.port is None:
+            return
+        try:
+            self.port.send(msg)
+            self.messages += 1
+        except Exception as e:  # device unplugged, driver error
+            self.errors += 1
+            self.last_error = str(e)
+
+    def send(self, raw: object) -> None:
+        if not isinstance(raw, list):
+            return
+        for item in raw[:MAX_MIDI_MSGS_PER_FRAME]:
+            msg = midi.clean_message(item)
+            if msg is not None:
+                self._send(msg)
+
+    def _later(self, delay_s: float, fn) -> None:
+        handle: asyncio.TimerHandle | None = None
+
+        def run() -> None:
+            self.timers.discard(handle)
+            fn()
+
+        handle = self.loop.call_later(delay_s, run)
+        self.timers.add(handle)
+
+    def notes(self, raw: object) -> None:
+        """Start each note after its delay and end it after its duration."""
+        if not isinstance(raw, list) or self.port is None:
+            return
+        for item in raw[:MAX_MIDI_MSGS_PER_FRAME]:
+            if not (isinstance(item, list) and len(item) == 5
+                    and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in item)):
+                continue
+            ch, note, vel, delay, dur = item
+            if not (ch == int(ch) and note == int(note) and 0 <= ch <= 15 and 0 <= note <= 127):
+                continue
+            ch, note = int(ch), int(note)
+            vel = max(1, min(127, int(vel)))
+            delay = max(0.0, min(MAX_NOTE_DELAY_MS, float(delay))) / 1000
+            dur = max(20.0, min(MAX_NOTE_MS, float(dur))) / 1000
+            self._later(delay, lambda ch=ch, note=note, vel=vel: self._on(ch, note, vel))
+            self._later(delay + dur, lambda ch=ch, note=note: self._off(ch, note))
+
+    def _on(self, ch: int, note: int, vel: int) -> None:
+        self.sounding[(ch, note)] = self.sounding.get((ch, note), 0) + 1
+        self._send([0x90 | ch, note, vel])
+
+    def _off(self, ch: int, note: int) -> None:
+        n = self.sounding.get((ch, note), 0) - 1
+        if n > 0:
+            self.sounding[(ch, note)] = n  # the same note was struck again: let it ring
+            return
+        self.sounding.pop((ch, note), None)
+        self._send([0x80 | ch, note, 0])
+
+    def panic(self) -> None:
+        """Cancel pending notes and silence everything this session started."""
+        for h in self.timers:
+            h.cancel()
+        self.timers.clear()
+        channels = {ch for ch, _ in self.sounding}
+        for ch, note in list(self.sounding):
+            self._send([0x80 | ch, note, 0])
+        self.sounding.clear()
+        for ch in channels:
+            self._send([0xB0 | ch, 123, 0])  # all notes off
+
+    def stats(self) -> dict:
+        d: dict = {"type": "stats", "messages": self.messages, "errors": self.errors}
+        if self.last_error:
+            d["lastError"] = self.last_error
+        self.messages = self.errors = 0
+        self.last_error = None
+        return d
+
+    def close(self) -> None:
+        self.panic()
+        if self.port is not None:
+            try:
+                self.port.close()
+            except Exception:
+                pass
+        self.port = None
+
+
+def _ports_message() -> dict:
+    d: dict = {"type": "ports", "available": midi.available(), "virtual": midi.supports_virtual(), "ports": []}
+    if not midi.available():
+        d["error"] = midi.unavailable_reason()
+        return d
+    try:
+        d["ports"] = midi.list_ports()
+    except Exception as e:
+        d["error"] = f"Couldn’t list MIDI ports: {e}"
+    return d
+
+
+@router.get("/midi/ports")
+def studio_midi_ports() -> dict:
+    """The MIDI destinations on this computer (for the port picker, before
+    sending is switched on)."""
+    return _ports_message()
+
+
+@router.websocket("/midi")
+async def studio_midi(ws: WebSocket) -> None:
+    if not origin_allowed(ws.headers.get("origin"), ws.headers.get("host")):
+        await ws.close(code=1008)
+        return
+    await ws.accept()
+    session = _MidiSession(asyncio.get_running_loop())
+    last_stats = time.monotonic()
+    try:
+        await ws.send_json(_ports_message())
+        while True:
+            try:
+                msg = json.loads(await ws.receive_text())
+            except ValueError:
+                continue
+            kind = msg.get("type") if isinstance(msg, dict) else None
+            if kind == "ports":
+                await ws.send_json(_ports_message())
+            elif kind == "config":
+                name = msg.get("port")
+                try:
+                    if name is not None and not (isinstance(name, str) and 0 < len(name) <= 256):
+                        raise ValueError("Choose a MIDI port.")
+                    target = session.open(name)
+                    await ws.send_json({"type": "status", "ok": True, "target": target})
+                except ValueError as e:
+                    await ws.send_json({"type": "status", "ok": False, "error": str(e)})
+            elif kind == "frame":
+                session.send(msg.get("msgs"))
+                session.notes(msg.get("notes"))
+            elif kind == "test":
+                session.notes([[0, 60, 100, 0, 400]])
+            elif kind == "panic":
+                session.panic()
+            now = time.monotonic()
+            if now - last_stats >= STATS_EVERY_SEC:
+                await ws.send_json(session.stats())
+                last_stats = now
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        session.close()

@@ -1,5 +1,5 @@
 // frontend/src/lib/studio/art.ts
-// Colour and motion for the "art" scenes (Aura, Currents, Horizon).
+// Colour and motion for the "art" scenes (Aura, Currents, Murmuration).
 //
 // These scenes don't name features — they turn each person into a colour
 // and an amount of movement. What drives each is chosen in the Visuals
@@ -140,7 +140,7 @@ export function rgbToLab([R, G, B]: RGB): Lab {
   ];
 }
 
-/** OKLab → sRGB 0..255 (clamped). Hot path: called per pixel by Aura/Horizon. */
+/** OKLab → sRGB 0..255 (clamped). Hot path: called per pixel by Aura. */
 export function labToRgb(L: number, A: number, B: number, out: RGB = [0, 0, 0]): RGB {
   const l_ = L + 0.3963377774 * A + 0.2158037573 * B;
   const m_ = L - 0.1055613458 * A - 0.0638541728 * B;

@@ -21,9 +21,10 @@
 // - The context is injectable so the graph can be rendered offline
 //   (OfflineAudioContext) for verification.
 
-import { degreeToMidi, midiToFreq, nextSixteenth, snapConsonant } from './scale';
-import type { AudioParam as StudioParam, Patch, SoundKit, Voice } from './types';
-import { defaultVoices, normalizeVoices, type Voices } from './voices';
+import { homeMidi, noteLevel, NotePicker } from './notes';
+import { midiToFreq, nextSixteenth } from './scale';
+import type { AudioParam as StudioParam, Patch, PeopleSound, SoundKit, Voice } from './types';
+import { defaultPeople, defaultVoices, normalizePeople, normalizeVoices, type Voices } from './voices';
 
 /** Lead-voice character per person (index = person order), so people are
  *  told apart by ear the same way they are by colour. `ratio` is the FM
@@ -82,10 +83,21 @@ export const isSoundKit = (k: unknown): k is SoundKit => typeof k === 'string' &
 /** Most a note's highs are lifted by Tone = brighter. */
 const BRIGHT_DB = 9;
 
-/** Scale-degree home for each person: root, 3rd, 5th, … of the pentatonic. */
-const BASE_DEGREE = [0, 2, 4, 1, 3, 5];
+/** Each person's own bell and drum colour (patch.people.separate): on two
+ *  recorded sessions these were the same sound for everybody. Registers are
+ *  in notes.ts. */
+/** FM modulator ratio of the bell per person (3.5 = the original bell). */
+const BELL_RATIO = [3.5, 2, 5.3, 1.41];
+/** Second note of the Pulse set's bell blip, in semitones, per person. */
+const BLIP_INTERVAL = [7, 12, 4, 9];
+/** Drum pitch offset per person, in semitones. */
+const DRUM_OFFSET = [0, 5, -4, 9];
+/** How far left/right people are panned (1 = hard) unless the Width control says otherwise. */
+const PAN_WIDTH = 0.85;
+/** Minimum spacing of "together" chords per voice (s). */
+const TOGETHER_GAP = 0.3;
 
-type PatchSettings = Pick<Patch, 'scale' | 'root' | 'bpm' | 'quantize'> & { kit: SoundKit; voices: Voices };
+type PatchSettings = Pick<Patch, 'scale' | 'root' | 'bpm' | 'quantize'> & { kit: SoundKit; voices: Voices; people: PeopleSound };
 
 class PersonVoice {
   readonly input: GainNode;
@@ -95,6 +107,10 @@ class PersonVoice {
   private lfoDepth: GainNode;
   readonly volume: GainNode;
   private pan: StereoPannerNode;
+  /** Extra reverb for this person (the Reverb control), on top of the sound set's. */
+  private send: GainNode;
+  private panX = 0.5;
+  private width = PAN_WIDTH;
   private padOscs: OscillatorNode[];
   private padGain: GainNode;
   consonance = 0;
@@ -112,6 +128,7 @@ class PersonVoice {
     padMidi: number,
     kit: SoundKit,
     private drone = 1,
+    verb?: AudioNode,
   ) {
     const t = ctx.currentTime;
     this.kit = KITS[kit];
@@ -131,6 +148,9 @@ class PersonVoice {
     this.volume.gain.value = this.level;
     this.pan = ctx.createStereoPanner();
     this.input.connect(this.filter).connect(this.trem).connect(this.volume).connect(this.pan).connect(out);
+    this.send = ctx.createGain();
+    this.send.gain.value = 0;
+    if (verb) this.pan.connect(this.send).connect(verb);
 
     // Quiet two-oscillator pad on the person's home note: continuous presence
     // between notes, brightened by the cutoff mapping.
@@ -206,6 +226,19 @@ class PersonVoice {
         this.padX.detune = x;
         this.padOscs.forEach((o, i) => o.detune.setTargetAtTime((i ? 1 : -1) * (pd + 30 * x), t, 0.2));
         break;
+      case 'resonance':
+        // From the timbre's own (0.7–9) up to a whistling 18.
+        this.filter.Q.setTargetAtTime(this.timbre.filterQ + (18 - this.timbre.filterQ) * x * x, t, 0.08);
+        break;
+      case 'reverb':
+        this.send.gain.setTargetAtTime(0.9 * x, t, 0.2);
+        break;
+      case 'width':
+        this.width = x;
+        this.setPan(this.panX);
+        break;
+      case 'pitch':
+        break; // chosen per note by the engine (notes.ts)
     }
   }
 
@@ -231,14 +264,31 @@ class PersonVoice {
         else this.padX.detune = -1;
         this.padOscs.forEach((o, i) => o.detune.setTargetAtTime((i ? 1 : -1) * pd * (1 - this.padX.harmony), t, 0.3));
         break;
+      case 'resonance':
+        this.filter.Q.setTargetAtTime(this.timbre.filterQ, t, 0.2);
+        break;
+      case 'reverb':
+        this.send.gain.setTargetAtTime(0, t, 0.3);
+        break;
+      case 'width':
+        this.width = PAN_WIDTH;
+        this.setPan(this.panX);
+        break;
+      case 'pitch':
+        break;
     }
   }
 
   setPan(x: number): void {
-    this.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, (2 * x - 1) * 0.85)), this.ctx.currentTime, 0.1);
+    this.panX = x;
+    this.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, (2 * x - 1) * this.width)), this.ctx.currentTime, 0.1);
   }
 
+  /** False while muted or silenced by someone else's solo. */
+  audible = true;
+
   applyGain(audible: boolean): void {
+    this.audible = audible;
     this.volume.gain.setTargetAtTime(audible ? this.level : 0, this.ctx.currentTime, 0.05);
   }
 
@@ -246,7 +296,7 @@ class PersonVoice {
     const t = this.ctx.currentTime;
     this.volume.gain.setTargetAtTime(0, t, 0.08);
     for (const o of [...this.padOscs, this.lfo]) o.stop(t + 0.6);
-    setTimeout(() => this.pan.disconnect(), 800);
+    setTimeout(() => { this.pan.disconnect(); this.send.disconnect(); }, 800);
   }
 }
 
@@ -262,17 +312,20 @@ export class AudioEngine {
   private master: GainNode;
   private people = new Map<string, PersonVoice>();
   private soloed = new Set<string>();
-  private lastNote: { slot: string; midi: number; t: number } | null = null;
+  private picker: NotePicker;
   private noise: AudioBuffer;
   private origin: number;
   private rng: () => number;
   private reverbSend: GainNode;
-  patch: PatchSettings = { scale: 'pentatonic', root: 57, bpm: 96, quantize: true, kit: 'classic', voices: defaultVoices() };
+  private verb: ConvolverNode;
+  private lastTogether = new Map<Voice, number>();
+  patch: PatchSettings = { scale: 'pentatonic', root: 57, bpm: 96, quantize: true, kit: 'classic', voices: defaultVoices(), people: defaultPeople() };
 
   /** Must be constructed from a user gesture (click) in WKWebView/Chrome. */
   constructor(o: AudioEngineOptions = {}) {
     this.ctx = o.ctx ?? new AudioContext({ latencyHint: 'interactive' });
     this.rng = o.rng ?? Math.random;
+    this.picker = new NotePicker(this.rng);
     const comp = this.ctx.createDynamicsCompressor();
     comp.threshold.value = -18;
     comp.ratio.value = 6;
@@ -281,12 +334,14 @@ export class AudioEngine {
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.7;
     this.master.connect(comp).connect(this.ctx.destination);
-    // Reverb send: master → convolver (generated room) → send level → compressor.
-    const verb = this.ctx.createConvolver();
-    verb.buffer = AudioEngine.roomImpulse(this.ctx, 2.8);
+    // Reverb: master → send level (per sound set) → convolver (generated
+    // room) → compressor. Each person can also feed the room directly (the
+    // Reverb control), whatever the sound set's own level.
+    this.verb = this.ctx.createConvolver();
+    this.verb.buffer = AudioEngine.roomImpulse(this.ctx, 2.8);
     this.reverbSend = this.ctx.createGain();
     this.reverbSend.gain.value = KITS.classic.reverb;
-    this.master.connect(verb).connect(this.reverbSend).connect(comp);
+    this.master.connect(this.reverbSend).connect(this.verb).connect(comp);
     this.origin = this.ctx.currentTime;
     // One shared white-noise buffer for percussion.
     const len = Math.floor(this.ctx.sampleRate * 0.3);
@@ -333,7 +388,7 @@ export class AudioEngine {
     return buf;
   }
 
-  setPatch(p: Pick<Patch, 'scale' | 'root' | 'bpm' | 'quantize' | 'kit' | 'voices'>): void {
+  setPatch(p: Pick<Patch, 'scale' | 'root' | 'bpm' | 'quantize' | 'kit' | 'voices' | 'people'>): void {
     const kit = isSoundKit(p.kit) ? p.kit : 'classic';
     const voices = normalizeVoices(p.voices);
     if (kit !== this.patch.kit) {
@@ -341,7 +396,7 @@ export class AudioEngine {
       for (const v of this.people.values()) v.setKit(kit);
     }
     if (voices.drone !== this.patch.voices.drone) for (const v of this.people.values()) v.setDrone(voices.drone);
-    this.patch = { scale: p.scale, root: p.root, bpm: p.bpm, quantize: p.quantize, kit, voices };
+    this.patch = { scale: p.scale, root: p.root, bpm: p.bpm, quantize: p.quantize, kit, voices, people: normalizePeople(p.people) };
   }
 
   get slots(): string[] {
@@ -351,8 +406,8 @@ export class AudioEngine {
   /** Create the person's voice on first sight; `index` picks timbre + home note. */
   ensurePerson(slot: string, index: number): void {
     if (this.people.has(slot)) return;
-    const home = degreeToMidi(this.patch.scale, this.patch.root, BASE_DEGREE[index % BASE_DEGREE.length]) - 12;
-    const v = new PersonVoice(this.ctx, this.master, index, home, this.patch.kit, this.patch.voices.drone);
+    const home = homeMidi(this.patch.scale, this.patch.root, index) - 12;
+    const v = new PersonVoice(this.ctx, this.master, index, home, this.patch.kit, this.patch.voices.drone, this.verb);
     this.people.set(slot, v);
     this.applyMix();
   }
@@ -404,9 +459,11 @@ export class AudioEngine {
    * Play a note for an expression onset. `strength` is the onset z (≥ the
    * threshold, typically 1.5–10): higher → higher scale degree and louder.
    * The voice's own settings (octave, volume, length, tone; drum type, pitch
-   * and punch) shape it. Returns the scheduled start time, or null if dropped.
+   * and punch) shape it. `pitch` is the MIDI note when the caller has already
+   * chosen it (the engine does, so MIDI output plays the same note).
+   * Returns the scheduled start time, or null if dropped.
    */
-  playNote(slot: string, voice: Voice, strength: number, at?: number): number | null {
+  playNote(slot: string, voice: Voice, strength: number, at?: number, pitch?: number): number | null {
     const p = this.people.get(slot);
     if (!p) return null;
     const vs = this.patch.voices[voice];
@@ -420,16 +477,16 @@ export class AudioEngine {
     if (prev !== undefined && Math.abs(when - prev) < 0.08) return null;
     p.lastNoteAt.set(voice, when);
 
-    const s = Math.max(0, Math.min(1, (strength - 1.5) / 4));
-    const vel = (0.5 + 0.5 * s) * vs.volume;
+    const vel = (0.5 + 0.5 * noteLevel(strength)) * vs.volume;
     const len = vs.length;
     const kit = this.patch.kit;
+    const separate = this.patch.people.separate;
     if (voice === 'perc') {
       // Hits skip the person's lowpass so they stay crisp, but still follow
       // their volume/mute/solo and pan.
       const drum = this.patch.voices.perc;
       const type = drum.type === 'set' ? (kit === 'pulse' ? 'kick' : kit === 'glass' ? 'shaker' : 'tick') : drum.type;
-      const ratio = 2 ** (drum.pitch / 12);
+      const ratio = 2 ** ((drum.pitch + (separate ? DRUM_OFFSET[p.index % DRUM_OFFSET.length] : 0)) / 12);
       // No Tone for hits: their colour is the drum Sound, Pitch and Punch (a
       // dark shaker, for one, is just a quiet one).
       const out = p.volume;
@@ -438,17 +495,8 @@ export class AudioEngine {
       else this.perc(out, when, vel, type === 'shaker', ratio, len);
       return when;
     }
-    const base = BASE_DEGREE[p.index % BASE_DEGREE.length];
-    let midi = degreeToMidi(this.patch.scale, this.patch.root, base + Math.round(s * 4));
-    if (voice === 'bell') midi += 12;
-    if (voice === 'low') midi = degreeToMidi(this.patch.scale, this.patch.root, base) - 12;
-    // Synchrony → lock onto a consonant interval with the last other voice.
-    const last = this.lastNote;
-    if (voice !== 'low' && last && last.slot !== slot && when - last.t < 2 && this.rng() < p.consonance) {
-      midi = snapConsonant(this.patch.scale, this.patch.root, midi, last.midi);
-    }
-    this.lastNote = { slot, midi, t: when };
-    midi += 12 * vs.octave;
+    const midi = pitch ?? this.picker.pick({ ...this.patch, separate }, slot, p.index, voice, strength, p.consonance, when);
+    const bellRatio = separate ? BELL_RATIO[p.index % BELL_RATIO.length] : 3.5;
 
     const timbre = p.timbre;
     // Tilt pivots a little above the note's fundamental, so Tone shapes a
@@ -456,20 +504,59 @@ export class AudioEngine {
     const pivot = Math.min(2500, Math.max(200, midiToFreq(midi) * 2.5));
     const out = this.toneStage(p.input, vs.tone, when, 3.5 * len + 0.5, pivot);
     if (kit === 'glass') {
-      if (voice === 'bell') this.fm(out, midi, when, vel * 0.75, 3.5, 3.2 * len, 1.2);
+      if (voice === 'bell') this.fm(out, midi, when, vel * 0.75, bellRatio, 3.2 * len, 1.2);
       else if (voice === 'low') this.tone(out, midi, when, vel * 0.85, 'sine', 1.4 * len, 0.04);
       else this.fm(out, midi, when, vel, timbre.ratio, timbre.decay * len, 0.9);
     } else if (kit === 'pulse') {
       if (voice === 'bell') {
         // Blip: a quick octave-and-fifth arpeggio.
         this.synth(out, midi, when, vel * 0.7, 'square', 0.1 * len, 6000, timbre.filterQ);
-        this.synth(out, midi + 7, when + 0.06, vel * 0.5, 'square', 0.1 * len, 6000, timbre.filterQ);
+        const blip = separate ? BLIP_INTERVAL[p.index % BLIP_INTERVAL.length] : 7;
+        this.synth(out, midi + blip, when + 0.06, vel * 0.5, 'square', 0.1 * len, 6000, timbre.filterQ);
       } else if (voice === 'low') this.sub(out, midi, when, vel, len);
       else this.synth(out, midi, when, vel, timbre.wave, timbre.decay * len, 5200, timbre.filterQ);
     } else {
-      if (voice === 'bell') this.bell(out, midi, when, vel, len);
+      if (voice === 'bell') this.bell(out, midi, when, vel, len, bellRatio);
       else if (voice === 'low') this.tone(out, midi, when, vel * 0.9, 'sine', 0.5 * len);
       else this.tone(out, midi, when, vel, timbre.wave, timbre.decay * len);
+    }
+    return when;
+  }
+
+  /**
+   * Several people made the same movement within a moment of each other:
+   * ring a soft chord with one tone per person (their home notes, which sit
+   * a third apart, so two people sound an interval and three a triad). It
+   * swells and rings where single notes are plucked, so "together" is heard
+   * as its own event rather than as one louder note. Centre-panned.
+   */
+  playTogether(slots: string[], voice: Voice, strength: number, at?: number): number | null {
+    const people = slots.map(s => this.people.get(s)).filter((p): p is PersonVoice => !!p && p.audible);
+    if (people.length < 2) return null;
+    const now = this.ctx.currentTime;
+    let when = at ?? now + 0.01;
+    if (at === undefined && this.patch.quantize) when = nextSixteenth(when, this.patch.bpm, this.origin);
+    const prev = this.lastTogether.get(voice);
+    if (prev !== undefined && when - prev < TOGETHER_GAP) return null;
+    this.lastTogether.set(voice, when);
+    const octave = voice === 'bell' ? 12 : voice === 'low' ? -12 : 0;
+    const tones = new Set<number>();
+    for (const p of people) {
+      tones.add(homeMidi(this.patch.scale, this.patch.root, p.index) + octave);
+    }
+    const vel = (0.6 + 0.4 * noteLevel(strength)) / Math.sqrt(tones.size);
+    for (const midi of tones) {
+      const f = midiToFreq(midi);
+      // Two sines a few cents apart (a slow beat) plus a quiet octave.
+      for (const [mult, cents, level] of [[1, -4, 0.11], [1, 4, 0.11], [2, 0, 0.035]]) {
+        const o = this.ctx.createOscillator();
+        o.frequency.value = f * mult;
+        o.detune.value = cents;
+        const env = this.envelope(when, level * vel, 2.4, 0.06);
+        o.connect(env).connect(this.master);
+        o.start(when);
+        o.stop(when + 2.5);
+      }
     }
     return when;
   }
@@ -520,12 +607,12 @@ export class AudioEngine {
     o.stop(when + decay + 0.05);
   }
 
-  private bell(out: AudioNode, midi: number, when: number, vel: number, len: number): void {
+  private bell(out: AudioNode, midi: number, when: number, vel: number, len: number, ratio = 3.5): void {
     const f = midiToFreq(midi);
     const carrier = this.ctx.createOscillator();
     carrier.frequency.value = f;
     const mod = this.ctx.createOscillator();
-    mod.frequency.value = f * 3.5;
+    mod.frequency.value = f * ratio;
     const modGain = this.ctx.createGain();
     modGain.gain.setValueAtTime(f * 2, when);
     modGain.gain.exponentialRampToValueAtTime(f * 0.05, when + 1.0 * len);

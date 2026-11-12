@@ -30,3 +30,4 @@ uvicorn[standard]>=0.34
 python-multipart>=0.0.18
 av==16.1.0
 pillow==12.2.0
+python-rtmidi==1.5.8  # Studio MIDI output (optional at import: backend/midi.py)

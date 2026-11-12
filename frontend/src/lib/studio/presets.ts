@@ -33,7 +33,7 @@ export const BUILTIN_PRESETS: StudioPreset[] = [
   },
   {
     name: 'Sunset',
-    sceneId: 'horizon',
+    sceneId: 'murmuration',
     art: { ...DEFAULT_ART, palette: palette('ember'), speed: 0.8, smoothness: 1.5 },
     patch: withSound({ scale: 'minor', root: 55, bpm: 84 }),
   },

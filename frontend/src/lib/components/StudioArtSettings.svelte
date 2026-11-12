@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Colour and movement for the art scenes (Aura, Currents, Horizon). Shown
+  // Colour and movement for the art scenes (Aura, Currents, Murmuration). Shown
   // under the scene picker only while an art scene is selected.
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
